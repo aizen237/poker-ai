@@ -6,3 +6,4 @@ export * from "./ev.js";
 export * from "./draws.js";
 export * from "./outs.js";
 export * from "./boardTexture.js";
+export * from "./comboDraws.js";
