@@ -13,7 +13,13 @@ if (!apiKey) {
   throw new Error("GROQ_API_KEY not found -- check your .env file in the poker-ai root");
 }
 
-const provider = createGroqProvider({ apiKey });
+import { getModelsByProvider } from "../src/modelRegistry.js";
+
+const [defaultGroqModel] = getModelsByProvider("groq");
+if (!defaultGroqModel) {
+  throw new Error("No Groq model found in the registry");
+}
+const provider = createGroqProvider({ apiKey, model: defaultGroqModel.modelId });
 
 const packet: DecisionPacket = {
   hero: {

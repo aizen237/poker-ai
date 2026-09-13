@@ -13,7 +13,13 @@ if (!apiKey) {
   throw new Error("GEMINI_API_KEY not found -- check your .env file in the poker-ai root");
 }
 
-const provider = createGeminiProvider({ apiKey });
+import { getModelsByProvider } from "../src/modelRegistry.js";
+
+const [defaultGeminiModel] = getModelsByProvider("gemini");
+if (!defaultGeminiModel) {
+  throw new Error("No Gemini model found in the registry");
+}
+const provider = createGeminiProvider({ apiKey, model: defaultGeminiModel.modelId });
 
 // Same exact decision packet used to test Groq -- deliberately identical
 // so the two providers' outputs are directly comparable.
