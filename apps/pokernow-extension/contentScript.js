@@ -164,6 +164,246 @@
     };
   }
 
+  // ../../packages/poker-engine/dist/types.js
+  var HandCategory;
+  (function(HandCategory2) {
+    HandCategory2[HandCategory2["HighCard"] = 0] = "HighCard";
+    HandCategory2[HandCategory2["Pair"] = 1] = "Pair";
+    HandCategory2[HandCategory2["TwoPair"] = 2] = "TwoPair";
+    HandCategory2[HandCategory2["ThreeOfAKind"] = 3] = "ThreeOfAKind";
+    HandCategory2[HandCategory2["Straight"] = 4] = "Straight";
+    HandCategory2[HandCategory2["Flush"] = 5] = "Flush";
+    HandCategory2[HandCategory2["FullHouse"] = 6] = "FullHouse";
+    HandCategory2[HandCategory2["FourOfAKind"] = 7] = "FourOfAKind";
+    HandCategory2[HandCategory2["StraightFlush"] = 8] = "StraightFlush";
+  })(HandCategory || (HandCategory = {}));
+
+  // ../../packages/poker-engine/dist/combinatorics.js
+  function combinations(items, k) {
+    const results = [];
+    const combo = [];
+    function backtrack(start) {
+      if (combo.length === k) {
+        results.push([...combo]);
+        return;
+      }
+      for (let i = start; i < items.length; i++) {
+        combo.push(items[i]);
+        backtrack(i + 1);
+        combo.pop();
+      }
+    }
+    backtrack(0);
+    return results;
+  }
+
+  // ../../packages/poker-engine/dist/evaluator.js
+  function detectStraightHigh(distinctRanksDesc) {
+    if (distinctRanksDesc.length !== 5)
+      return null;
+    const set = new Set(distinctRanksDesc);
+    if ([14, 5, 4, 3, 2].every((r) => set.has(r)))
+      return 5;
+    const [a, b, c, d, e] = distinctRanksDesc;
+    if (a - b === 1 && b - c === 1 && c - d === 1 && d - e === 1)
+      return a;
+    return null;
+  }
+  function packValue(category, tiebreakers) {
+    let value = category;
+    for (let i = 0; i < 5; i++) {
+      value = value * 16 + (tiebreakers[i] ?? 0);
+    }
+    return value;
+  }
+  function evaluate5(cards) {
+    if (cards.length !== 5) {
+      throw new Error(`evaluate5 requires exactly 5 cards, got ${cards.length}`);
+    }
+    const suits = cards.map((c) => c.suit);
+    const isFlush = suits.every((s) => s === suits[0]);
+    const rankCounts = /* @__PURE__ */ new Map();
+    for (const c of cards) {
+      rankCounts.set(c.rank, (rankCounts.get(c.rank) ?? 0) + 1);
+    }
+    const distinctRanksDesc = [...rankCounts.keys()].sort((a, b) => b - a);
+    const straightHigh = detectStraightHigh(distinctRanksDesc);
+    const groups = [...rankCounts.entries()].map(([rank, count]) => ({ rank, count })).sort((a, b) => b.count !== a.count ? b.count - a.count : b.rank - a.rank);
+    const allRanksDesc = cards.map((c) => c.rank).sort((a, b) => b - a);
+    let category;
+    let tiebreakers;
+    if (isFlush && straightHigh !== null) {
+      category = HandCategory.StraightFlush;
+      tiebreakers = [straightHigh];
+    } else if (groups[0].count === 4) {
+      category = HandCategory.FourOfAKind;
+      const kicker = allRanksDesc.find((r) => r !== groups[0].rank);
+      tiebreakers = [groups[0].rank, kicker];
+    } else if (groups[0].count === 3 && groups[1]?.count === 2) {
+      category = HandCategory.FullHouse;
+      tiebreakers = [groups[0].rank, groups[1].rank];
+    } else if (isFlush) {
+      category = HandCategory.Flush;
+      tiebreakers = allRanksDesc;
+    } else if (straightHigh !== null) {
+      category = HandCategory.Straight;
+      tiebreakers = [straightHigh];
+    } else if (groups[0].count === 3) {
+      category = HandCategory.ThreeOfAKind;
+      const kickers = allRanksDesc.filter((r) => r !== groups[0].rank);
+      tiebreakers = [groups[0].rank, ...kickers];
+    } else if (groups[0].count === 2 && groups[1]?.count === 2) {
+      category = HandCategory.TwoPair;
+      const highPair = groups[0].rank;
+      const lowPair = groups[1].rank;
+      const kicker = allRanksDesc.find((r) => r !== highPair && r !== lowPair);
+      tiebreakers = [highPair, lowPair, kicker];
+    } else if (groups[0].count === 2) {
+      category = HandCategory.Pair;
+      const pairRank = groups[0].rank;
+      const kickers = allRanksDesc.filter((r) => r !== pairRank);
+      tiebreakers = [pairRank, ...kickers];
+    } else {
+      category = HandCategory.HighCard;
+      tiebreakers = allRanksDesc;
+    }
+    return {
+      category,
+      tiebreakers,
+      value: packValue(category, tiebreakers),
+      cards: [...cards]
+    };
+  }
+  function evaluateBest(cards) {
+    if (cards.length < 5) {
+      throw new Error(`evaluateBest requires at least 5 cards, got ${cards.length}`);
+    }
+    if (cards.length === 5) {
+      return evaluate5(cards);
+    }
+    const candidates = combinations(cards, 5);
+    let best = null;
+    for (const combo of candidates) {
+      const evaluated = evaluate5(combo);
+      if (!best || evaluated.value > best.value) {
+        best = evaluated;
+      }
+    }
+    return best;
+  }
+
+  // ../../packages/shared/dist/card.js
+  var SUITS = ["s", "h", "d", "c"];
+  var RANKS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
+
+  // ../../packages/shared/dist/deck.js
+  function fullDeck() {
+    const cards = [];
+    for (const suit of SUITS) {
+      for (const rank of RANKS) {
+        cards.push({ rank, suit });
+      }
+    }
+    return cards;
+  }
+  function shuffle(items, rng = Math.random) {
+    for (let i = items.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      const tmp = items[i];
+      items[i] = items[j];
+      items[j] = tmp;
+    }
+    return items;
+  }
+  var Deck = class {
+    cards;
+    constructor(rng = Math.random, exclude = []) {
+      const excludeIds = new Set(exclude.map((c) => `${c.rank}${c.suit}`));
+      this.cards = shuffle(fullDeck().filter((c) => !excludeIds.has(`${c.rank}${c.suit}`)), rng);
+    }
+    /** Number of cards remaining. */
+    get remaining() {
+      return this.cards.length;
+    }
+    draw() {
+      const card = this.cards.pop();
+      if (!card)
+        throw new Error("Cannot draw from an empty deck");
+      return card;
+    }
+    drawMany(n) {
+      const drawn = [];
+      for (let i = 0; i < n; i++)
+        drawn.push(this.draw());
+      return drawn;
+    }
+  };
+
+  // ../../packages/poker-engine/dist/equity.js
+  var DEFAULT_ITERATIONS = 1e4;
+  function calculateEquity(heroCards, board, numOpponents, options = {}) {
+    if (heroCards.length !== 2) {
+      throw new Error(`calculateEquity requires exactly 2 hero cards, got ${heroCards.length}`);
+    }
+    if (board.length > 5) {
+      throw new Error(`Board cannot have more than 5 cards, got ${board.length}`);
+    }
+    if (numOpponents < 1) {
+      throw new Error(`calculateEquity requires at least 1 opponent, got ${numOpponents}`);
+    }
+    const iterations = options.iterations ?? DEFAULT_ITERATIONS;
+    const rng = options.rng ?? Math.random;
+    const cardsToComplete = 5 - board.length;
+    let winShareSum = 0;
+    let wins = 0;
+    let ties = 0;
+    let losses = 0;
+    const knownCards = [...heroCards, ...board];
+    for (let i = 0; i < iterations; i++) {
+      const deck = new Deck(rng, knownCards);
+      const opponentHoleCards = [];
+      for (let o = 0; o < numOpponents; o++) {
+        opponentHoleCards.push(deck.drawMany(2));
+      }
+      const runoutBoard = [...board, ...deck.drawMany(cardsToComplete)];
+      const heroValue = evaluateBest([...heroCards, ...runoutBoard]).value;
+      const opponentValues = opponentHoleCards.map((hole) => evaluateBest([...hole, ...runoutBoard]).value);
+      const maxValue = Math.max(heroValue, ...opponentValues);
+      if (heroValue < maxValue) {
+        losses++;
+      } else {
+        const winnersCount = 1 + opponentValues.filter((v) => v === maxValue).length;
+        winShareSum += 1 / winnersCount;
+        if (winnersCount === 1) {
+          wins++;
+        } else {
+          ties++;
+        }
+      }
+    }
+    return {
+      equity: winShareSum / iterations,
+      wins,
+      ties,
+      losses,
+      iterations
+    };
+  }
+
+  // ../../packages/poker-engine/dist/ev.js
+  function calculatePotOdds(currentPot, amountToCall) {
+    if (currentPot < 0)
+      throw new Error(`currentPot cannot be negative, got ${currentPot}`);
+    if (amountToCall <= 0) {
+      throw new Error(`amountToCall must be positive, got ${amountToCall} (use 0 only for a check, which has no pot odds concept)`);
+    }
+    const breakevenEquity = amountToCall / (currentPot + amountToCall);
+    return {
+      breakevenEquity,
+      breakevenEquityPercent: breakevenEquity * 100
+    };
+  }
+
   // src/contentScript.ts
   console.log("[Poker AI Reader] Content script loaded on:", window.location.href);
   function extractBoardCards() {
@@ -255,6 +495,26 @@
     if (stateJson !== lastStateJson) {
       console.log("[Poker AI Reader] Game state changed:", JSON.parse(stateJson));
       lastStateJson = stateJson;
+      const hero = state.seats.find((s) => s.isYou);
+      if (hero && hero.holeCards.length === 2 && state.street !== "preflop") {
+        const numOpponents = state.seats.filter(
+          (s) => s.isOccupied && !s.isYou && !s.isFolded
+        ).length;
+        if (numOpponents >= 1) {
+          const equityResult = calculateEquity(hero.holeCards, state.board, numOpponents, {
+            iterations: 3e3
+          });
+          console.log(
+            `[Poker AI Reader] Hero equity vs ${numOpponents} opponent(s): ${(equityResult.equity * 100).toFixed(1)}%`
+          );
+          if (state.potMainValue > 0) {
+            const potOdds = calculatePotOdds(state.potMainValue, Math.max(1, Math.round(state.potMainValue * 0.5)));
+            console.log(
+              `[Poker AI Reader] (rough) breakeven equity needed: ${potOdds.breakevenEquityPercent.toFixed(1)}%`
+            );
+          }
+        }
+      }
     }
   }, 1e3);
 })();
