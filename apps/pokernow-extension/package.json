@@ -1,0 +1,16 @@
+{
+  "name": "@poker-ai/pokernow-extension",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "esbuild src/contentScript.ts --bundle --outfile=contentScript.js --format=iife"
+  },
+  "dependencies": {
+    "@poker-ai/browser-reader": "*",
+    "@poker-ai/shared": "*"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "typescript": "^5.7.2"
+  }
+}
