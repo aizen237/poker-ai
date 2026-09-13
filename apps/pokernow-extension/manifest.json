@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Poker AI Assistant - PokerNow Reader",
+  "version": "0.1.0",
+  "description": "Reads live PokerNow table state for assisted-mode play (read-only, no automated actions)",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.pokernow.com/games/*",
+        "https://pokernow.com/games/*",
+        "https://www.pokernow.club/games/*",
+        "https://pokernow.club/games/*"
+      ],
+      "js": ["contentScript.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
