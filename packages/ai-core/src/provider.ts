@@ -1,3 +1,4 @@
+import type { AuditRecord } from "./auditRecord.js";
 import type { DecisionPacket } from "./decisionPacket.js";
 import type { Recommendation } from "./recommendation.js";
 
@@ -8,20 +9,21 @@ export interface AIProviderMetadata {
   isFree: boolean;
 }
 
-/**
- * The provider abstraction from the original spec (§9). Every provider
- * (Groq, Gemini, OpenAI, Anthropic, OpenRouter, Ollama, ...) implements
- * this same interface -- the model-router (a later phase) and the rest
- * of the app never need to know which specific provider is behind it.
- */
+export interface GetRecommendationOptions {
+  /** Identifiers for the audit trail -- see Rule 3. Optional since not
+   *  every caller (e.g. quick manual tests) needs full audit tracking. */
+  sessionId?: string;
+  handId?: string;
+  /** Called with the full audit record after the call completes, whether
+   *  it succeeded or failed. */
+  onAuditRecord?: (record: AuditRecord) => void;
+}
+
 export interface AIProvider {
   readonly metadata: AIProviderMetadata;
 
-  /**
-   * Sends a decision packet and returns a validated recommendation.
-   * Implementations are responsible for their own prompt construction
-   * and for calling parseRecommendation() on the raw response before
-   * returning -- callers should never receive an unvalidated result.
-   */
-  getRecommendation(packet: DecisionPacket): Promise<Recommendation>;
+  getRecommendation(
+    packet: DecisionPacket,
+    options?: GetRecommendationOptions,
+  ): Promise<Recommendation>;
 }

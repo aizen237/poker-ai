@@ -3,6 +3,7 @@ import { fileURLToPath } from "url";
 import path from "path";
 import { createGroqProvider } from "../src/providers/groq.js";
 import type { DecisionPacket } from "../src/decisionPacket.js";
+import type { AuditRecord } from "../src/auditRecord.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 config({ path: path.resolve(__dirname, "../../../.env") });
@@ -52,17 +53,27 @@ const packet: DecisionPacket = {
   dataConfidence: "high",
 };
 
+let capturedAuditRecord: AuditRecord | undefined;
+
 console.log("Sending decision packet to Groq...\n");
-const start = Date.now();
 
 provider
-  .getRecommendation(packet)
+  .getRecommendation(packet, {
+    sessionId: "manual-test-session-1",
+    handId: "manual-test-hand-1",
+    onAuditRecord: (record) => {
+      capturedAuditRecord = record;
+    },
+  })
   .then((recommendation) => {
-    const durationMs = Date.now() - start;
-    console.log(`Response received in ${durationMs}ms:\n`);
+    console.log("Recommendation:\n");
     console.log(JSON.stringify(recommendation, null, 2));
+    console.log("\nAudit record:\n");
+    console.log(JSON.stringify(capturedAuditRecord, null, 2));
   })
   .catch((error) => {
     console.error("Error calling Groq:", error);
+    console.log("\nAudit record (from the error path):\n");
+    console.log(JSON.stringify(capturedAuditRecord, null, 2));
     throw error;
   });

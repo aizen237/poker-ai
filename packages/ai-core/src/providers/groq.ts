@@ -1,16 +1,31 @@
 import { formatCards } from "@poker-ai/shared";
 import { evaluateBest } from "@poker-ai/poker-engine";
+import { buildAuditRecord } from "../auditRecord.js";
 import type { DecisionPacket } from "../decisionPacket.js";
 import { parseRecommendation, type Recommendation } from "../recommendation.js";
-import type { AIProvider, AIProviderMetadata } from "../provider.js";
+import type { AIProvider, AIProviderMetadata, GetRecommendationOptions } from "../provider.js";
 
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
+
+const PROMPT_VERSION = "v2-explicit-hand-category";
 
 const HAND_CATEGORY_NAMES = [
   "High Card", "Pair", "Two Pair", "Three of a Kind", "Straight",
   "Flush", "Full House", "Four of a Kind", "Straight Flush",
 ];
 
+/**
+ * Builds the prompt from a decision packet. Deliberately concise and
+ * structured -- per Rule 4/12 of the original spec, the AI should not
+ * receive a huge unnecessary conversation, just the already-computed
+ * numbers it needs to reason over.
+ *
+ * Hero's made hand category is computed via evaluateBest (a function
+ * we've tested against 24 known hand-ranking cases) and handed to the
+ * AI as an explicit fact, rather than left for the model to infer from
+ * raw cards -- this closes a real error we observed in testing, where
+ * the model misdescribed ace-king-high as "a premium overpair."
+ */
 function buildPrompt(packet: DecisionPacket): string {
   const lines: string[] = [];
 
@@ -55,8 +70,8 @@ export interface GroqProviderOptions {
   model?: string;
 }
 
-export function createGroqProvider(options: GroqProviderOptions): AIProvider {
-  const model = options.model ?? "openai/gpt-oss-120b";
+export function createGroqProvider(providerOptions: GroqProviderOptions): AIProvider {
+  const model = providerOptions.model ?? "openai/gpt-oss-120b";
 
   const metadata: AIProviderMetadata = {
     name: `groq:${model}`,
@@ -65,37 +80,77 @@ export function createGroqProvider(options: GroqProviderOptions): AIProvider {
     isFree: true,
   };
 
-  async function getRecommendation(packet: DecisionPacket): Promise<Recommendation> {
+  async function getRecommendation(
+    packet: DecisionPacket,
+    options: GetRecommendationOptions = {},
+  ): Promise<Recommendation> {
     const prompt = buildPrompt(packet);
+    const start = Date.now();
+    let rawContent: string | undefined;
 
-    const response = await fetch(GROQ_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${options.apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.3,
-      }),
-    });
+    try {
+      const response = await fetch(GROQ_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${providerOptions.apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.3,
+        }),
+      });
 
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`Groq API error (${response.status}): ${body}`);
+      if (!response.ok) {
+        const body = await response.text();
+        throw new Error(`Groq API error (${response.status}): ${body}`);
+      }
+
+      const data = (await response.json()) as {
+        choices: { message: { content: string } }[];
+      };
+
+      rawContent = data.choices[0]?.message.content;
+      if (!rawContent) {
+        throw new Error("Groq API returned no content");
+      }
+
+      const recommendation = parseRecommendation(rawContent);
+      const latencyMs = Date.now() - start;
+
+      options.onAuditRecord?.(
+        buildAuditRecord({
+          sessionId: options.sessionId ?? "unknown-session",
+          handId: options.handId ?? "unknown-hand",
+          decisionPacket: packet,
+          provider: "groq",
+          model,
+          promptVersion: PROMPT_VERSION,
+          latencyMs,
+          rawResponse: rawContent,
+          parsedRecommendation: recommendation,
+        }),
+      );
+
+      return recommendation;
+    } catch (error) {
+      const latencyMs = Date.now() - start;
+      options.onAuditRecord?.(
+        buildAuditRecord({
+          sessionId: options.sessionId ?? "unknown-session",
+          handId: options.handId ?? "unknown-hand",
+          decisionPacket: packet,
+          provider: "groq",
+          model,
+          promptVersion: PROMPT_VERSION,
+          latencyMs,
+          ...(rawContent !== undefined ? { rawResponse: rawContent } : {}),
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+      throw error;
     }
-
-    const data = (await response.json()) as {
-      choices: { message: { content: string } }[];
-    };
-
-    const rawContent = data.choices[0]?.message.content;
-    if (!rawContent) {
-      throw new Error("Groq API returned no content");
-    }
-
-    return parseRecommendation(rawContent);
   }
 
   return { metadata, getRecommendation };
