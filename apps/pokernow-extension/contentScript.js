@@ -176,6 +176,12 @@
       street: deriveStreet(board.length)
     };
   }
+  function calculateAmountToCall(state) {
+    const hero = state.seats.find((s) => s.isYou);
+    const heroBet = hero?.currentBet ?? 0;
+    const highestOpponentBet = state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded && s.currentBet !== null).reduce((max, s) => Math.max(max, s.currentBet), 0);
+    return Math.max(0, highestOpponentBet - heroBet);
+  }
 
   // ../../packages/poker-engine/dist/types.js
   var HandCategory;
@@ -445,7 +451,8 @@
           playerNameText: null,
           stackText: null,
           statusClasses: [],
-          holeCardClassLists: []
+          holeCardClassLists: [],
+          betValueText: null
         });
         continue;
       }
@@ -460,12 +467,14 @@
           playerNameText: null,
           stackText: null,
           statusClasses: [],
-          holeCardClassLists: []
+          holeCardClassLists: [],
+          betValueText: null
         });
         continue;
       }
       const holeCardEls = seatEl.querySelectorAll(".table-player-cards .card-container");
       const holeCardClassLists = [...holeCardEls].map((el) => [...el.classList]);
+      const betValueEl = seatEl.querySelector(".table-player-bet-value");
       seats.push({
         seatNumber,
         isOccupied: true,
@@ -473,7 +482,8 @@
         playerNameText: nameEl.textContent,
         stackText: stackEl.textContent,
         statusClasses: classList,
-        holeCardClassLists
+        holeCardClassLists,
+        betValueText: betValueEl?.textContent ?? null
       });
     }
     return seats;
@@ -520,11 +530,14 @@
           console.log(
             `[Poker AI Reader] Hero equity vs ${numOpponents} opponent(s): ${(equityResult.equity * 100).toFixed(1)}%`
           );
-          if (state.potMainValue > 0) {
-            const potOdds = calculatePotOdds(state.potMainValue, Math.max(1, Math.round(state.potMainValue * 0.5)));
+          const amountToCall = calculateAmountToCall(state);
+          if (amountToCall > 0 && state.potMainValue > 0) {
+            const potOdds = calculatePotOdds(state.potMainValue, amountToCall);
             console.log(
-              `[Poker AI Reader] (rough) breakeven equity needed: ${potOdds.breakevenEquityPercent.toFixed(1)}%`
+              `[Poker AI Reader] Amount to call: ${amountToCall}. Breakeven equity needed: ${potOdds.breakevenEquityPercent.toFixed(1)}%`
             );
+          } else if (amountToCall === 0) {
+            console.log("[Poker AI Reader] No bet facing hero (check or already matched) -- pot odds not applicable.");
           }
         }
       }

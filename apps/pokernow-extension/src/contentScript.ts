@@ -1,4 +1,4 @@
-import { assembleGameState, type RawSeatInput, type RawBoardCardInput } from "@poker-ai/browser-reader";
+import { assembleGameState, calculateAmountToCall, type RawSeatInput, type RawBoardCardInput } from "@poker-ai/browser-reader";
 import { calculateEquity, calculatePotOdds } from "@poker-ai/poker-engine";
 console.log("[Poker AI Reader] Content script loaded on:", window.location.href);
 
@@ -34,6 +34,7 @@ function extractSeats(): RawSeatInput[] {
         stackText: null,
         statusClasses: [],
         holeCardClassLists: [],
+        betValueText: null,
       });
       continue;
     }
@@ -55,12 +56,15 @@ function extractSeats(): RawSeatInput[] {
         stackText: null,
         statusClasses: [],
         holeCardClassLists: [],
+        betValueText: null,
       });
       continue;
     }
 
     const holeCardEls = seatEl.querySelectorAll(".table-player-cards .card-container");
     const holeCardClassLists = [...holeCardEls].map((el) => [...el.classList]);
+
+    const betValueEl = seatEl.querySelector(".table-player-bet-value");
 
     seats.push({
       seatNumber,
@@ -70,6 +74,7 @@ function extractSeats(): RawSeatInput[] {
       stackText: stackEl.textContent,
       statusClasses: classList,
       holeCardClassLists,
+      betValueText: betValueEl?.textContent ?? null,
     });
   }
 
@@ -125,14 +130,14 @@ setInterval(() => {
           `[Poker AI Reader] Hero equity vs ${numOpponents} opponent(s): ${(equityResult.equity * 100).toFixed(1)}%`,
         );
 
-        if (state.potMainValue > 0) {
-          // Using potMainValue as a rough stand-in "amount to call" placeholder
-          // for this quick live check -- a real amount-to-call reading from
-          // the current bet isn't extracted yet, that's a separate next step.
-          const potOdds = calculatePotOdds(state.potMainValue, Math.max(1, Math.round(state.potMainValue * 0.5)));
+        const amountToCall = calculateAmountToCall(state);
+        if (amountToCall > 0 && state.potMainValue > 0) {
+          const potOdds = calculatePotOdds(state.potMainValue, amountToCall);
           console.log(
-            `[Poker AI Reader] (rough) breakeven equity needed: ${potOdds.breakevenEquityPercent.toFixed(1)}%`,
+            `[Poker AI Reader] Amount to call: ${amountToCall}. Breakeven equity needed: ${potOdds.breakevenEquityPercent.toFixed(1)}%`,
           );
+        } else if (amountToCall === 0) {
+          console.log("[Poker AI Reader] No bet facing hero (check or already matched) -- pot odds not applicable.");
         }
       }
     }
