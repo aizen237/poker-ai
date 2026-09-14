@@ -1,3 +1,4 @@
+"use strict";
 (() => {
   // ../../packages/browser-reader/dist/cardParsing.js
   var CLASS_SUIT_MAP = {
@@ -114,6 +115,16 @@
       return "river";
     throw new Error(`Unexpected board card count: ${boardCardCount} (expected 0, 3, 4, or 5)`);
   }
+  function parseBetValue(betValueText) {
+    if (betValueText === null)
+      return null;
+    const trimmed = betValueText.trim();
+    if (trimmed.length === 0)
+      return null;
+    const cleaned = trimmed.replace(/,/g, "");
+    const value = Number(cleaned);
+    return Number.isNaN(value) ? null : value;
+  }
   function assembleSeat(raw) {
     if (!raw.isOccupied) {
       return {
@@ -125,7 +136,8 @@
         isFolded: false,
         isCurrentToAct: false,
         isOffline: false,
-        holeCards: []
+        holeCards: [],
+        currentBet: null
       };
     }
     const isFolded = raw.statusClasses.includes("fold");
@@ -148,7 +160,8 @@
       isFolded,
       isCurrentToAct,
       isOffline,
-      holeCards
+      holeCards,
+      currentBet: parseBetValue(raw.betValueText)
     };
   }
   function assembleGameState(raw) {

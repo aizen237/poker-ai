@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assembleGameState, type RawTableInput } from "./gameState.js";
+import { assembleGameState, calculateAmountToCall, type RawTableInput } from "./gameState.js";
 
 function realisticRawInput(): RawTableInput {
   return {
@@ -17,6 +17,7 @@ function realisticRawInput(): RawTableInput {
         isYou: true,
         playerNameText: "aizen29",
         stackText: "197",
+        betValueText: null,
         statusClasses: ["decision-current"],
         holeCardClassLists: [
           ["card-container", "card-s", "card-s-5", "flipped", "card-p1"],
@@ -29,6 +30,7 @@ function realisticRawInput(): RawTableInput {
         isYou: false,
         playerNameText: "Talion",
         stackText: "198",
+        betValueText: null,
         statusClasses: ["fold"],
         // Opponent's hole cards, not flipped -- hidden, no rank/suit classes.
         holeCardClassLists: [
@@ -42,6 +44,7 @@ function realisticRawInput(): RawTableInput {
         isYou: false,
         playerNameText: "fc6666",
         stackText: "585",
+        betValueText: null,
         statusClasses: ["offline"],
         holeCardClassLists: [
           ["card-container", "card-p1", "med"],
@@ -54,6 +57,7 @@ function realisticRawInput(): RawTableInput {
         isYou: false,
         playerNameText: null,
         stackText: null,
+        betValueText: null,
         statusClasses: [],
         holeCardClassLists: [],
       },
@@ -150,5 +154,91 @@ describe("assembleGameState — street derivation edge cases", () => {
     const raw = realisticRawInput();
     raw.boardCards = raw.boardCards.slice(0, 2);
     expect(() => assembleGameState(raw)).toThrow();
+  });
+});
+describe("assembleGameState — bet value parsing", () => {
+  it("parses a numeric bet value correctly", () => {
+    const raw = realisticRawInput();
+    raw.seats[1]!.betValueText = "12";
+    const result = assembleGameState(raw);
+    const talion = result.seats.find((s) => s.playerName === "Talion");
+    expect(talion!.currentBet).toBe(12);
+  });
+
+  it("returns null (not 0 or NaN) for non-numeric action-word text like 'check'", () => {
+    const raw = realisticRawInput();
+    raw.seats[1]!.betValueText = "check";
+    const result = assembleGameState(raw);
+    const talion = result.seats.find((s) => s.playerName === "Talion");
+    expect(talion!.currentBet).toBeNull();
+  });
+
+  it("returns null when no bet indicator is present at all", () => {
+    const result = assembleGameState(realisticRawInput());
+    const talion = result.seats.find((s) => s.playerName === "Talion");
+    expect(talion!.currentBet).toBeNull();
+  });
+
+  it("an unoccupied seat always has a null currentBet", () => {
+    const result = assembleGameState(realisticRawInput());
+    const emptySeat = result.seats.find((s) => s.seatNumber === 4);
+    expect(emptySeat!.currentBet).toBeNull();
+  });
+});
+
+describe("calculateAmountToCall", () => {
+  it("computes the gap between the highest opponent bet and hero's own bet", () => {
+    const raw = realisticRawInput();
+    raw.seats[0]!.betValueText = "2"; // hero has put in 2
+    raw.seats[1]!.betValueText = "8"; // Talion bet 8
+    raw.seats[1]!.statusClasses = []; // not folded, a real live bet to face
+    const state = assembleGameState(raw);
+    expect(calculateAmountToCall(state)).toBe(6); // 8 - 2 = 6 to call
+  });
+
+  it("returns 0 when hero has already matched the highest bet", () => {
+    const raw = realisticRawInput();
+    raw.seats[0]!.betValueText = "8";
+    raw.seats[1]!.betValueText = "8";
+    raw.seats[1]!.statusClasses = [];
+    const state = assembleGameState(raw);
+    expect(calculateAmountToCall(state)).toBe(0);
+  });
+
+  it("returns 0 rather than negative when hero has bet MORE than any opponent (e.g. hero is the raiser)", () => {
+    const raw = realisticRawInput();
+    raw.seats[0]!.betValueText = "10";
+    raw.seats[1]!.betValueText = "4";
+    raw.seats[1]!.statusClasses = [];
+    const state = assembleGameState(raw);
+    expect(calculateAmountToCall(state)).toBe(0);
+  });
+
+  it("ignores folded opponents' bets when computing the amount to call", () => {
+    const raw = realisticRawInput();
+    raw.seats[0]!.betValueText = "0";
+    raw.seats[1]!.betValueText = "50"; // Talion is folded (per the base fixture), should be ignored
+    const state = assembleGameState(raw);
+    expect(calculateAmountToCall(state)).toBe(0);
+  });
+
+  it("ignores opponents with a non-numeric bet (e.g. 'check') when finding the highest bet", () => {
+    const raw = realisticRawInput();
+    raw.seats[0]!.betValueText = "0";
+    raw.seats[1]!.statusClasses = []; // active
+    raw.seats[1]!.betValueText = "check"; // not a numeric bet, contributes 0
+    raw.seats[2]!.statusClasses = []; // also active, offline flag removed for this test
+    raw.seats[2]!.betValueText = "5";
+    const state = assembleGameState(raw);
+    expect(calculateAmountToCall(state)).toBe(5);
+  });
+
+  it("returns 0 when hero is not found in the seats (defensive default)", () => {
+    const raw = realisticRawInput();
+    raw.seats[0]!.isYou = false; // no one marked as hero
+    raw.seats[1]!.betValueText = "5";
+    raw.seats[1]!.statusClasses = [];
+    const state = assembleGameState(raw);
+    expect(calculateAmountToCall(state)).toBe(5); // heroBet defaults to 0
   });
 });

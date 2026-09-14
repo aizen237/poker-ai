@@ -12,6 +12,8 @@ export interface RawSeatInput {
   statusClasses: string[];
   /** One class-list array per hole card element found (0, 1, or 2 -- matches what's actually in the DOM). */
   holeCardClassLists: string[][];
+  /** Raw text of this seat's current-street bet indicator, e.g. "2", "check", "call", null if nothing shown. */
+  betValueText: string | null;
 }
 
 export interface RawBoardCardInput {
@@ -37,6 +39,8 @@ export interface SeatState {
   isOffline: boolean;
   /** Only populated for you.player (own hand) or a revealed showdown -- otherwise empty, per Rule 5: we never guess at hidden cards. */
   holeCards: Card[];
+  /** Amount currently bet this street, or null if it's not a numeric bet (e.g. "check"/"call" text labels, or no action yet). */
+  currentBet: number | null;
 }
 
 export interface PokerGameState {
@@ -55,6 +59,22 @@ function deriveStreet(boardCardCount: number): PokerGameState["street"] {
   throw new Error(`Unexpected board card count: ${boardCardCount} (expected 0, 3, 4, or 5)`);
 }
 
+/**
+ * Parses a seat's bet-value text into a numeric current-street bet, or
+ * null if it's not a number (e.g. PokerNow shows action-word text like
+ * "check" or "call" in the same element rather than always a chip
+ * amount -- those aren't bet sizes and should not be misread as 0 or
+ * NaN).
+ */
+function parseBetValue(betValueText: string | null): number | null {
+  if (betValueText === null) return null;
+  const trimmed = betValueText.trim();
+  if (trimmed.length === 0) return null;
+  const cleaned = trimmed.replace(/,/g, "");
+  const value = Number(cleaned);
+  return Number.isNaN(value) ? null : value;
+}
+
 function assembleSeat(raw: RawSeatInput): SeatState {
   if (!raw.isOccupied) {
     return {
@@ -67,6 +87,7 @@ function assembleSeat(raw: RawSeatInput): SeatState {
       isCurrentToAct: false,
       isOffline: false,
       holeCards: [],
+      currentBet: null,
     };
   }
 
@@ -100,6 +121,7 @@ function assembleSeat(raw: RawSeatInput): SeatState {
     isCurrentToAct,
     isOffline,
     holeCards,
+    currentBet: parseBetValue(raw.betValueText),
   };
 }
 
@@ -121,4 +143,21 @@ export function assembleGameState(raw: RawTableInput): PokerGameState {
     potTotalValue: potInfo.totalValue,
     street: deriveStreet(board.length),
   };
+}
+
+/**
+ * Computes the amount hero needs to call: the largest current bet among
+ * still-active (occupied, non-folded) opponents, minus whatever hero has
+ * already put in this street. Returns 0 if hero is already matched or
+ * ahead (e.g. facing a check), never negative.
+ */
+export function calculateAmountToCall(state: PokerGameState): number {
+  const hero = state.seats.find((s) => s.isYou);
+  const heroBet = hero?.currentBet ?? 0;
+
+  const highestOpponentBet = state.seats
+    .filter((s) => s.isOccupied && !s.isYou && !s.isFolded && s.currentBet !== null)
+    .reduce((max, s) => Math.max(max, s.currentBet!), 0);
+
+  return Math.max(0, highestOpponentBet - heroBet);
 }
