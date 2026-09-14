@@ -1,0 +1,23 @@
+{
+  "name": "@poker-ai/ai-relay-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit",
+    "dev": "node --experimental-strip-types src/server.ts"
+  },
+  "dependencies": {
+    "@poker-ai/ai-core": "*",
+    "@poker-ai/browser-reader": "*",
+    "express": "^5.1.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/cors": "^2.8.17",
+    "typescript": "^5.7.2"
+  }
+}
