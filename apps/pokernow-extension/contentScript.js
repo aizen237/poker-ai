@@ -496,6 +496,16 @@
       total: totalEl?.textContent ?? null
     };
   }
+  function extractBigBlind() {
+    const blindValueEls = document.querySelectorAll(".blind-value .chips-value .normal-value");
+    const bigBlindText = blindValueEls[1]?.textContent;
+    if (!bigBlindText) {
+      console.warn("[Poker AI Reader] Could not find big blind value, defaulting to 1 (BB conversions will be wrong)");
+      return 1;
+    }
+    const bigBlind = Number(bigBlindText.trim());
+    return Number.isNaN(bigBlind) || bigBlind <= 0 ? 1 : bigBlind;
+  }
   function readGameState() {
     const pot = extractPotValues();
     try {
@@ -510,7 +520,55 @@
       return null;
     }
   }
+  var RELAY_SERVER_URL = "http://localhost:8787/recommendation";
+  function buildDecisionPacket(state, amountToCall, equity, bigBlind) {
+    const hero = state.seats.find((s) => s.isYou);
+    const numOpponentsRemaining = state.seats.filter(
+      (s) => s.isOccupied && !s.isYou && !s.isFolded
+    ).length;
+    return {
+      hero: {
+        holeCards: hero.holeCards,
+        position: "BTN",
+        // KNOWN PLACEHOLDER -- see function doc comment above
+        stackBB: bigBlind > 0 ? (hero.stack ?? 0) / bigBlind : hero.stack ?? 0
+      },
+      table: {
+        potBB: bigBlind > 0 ? state.potMainValue / bigBlind : state.potMainValue,
+        board: state.board,
+        street: state.street,
+        numOpponentsRemaining
+      },
+      facingAction: {
+        type: amountToCall > 0 ? "bet" : "none",
+        ...amountToCall > 0 ? { amountBB: bigBlind > 0 ? amountToCall / bigBlind : amountToCall } : {}
+      },
+      engineCalculations: {
+        equity
+      },
+      dataConfidence: "medium"
+      // position placeholder means we can't honestly claim "high" yet
+    };
+  }
+  async function requestRecommendation(packet, stateDescription) {
+    try {
+      const response = await fetch(RELAY_SERVER_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "fast", decisionPacket: packet })
+      });
+      const data = await response.json();
+      if (data.ok) {
+        console.log(`[Poker AI Reader] AI recommendation (for: ${stateDescription}):`, data.result);
+      } else {
+        console.error(`[Poker AI Reader] Relay server returned an error (for: ${stateDescription}):`, data.error);
+      }
+    } catch (error) {
+      console.error(`[Poker AI Reader] Failed to reach relay server (for: ${stateDescription}):`, error);
+    }
+  }
   var lastStateJson = null;
+  var lastRecommendationRequestKey = null;
   setInterval(() => {
     const state = readGameState();
     if (!state) return;
@@ -538,6 +596,19 @@
             );
           } else if (amountToCall === 0) {
             console.log("[Poker AI Reader] No bet facing hero (check or already matched) -- pot odds not applicable.");
+          }
+          if (hero.isCurrentToAct) {
+            const requestKey = `${state.street}:${state.board.length}:${amountToCall}:${state.potMainValue}`;
+            if (requestKey !== lastRecommendationRequestKey) {
+              lastRecommendationRequestKey = requestKey;
+              const bigBlind = extractBigBlind();
+              const packet = buildDecisionPacket(state, amountToCall, equityResult.equity, bigBlind);
+              console.log(`[Poker AI Reader] Big blind detected: ${bigBlind}. Hero stackBB: ${packet.hero.stackBB.toFixed(2)}. Facing amountBB: ${packet.facingAction.amountBB?.toFixed(2) ?? "n/a"}`);
+              console.log(
+                `[Poker AI Reader] It's hero's turn -- requesting AI recommendation for street=${state.street}, board=${JSON.stringify(state.board)}, potMainValue=${state.potMainValue}`
+              );
+              requestRecommendation(packet, `${state.street} | board: ${JSON.stringify(state.board)} | pot: ${state.potMainValue}`);
+            }
           }
         }
       }

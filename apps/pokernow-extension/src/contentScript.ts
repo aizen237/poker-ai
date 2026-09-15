@@ -1,5 +1,6 @@
 import { assembleGameState, calculateAmountToCall, type RawSeatInput, type RawBoardCardInput } from "@poker-ai/browser-reader";
 import { calculateEquity, calculatePotOdds } from "@poker-ai/poker-engine";
+import type { DecisionPacket } from "@poker-ai/ai-core";
 console.log("[Poker AI Reader] Content script loaded on:", window.location.href);
 
 function extractBoardCards(): RawBoardCardInput[] {
@@ -90,6 +91,18 @@ function extractPotValues(): { main: string; total: string | null } {
   };
 }
 
+function extractBigBlind(): number {
+  const blindValueEls = document.querySelectorAll(".blind-value .chips-value .normal-value");
+  // First is small blind, second is big blind, per confirmed DOM structure.
+  const bigBlindText = blindValueEls[1]?.textContent;
+  if (!bigBlindText) {
+    console.warn("[Poker AI Reader] Could not find big blind value, defaulting to 1 (BB conversions will be wrong)");
+    return 1;
+  }
+  const bigBlind = Number(bigBlindText.trim());
+  return Number.isNaN(bigBlind) || bigBlind <= 0 ? 1 : bigBlind;
+}
+
 function readGameState() {
   const pot = extractPotValues();
   try {
@@ -105,7 +118,71 @@ function readGameState() {
   }
 }
 
+
+const RELAY_SERVER_URL = "http://localhost:8787/recommendation";
+
+/**
+ * Builds a full DecisionPacket from the live game state. KNOWN GAP,
+ * documented not hidden: hero's real position (BTN/CO/etc.) isn't
+ * computed yet -- that requires tracking the dealer button's seat and
+ * hero's seat relative to it, which isn't built. Using "BTN" as a fixed
+ * placeholder for now so the AI receives *a* valid position rather than
+ * an invalid one, but this is not yet a trustworthy field.
+ */
+function buildDecisionPacket(
+  state: ReturnType<typeof readGameState> extends infer T ? NonNullable<T> : never,
+  amountToCall: number,
+  equity: number,
+  bigBlind: number,
+): DecisionPacket {
+  const hero = state.seats.find((s) => s.isYou)!;
+  const numOpponentsRemaining = state.seats.filter(
+    (s) => s.isOccupied && !s.isYou && !s.isFolded,
+  ).length;
+
+  return {
+    hero: {
+      holeCards: hero.holeCards as [import("@poker-ai/shared").Card, import("@poker-ai/shared").Card],
+      position: "BTN", // KNOWN PLACEHOLDER -- see function doc comment above
+      stackBB: bigBlind > 0 ? (hero.stack ?? 0) / bigBlind : (hero.stack ?? 0),
+    },
+    table: {
+      potBB: bigBlind > 0 ? state.potMainValue / bigBlind : state.potMainValue,
+      board: state.board,
+      street: state.street,
+      numOpponentsRemaining,
+    },
+    facingAction: {
+      type: amountToCall > 0 ? "bet" : "none",
+      ...(amountToCall > 0 ? { amountBB: bigBlind > 0 ? amountToCall / bigBlind : amountToCall } : {}),
+    },
+    engineCalculations: {
+      equity,
+    },
+    dataConfidence: "medium", // position placeholder means we can't honestly claim "high" yet
+  };
+}
+
+async function requestRecommendation(packet: DecisionPacket, stateDescription: string) {
+  try {
+    const response = await fetch(RELAY_SERVER_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "fast", decisionPacket: packet }),
+    });
+    const data = await response.json();
+    if (data.ok) {
+      console.log(`[Poker AI Reader] AI recommendation (for: ${stateDescription}):`, data.result);
+    } else {
+      console.error(`[Poker AI Reader] Relay server returned an error (for: ${stateDescription}):`, data.error);
+    }
+  } catch (error) {
+    console.error(`[Poker AI Reader] Failed to reach relay server (for: ${stateDescription}):`, error);
+  }
+}
+
 let lastStateJson: string | null = null;
+let lastRecommendationRequestKey: string | null = null;
 
 setInterval(() => {
   const state = readGameState();
@@ -138,6 +215,26 @@ setInterval(() => {
           );
         } else if (amountToCall === 0) {
           console.log("[Poker AI Reader] No bet facing hero (check or already matched) -- pot odds not applicable.");
+        }
+
+        // Only actually call the AI when it's genuinely hero's turn --
+        // otherwise this would fire a real API request on every single
+        // board/bet change from ANY player, not just when a decision is
+        // actually needed. Also de-duplicated by a request key so the
+        // same exact turn doesn't trigger multiple requests if polled
+        // more than once before the state next changes.
+        if (hero.isCurrentToAct) {
+          const requestKey = `${state.street}:${state.board.length}:${amountToCall}:${state.potMainValue}`;
+          if (requestKey !== lastRecommendationRequestKey) {
+            lastRecommendationRequestKey = requestKey;
+            const bigBlind = extractBigBlind();
+            const packet = buildDecisionPacket(state, amountToCall, equityResult.equity, bigBlind);
+            console.log(`[Poker AI Reader] Big blind detected: ${bigBlind}. Hero stackBB: ${packet.hero.stackBB.toFixed(2)}. Facing amountBB: ${packet.facingAction.amountBB?.toFixed(2) ?? "n/a"}`);
+            console.log(
+              `[Poker AI Reader] It's hero's turn -- requesting AI recommendation for street=${state.street}, board=${JSON.stringify(state.board)}, potMainValue=${state.potMainValue}`,
+            );
+            requestRecommendation(packet, `${state.street} | board: ${JSON.stringify(state.board)} | pot: ${state.potMainValue}`);
+          }
         }
       }
     }
