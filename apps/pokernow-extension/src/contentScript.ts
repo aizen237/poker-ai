@@ -1,4 +1,4 @@
-import { assembleGameState, calculateAmountToCall, type RawSeatInput, type RawBoardCardInput } from "@poker-ai/browser-reader";
+import { assembleGameState, calculateAmountToCall, computeDataConfidence, type RawSeatInput, type RawBoardCardInput } from "@poker-ai/browser-reader";
 import { calculateEquity, calculatePotOdds } from "@poker-ai/poker-engine";
 import type { DecisionPacket } from "@poker-ai/ai-core";
 import { evaluateShove } from "@poker-ai/range-engine";
@@ -104,6 +104,20 @@ function extractBigBlind(): number {
   return Number.isNaN(bigBlind) || bigBlind <= 0 ? 1 : bigBlind;
 }
 
+/**
+ * Independent check for whether the big blind is actually readable from
+ * the DOM right now. Kept separate from extractBigBlind() on purpose --
+ * this only feeds data-confidence and never changes what
+ * extractBigBlind() itself returns to its existing callers (preflop
+ * push/fold, BB conversions).
+ */
+function isBigBlindReadable(): boolean {
+  const blindValueEls = document.querySelectorAll(".blind-value .chips-value .normal-value");
+  const bigBlindText = blindValueEls[1]?.textContent;
+  if (!bigBlindText) return false;
+  const bigBlind = Number(bigBlindText.trim());
+  return !Number.isNaN(bigBlind) && bigBlind > 0;
+}
 function readGameState() {
   const pot = extractPotValues();
   try {
@@ -120,7 +134,8 @@ function readGameState() {
 }
 
 
-const RELAY_SERVER_URL = "http://localhost:8787/recommendation";
+const RELAY_SERVER_URL = "http://localhost:8787/recommendation"
+const POSITION_IS_KNOWN = false; // KNOWN PLACEHOLDER -- flips to true once real dealer-button tracking exists.
 
 /**
  * Builds a full DecisionPacket from the live game state. KNOWN GAP,
