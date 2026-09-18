@@ -1,6 +1,7 @@
 import { assembleGameState, calculateAmountToCall, type RawSeatInput, type RawBoardCardInput } from "@poker-ai/browser-reader";
 import { calculateEquity, calculatePotOdds } from "@poker-ai/poker-engine";
 import type { DecisionPacket } from "@poker-ai/ai-core";
+import { evaluateShove } from "@poker-ai/range-engine";
 console.log("[Poker AI Reader] Content script loaded on:", window.location.href);
 
 function extractBoardCards(): RawBoardCardInput[] {
@@ -163,6 +164,34 @@ function buildDecisionPacket(
   };
 }
 
+const SHORT_STACK_BB_THRESHOLD = 20;
+
+/**
+ * Preflop push/fold advice, position-independent (unlike opening ranges,
+ * which need real position data we don't have yet -- see the placeholder
+ * note on buildDecisionPacket). Only fires below a stack-depth threshold,
+ * since push/fold logic isn't the right tool for deep-stacked preflop
+ * decisions. Deep-stack preflop is an honest, documented gap for now,
+ * not silently faked.
+ */
+function checkPreflopPushFold(state: ReturnType<typeof readGameState> extends infer T ? NonNullable<T> : never, bigBlind: number) {
+  const hero = state.seats.find((s) => s.isYou);
+  if (!hero || hero.holeCards.length !== 2 || !hero.isCurrentToAct || state.street !== "preflop") return;
+
+  const stackBB = bigBlind > 0 ? (hero.stack ?? 0) / bigBlind : 0;
+  if (stackBB <= 0 || stackBB > SHORT_STACK_BB_THRESHOLD) return;
+
+  const potBB = bigBlind > 0 ? state.potMainValue / bigBlind : state.potMainValue;
+  if (potBB <= 0) return;
+
+  const shove = evaluateShove(hero.holeCards, stackBB, potBB, { iterations: 2000 });
+  console.log(
+    `[Poker AI Reader] PREFLOP push/fold check (${stackBB.toFixed(1)}BB effective): ` +
+      `${shove.isProfitable ? "SHOVE profitable" : "SHOVE not profitable"} (EV: ${shove.ev.toFixed(2)}BB, ` +
+      `equity if called: ${(shove.equityIfCalled * 100).toFixed(1)}%, assumed fold equity: ${(shove.foldEquityUsed * 100).toFixed(0)}%)`,
+  );
+}
+
 async function requestRecommendation(packet: DecisionPacket, stateDescription: string) {
   try {
     const response = await fetch(RELAY_SERVER_URL, {
@@ -192,6 +221,9 @@ setInterval(() => {
   if (stateJson !== lastStateJson) {
     console.log("[Poker AI Reader] Game state changed:", JSON.parse(stateJson));
     lastStateJson = stateJson;
+
+    const bigBlindForPreflopCheck = extractBigBlind();
+    checkPreflopPushFold(state, bigBlindForPreflopCheck);
 
     const hero = state.seats.find((s) => s.isYou);
     if (hero && hero.holeCards.length === 2 && state.street !== "preflop") {

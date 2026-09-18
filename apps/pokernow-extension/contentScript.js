@@ -422,6 +422,62 @@
       breakevenEquityPercent: breakevenEquity * 100
     };
   }
+  function calculateBetEV(equityIfCalled, foldEquity, currentPot, betSize) {
+    if (equityIfCalled < 0 || equityIfCalled > 1) {
+      throw new Error(`equityIfCalled must be between 0 and 1, got ${equityIfCalled}`);
+    }
+    if (foldEquity < 0 || foldEquity > 1) {
+      throw new Error(`foldEquity must be between 0 and 1, got ${foldEquity}`);
+    }
+    const evIfFold = currentPot;
+    const evIfCall = equityIfCalled * (currentPot + betSize) - (1 - equityIfCalled) * betSize;
+    const ev = foldEquity * evIfFold + (1 - foldEquity) * evIfCall;
+    return { ev };
+  }
+
+  // ../../packages/range-engine/dist/handNotation.js
+  var RANK_TO_CHAR = {
+    2: "2",
+    3: "3",
+    4: "4",
+    5: "5",
+    6: "6",
+    7: "7",
+    8: "8",
+    9: "9",
+    10: "T",
+    11: "J",
+    12: "Q",
+    13: "K",
+    14: "A"
+  };
+  var CHAR_TO_RANK = Object.fromEntries(RANKS.map((r) => [RANK_TO_CHAR[r], r]));
+
+  // ../../packages/range-engine/dist/pushFold.js
+  var DEFAULT_FOLD_EQUITY = 0.5;
+  function evaluateShove(heroCards, effectiveStackBB, potBB, options = {}) {
+    if (effectiveStackBB <= 0) {
+      throw new Error(`effectiveStackBB must be positive, got ${effectiveStackBB}`);
+    }
+    if (potBB <= 0) {
+      throw new Error(`potBB must be positive, got ${potBB}`);
+    }
+    const foldEquity = options.foldEquity ?? DEFAULT_FOLD_EQUITY;
+    if (foldEquity < 0 || foldEquity > 1) {
+      throw new Error(`foldEquity must be between 0 and 1, got ${foldEquity}`);
+    }
+    const equityResult = calculateEquity(heroCards, [], 1, {
+      ...options.iterations !== void 0 ? { iterations: options.iterations } : {},
+      ...options.rng !== void 0 ? { rng: options.rng } : {}
+    });
+    const { ev } = calculateBetEV(equityResult.equity, foldEquity, potBB, effectiveStackBB);
+    return {
+      ev,
+      equityIfCalled: equityResult.equity,
+      foldEquityUsed: foldEquity,
+      isProfitable: ev > 0
+    };
+  }
 
   // src/contentScript.ts
   console.log("[Poker AI Reader] Content script loaded on:", window.location.href);
@@ -550,6 +606,19 @@
       // position placeholder means we can't honestly claim "high" yet
     };
   }
+  var SHORT_STACK_BB_THRESHOLD = 20;
+  function checkPreflopPushFold(state, bigBlind) {
+    const hero = state.seats.find((s) => s.isYou);
+    if (!hero || hero.holeCards.length !== 2 || !hero.isCurrentToAct || state.street !== "preflop") return;
+    const stackBB = bigBlind > 0 ? (hero.stack ?? 0) / bigBlind : 0;
+    if (stackBB <= 0 || stackBB > SHORT_STACK_BB_THRESHOLD) return;
+    const potBB = bigBlind > 0 ? state.potMainValue / bigBlind : state.potMainValue;
+    if (potBB <= 0) return;
+    const shove = evaluateShove(hero.holeCards, stackBB, potBB, { iterations: 2e3 });
+    console.log(
+      `[Poker AI Reader] PREFLOP push/fold check (${stackBB.toFixed(1)}BB effective): ${shove.isProfitable ? "SHOVE profitable" : "SHOVE not profitable"} (EV: ${shove.ev.toFixed(2)}BB, equity if called: ${(shove.equityIfCalled * 100).toFixed(1)}%, assumed fold equity: ${(shove.foldEquityUsed * 100).toFixed(0)}%)`
+    );
+  }
   async function requestRecommendation(packet, stateDescription) {
     try {
       const response = await fetch(RELAY_SERVER_URL, {
@@ -576,6 +645,8 @@
     if (stateJson !== lastStateJson) {
       console.log("[Poker AI Reader] Game state changed:", JSON.parse(stateJson));
       lastStateJson = stateJson;
+      const bigBlindForPreflopCheck = extractBigBlind();
+      checkPreflopPushFold(state, bigBlindForPreflopCheck);
       const hero = state.seats.find((s) => s.isYou);
       if (hero && hero.holeCards.length === 2 && state.street !== "preflop") {
         const numOpponents = state.seats.filter(
