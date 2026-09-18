@@ -150,16 +150,26 @@ function buildDecisionPacket(
   amountToCall: number,
   equity: number,
   bigBlind: number,
+  bigBlindWasDefaulted: boolean,
 ): DecisionPacket {
   const hero = state.seats.find((s) => s.isYou)!;
   const numOpponentsRemaining = state.seats.filter(
     (s) => s.isOccupied && !s.isYou && !s.isFolded,
   ).length;
 
+  const confidence = computeDataConfidence(state, {
+    amountToCall,
+    bigBlindWasDefaulted,
+    isPositionKnown: POSITION_IS_KNOWN,
+  });
+  console.log(
+    `[Poker AI Reader] Data confidence: ${confidence.level}${confidence.reasons.length > 0 ? ` (${confidence.reasons.join("; ")})` : ""}`,
+  );
+
   return {
     hero: {
       holeCards: hero.holeCards as [import("@poker-ai/shared").Card, import("@poker-ai/shared").Card],
-      position: "BTN", // KNOWN PLACEHOLDER -- see function doc comment above
+      position: "BTN", // KNOWN PLACEHOLDER -- see POSITION_IS_KNOWN above
       stackBB: bigBlind > 0 ? (hero.stack ?? 0) / bigBlind : (hero.stack ?? 0),
     },
     table: {
@@ -175,7 +185,7 @@ function buildDecisionPacket(
     engineCalculations: {
       equity,
     },
-    dataConfidence: "medium", // position placeholder means we can't honestly claim "high" yet
+    dataConfidence: confidence.level,
   };
 }
 
@@ -275,7 +285,8 @@ setInterval(() => {
           if (requestKey !== lastRecommendationRequestKey) {
             lastRecommendationRequestKey = requestKey;
             const bigBlind = extractBigBlind();
-            const packet = buildDecisionPacket(state, amountToCall, equityResult.equity, bigBlind);
+            const bigBlindWasDefaulted = !isBigBlindReadable();
+            const packet = buildDecisionPacket(state, amountToCall, equityResult.equity, bigBlind, bigBlindWasDefaulted);
             console.log(`[Poker AI Reader] Big blind detected: ${bigBlind}. Hero stackBB: ${packet.hero.stackBB.toFixed(2)}. Facing amountBB: ${packet.facingAction.amountBB?.toFixed(2) ?? "n/a"}`);
             console.log(
               `[Poker AI Reader] It's hero's turn -- requesting AI recommendation for street=${state.street}, board=${JSON.stringify(state.board)}, potMainValue=${state.potMainValue}`,
