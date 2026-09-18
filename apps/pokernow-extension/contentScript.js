@@ -183,6 +183,68 @@
     return Math.max(0, highestOpponentBet - heroBet);
   }
 
+  // ../../packages/browser-reader/dist/dataConfidence.js
+  var EXPECTED_BOARD_COUNT = {
+    preflop: 0,
+    flop: 3,
+    turn: 4,
+    river: 5
+  };
+  function computeDataConfidence(state, context) {
+    const criticalReasons = [];
+    const uncertainReasons = [];
+    const hero = state.seats.find((s) => s.isYou);
+    if (!hero) {
+      criticalReasons.push("hero seat not found in state");
+    } else {
+      if (hero.holeCards.length !== 2) {
+        criticalReasons.push(`hero hole cards incomplete (${hero.holeCards.length}/2)`);
+      }
+      if (hero.stack === null || !Number.isFinite(hero.stack) || hero.stack < 0) {
+        criticalReasons.push("hero stack missing or invalid");
+      }
+      if (hero.isFolded) {
+        criticalReasons.push("hero has already folded -- no decision to make");
+      }
+      if (!hero.isCurrentToAct) {
+        criticalReasons.push("it is not hero's turn -- unsafe to base a decision on this state");
+      }
+      if (hero.isOffline) {
+        criticalReasons.push("hero is showing as offline");
+      }
+    }
+    const expectedBoardCount = EXPECTED_BOARD_COUNT[state.street];
+    if (state.board.length !== expectedBoardCount) {
+      criticalReasons.push(`board card count (${state.board.length}) does not match street "${state.street}" (expected ${expectedBoardCount})`);
+    }
+    if (!Number.isFinite(state.potMainValue) || state.potMainValue < 0) {
+      criticalReasons.push("pot value missing or invalid");
+    }
+    if (!Number.isFinite(context.amountToCall) || context.amountToCall < 0) {
+      criticalReasons.push("amount-to-call is missing or invalid");
+    }
+    const activeOpponents = state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded);
+    if (activeOpponents.length < 1) {
+      criticalReasons.push("no active opponents remain -- hand is already decided");
+    }
+    if (context.bigBlindWasDefaulted) {
+      criticalReasons.push("big blind could not be read from the table -- BB-based sizing is unreliable");
+    }
+    if (activeOpponents.some((s) => s.isOffline)) {
+      uncertainReasons.push("at least one active opponent is showing as offline -- their state may be stale");
+    }
+    if (!context.isPositionKnown) {
+      uncertainReasons.push("hero's real table position is not yet known (placeholder in use)");
+    }
+    if (criticalReasons.length > 0) {
+      return { level: "low", reasons: criticalReasons };
+    }
+    if (uncertainReasons.length > 0) {
+      return { level: "medium", reasons: uncertainReasons };
+    }
+    return { level: "high", reasons: [] };
+  }
+
   // ../../packages/poker-engine/dist/types.js
   var HandCategory;
   (function(HandCategory2) {
@@ -562,6 +624,13 @@
     const bigBlind = Number(bigBlindText.trim());
     return Number.isNaN(bigBlind) || bigBlind <= 0 ? 1 : bigBlind;
   }
+  function isBigBlindReadable() {
+    const blindValueEls = document.querySelectorAll(".blind-value .chips-value .normal-value");
+    const bigBlindText = blindValueEls[1]?.textContent;
+    if (!bigBlindText) return false;
+    const bigBlind = Number(bigBlindText.trim());
+    return !Number.isNaN(bigBlind) && bigBlind > 0;
+  }
   function readGameState() {
     const pot = extractPotValues();
     try {
@@ -577,16 +646,25 @@
     }
   }
   var RELAY_SERVER_URL = "http://localhost:8787/recommendation";
-  function buildDecisionPacket(state, amountToCall, equity, bigBlind) {
+  var POSITION_IS_KNOWN = false;
+  function buildDecisionPacket(state, amountToCall, equity, bigBlind, bigBlindWasDefaulted) {
     const hero = state.seats.find((s) => s.isYou);
     const numOpponentsRemaining = state.seats.filter(
       (s) => s.isOccupied && !s.isYou && !s.isFolded
     ).length;
+    const confidence = computeDataConfidence(state, {
+      amountToCall,
+      bigBlindWasDefaulted,
+      isPositionKnown: POSITION_IS_KNOWN
+    });
+    console.log(
+      `[Poker AI Reader] Data confidence: ${confidence.level}${confidence.reasons.length > 0 ? ` (${confidence.reasons.join("; ")})` : ""}`
+    );
     return {
       hero: {
         holeCards: hero.holeCards,
         position: "BTN",
-        // KNOWN PLACEHOLDER -- see function doc comment above
+        // KNOWN PLACEHOLDER -- see POSITION_IS_KNOWN above
         stackBB: bigBlind > 0 ? (hero.stack ?? 0) / bigBlind : hero.stack ?? 0
       },
       table: {
@@ -602,8 +680,7 @@
       engineCalculations: {
         equity
       },
-      dataConfidence: "medium"
-      // position placeholder means we can't honestly claim "high" yet
+      dataConfidence: confidence.level
     };
   }
   var SHORT_STACK_BB_THRESHOLD = 20;
@@ -673,7 +750,8 @@
             if (requestKey !== lastRecommendationRequestKey) {
               lastRecommendationRequestKey = requestKey;
               const bigBlind = extractBigBlind();
-              const packet = buildDecisionPacket(state, amountToCall, equityResult.equity, bigBlind);
+              const bigBlindWasDefaulted = !isBigBlindReadable();
+              const packet = buildDecisionPacket(state, amountToCall, equityResult.equity, bigBlind, bigBlindWasDefaulted);
               console.log(`[Poker AI Reader] Big blind detected: ${bigBlind}. Hero stackBB: ${packet.hero.stackBB.toFixed(2)}. Facing amountBB: ${packet.facingAction.amountBB?.toFixed(2) ?? "n/a"}`);
               console.log(
                 `[Poker AI Reader] It's hero's turn -- requesting AI recommendation for street=${state.street}, board=${JSON.stringify(state.board)}, potMainValue=${state.potMainValue}`
