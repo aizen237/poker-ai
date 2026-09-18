@@ -9,6 +9,7 @@ import {
   createModelRouter,
   getModelsByProvider,
   validateDecisionPacket,
+  validateActionLegality,
   type RouterOptions,
 } from "@poker-ai/ai-core";
 
@@ -50,8 +51,42 @@ app.post("/recommendation", async (req, res) => {
     const packet = validateDecisionPacket(req.body.decisionPacket);
     const mode: RouterOptions["mode"] = req.body.mode ?? "fast";
 
+    if (packet.dataConfidence === "low") {
+      res.json({
+        ok: true,
+        result: {
+          action: "FOLD",
+          confidence: 0,
+          reasoning: "Game state confidence is too low to make a reliable recommendation. Defaulting to FOLD rather than guessing.",
+        },
+        blocked: true,
+        blockedReason: "low_confidence",
+      });
+      return;
+    }
+
     const result = await router.getRecommendation(packet, { mode });
-    res.json({ ok: true, result });
+
+    if (Array.isArray(result)) {
+      // Consensus mode returns multiple providers' results, not one
+      // Recommendation -- legality validation isn't applied per-result
+      // here yet, since consensus mode isn't what the live extension
+      // actually uses today. Documented gap, not silently skipped.
+      res.json({ ok: true, result });
+      return;
+    }
+
+    const legality = validateActionLegality(result, packet);
+
+    if (!legality.isLegal) {
+      console.warn(`[Relay Server] AI recommendation rejected as illegal: ${legality.reason}`);
+    }
+
+    res.json({
+      ok: true,
+      result: legality.effectiveRecommendation,
+      ...(legality.isLegal ? {} : { blocked: true, blockedReason: "illegal_action", originalReason: legality.reason }),
+    });
   } catch (error) {
     console.error("[Relay Server] Error handling /recommendation:", error);
     res.status(400).json({
