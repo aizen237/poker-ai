@@ -160,6 +160,7 @@ function buildDecisionPacket(
   state: ReturnType<typeof readGameState> extends infer T ? NonNullable<T> : never,
   amountToCall: number,
   equity: number,
+  equitySource: DecisionPacket["engineCalculations"]["equitySource"],
   bigBlind: number,
   bigBlindWasDefaulted: boolean,
 ): DecisionPacket {
@@ -195,6 +196,7 @@ function buildDecisionPacket(
     },
     engineCalculations: {
       equity,
+      equitySource,
     },
     dataConfidence: confidence.level,
   };
@@ -274,6 +276,7 @@ setInterval(() => {
 
       if (numOpponents >= 1) {
         let equityResult: { equity: number };
+        let equitySource: DecisionPacket["engineCalculations"]["equitySource"];
 
         if (numOpponents === 1) {
           const opponent = state.seats.find((s) => s.isOccupied && !s.isYou && !s.isFolded)!;
@@ -283,6 +286,7 @@ setInterval(() => {
             equityResult = calculateEquityVsRange(hero.holeCards, estimatedRange, state.board, {
               iterations: 3000,
             });
+            equitySource = "estimated_range";
             console.log(
               `[Poker AI Reader] Hero equity vs estimated range (actions so far: ${
                 opponentActions.length > 0 ? opponentActions.join(", ") : "none yet"
@@ -293,6 +297,7 @@ setInterval(() => {
             // cards -- fall back to equity vs random rather than crash.
             console.warn("[Poker AI Reader] Range-based equity failed, falling back to random hands:", error);
             equityResult = calculateEquity(hero.holeCards, state.board, numOpponents, { iterations: 3000 });
+            equitySource = "random_hands";
             console.log(
               `[Poker AI Reader] Hero equity vs ${numOpponents} opponent(s) (random hands, fallback): ${(equityResult.equity * 100).toFixed(1)}%`,
             );
@@ -302,6 +307,7 @@ setInterval(() => {
           // vs multiple distinct opponent ranges at once -- documented
           // gap, falls back to equity vs random hands for now.
           equityResult = calculateEquity(hero.holeCards, state.board, numOpponents, { iterations: 3000 });
+          equitySource = "random_hands";
           console.log(
             `[Poker AI Reader] Hero equity vs ${numOpponents} opponent(s) (random hands -- multiway, no range model yet): ${(equityResult.equity * 100).toFixed(1)}%`,
           );
@@ -329,7 +335,7 @@ setInterval(() => {
             lastRecommendationRequestKey = requestKey;
             const bigBlind = extractBigBlind();
             const bigBlindWasDefaulted = !isBigBlindReadable();
-            const packet = buildDecisionPacket(state, amountToCall, equityResult.equity, bigBlind, bigBlindWasDefaulted);
+            const packet = buildDecisionPacket(state, amountToCall, equityResult.equity, equitySource, bigBlind, bigBlindWasDefaulted);
             console.log(`[Poker AI Reader] Big blind detected: ${bigBlind}. Hero stackBB: ${packet.hero.stackBB.toFixed(2)}. Facing amountBB: ${packet.facingAction.amountBB?.toFixed(2) ?? "n/a"}`);
             console.log(
               `[Poker AI Reader] It's hero's turn -- requesting AI recommendation for street=${state.street}, board=${JSON.stringify(state.board)}, potMainValue=${state.potMainValue}`,

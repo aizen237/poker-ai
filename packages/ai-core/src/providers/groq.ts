@@ -7,7 +7,7 @@ import type { AIProvider, AIProviderMetadata, GetRecommendationOptions } from ".
 
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 
-const PROMPT_VERSION = "v2-explicit-hand-category";
+const PROMPT_VERSION = "v3-equity-source";
 
 const HAND_CATEGORY_NAMES = [
   "High Card", "Pair", "Two Pair", "Three of a Kind", "Straight",
@@ -45,7 +45,16 @@ function buildPrompt(packet: DecisionPacket): string {
   lines.push(`Facing: ${packet.facingAction.type}${packet.facingAction.amountBB ? ` of ${packet.facingAction.amountBB}BB` : ""}.`);
 
   const calc = packet.engineCalculations;
-  if (calc.equity !== undefined) lines.push(`Hero's equity: ${(calc.equity * 100).toFixed(1)}%.`);
+  if (calc.equity !== undefined) {
+    lines.push(`Hero's equity: ${(calc.equity * 100).toFixed(1)}%.`);
+    const sourceDescription =
+      calc.equitySource === "estimated_range"
+        ? "estimated against the opponent's likely range, inferred from their actions this hand (heads-up only)"
+        : calc.equitySource === "random_hands"
+          ? "computed against random hands, not a modeled range (used for multiway pots, or as a heads-up fallback)"
+          : "source not recorded -- treat with extra caution";
+    lines.push(`Equity basis: ${sourceDescription}.`);
+  }
   if (calc.potOddsBreakevenPercent !== undefined) lines.push(`Pot odds breakeven: ${calc.potOddsBreakevenPercent.toFixed(1)}%.`);
   if (calc.callEV !== undefined) lines.push(`EV of calling: ${calc.callEV.toFixed(2)}BB.`);
   if (calc.spr !== undefined) lines.push(`SPR: ${calc.spr.toFixed(1)}.`);

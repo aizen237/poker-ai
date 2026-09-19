@@ -133,3 +133,60 @@ describe("validateDecisionPacket — rejects invalid packets", () => {
     expect(() => validateDecisionPacket(packet)).toThrow();
   });
 });
+
+
+
+
+describe("validateDecisionPacket — equitySource", () => {
+  it("accepts 'estimated_range' as an equitySource", () => {
+    const packet = validPacket();
+    (packet.engineCalculations as Record<string, unknown>).equitySource = "estimated_range";
+    expect(() => validateDecisionPacket(packet)).not.toThrow();
+  });
+
+  it("accepts 'random_hands' as an equitySource", () => {
+    const packet = validPacket();
+    (packet.engineCalculations as Record<string, unknown>).equitySource = "random_hands";
+    expect(() => validateDecisionPacket(packet)).not.toThrow();
+  });
+
+  it("accepts 'unknown' as an equitySource", () => {
+    const packet = validPacket();
+    (packet.engineCalculations as Record<string, unknown>).equitySource = "unknown";
+    expect(() => validateDecisionPacket(packet)).not.toThrow();
+  });
+
+  it("accepts a packet with equity but no equitySource (optional, by convention only)", () => {
+    const packet = validPacket();
+    expect((packet.engineCalculations as Record<string, unknown>).equitySource).toBeUndefined();
+    expect(() => validateDecisionPacket(packet)).not.toThrow();
+  });
+
+  it("accepts a packet with neither equity nor equitySource (e.g. very early preflop)", () => {
+    const packet = {
+      hero: {
+        holeCards: [
+          { rank: 14, suit: "s" },
+          { rank: 13, suit: "s" },
+        ],
+        position: "UTG",
+        stackBB: 100,
+      },
+      table: {
+        potBB: 1.5,
+        board: [],
+        street: "preflop",
+        numOpponentsRemaining: 5,
+      },
+      facingAction: { type: "none" },
+      engineCalculations: {},
+    };
+    expect(() => validateDecisionPacket(packet)).not.toThrow();
+  });
+
+  it("rejects an invalid equitySource value", () => {
+    const packet = validPacket();
+    (packet.engineCalculations as Record<string, unknown>).equitySource = "made_up_source";
+    expect(() => validateDecisionPacket(packet)).toThrow();
+  });
+});

@@ -13,7 +13,22 @@ const PositionSchema = z.enum(["UTG", "HJ", "CO", "BTN", "SB", "BB"]);
 
 const StreetSchema = z.enum(["preflop", "flop", "turn", "river"]);
 
+
 const FacingActionSchema = z.enum(["none", "bet", "raise", "all_in"]);
+
+/**
+ * Records how an equity number was produced, so the AI (and anyone
+ * reading the audit trail) knows what it's actually looking at rather
+ * than assuming every equity figure means the same thing:
+ * - "estimated_range": heads-up equity computed against the opponent's
+ *   narrowed range from their action history this hand.
+ * - "random_hands": Monte Carlo equity vs random hands -- the fallback
+ *   used for multiway pots (no multi-opponent range model exists yet)
+ *   and for heads-up when range estimation itself fails.
+ * - "unknown": reserved for a future/unrecognized source rather than
+ *   silently mislabeling it as one of the above.
+ */
+const EquitySourceSchema = z.enum(["estimated_range", "random_hands", "unknown"]);
 
 /**
  * The structured packet handed to an AI provider for a single decision.
@@ -46,6 +61,8 @@ export const DecisionPacketSchema = z.object({
 
   engineCalculations: z.object({
     equity: z.number().min(0).max(1).optional(),
+    /** Should be present whenever equity is -- see EquitySourceSchema doc comment above. Not schema-enforced as a pair, by convention only. */
+    equitySource: EquitySourceSchema.optional(),
     potOddsBreakevenPercent: z.number().min(0).max(100).optional(),
     callEV: z.number().optional(),
     spr: z.number().positive().optional(),
