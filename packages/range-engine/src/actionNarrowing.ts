@@ -1,5 +1,6 @@
 import { chenScore } from "./chenScore.js";
 import { parseHandType } from "./handNotation.js";
+import { getOpeningRange } from "./openingRanges.js";
 import type { Range } from "./range.js";
 
 export interface NarrowingOptions {
@@ -81,4 +82,54 @@ export function narrowExcludingTop(range: Range, topFractionExcluded: number): R
     if (!excluded.has(hand)) narrowed.set(hand, weight);
   }
   return narrowed;
+}
+
+export type OpponentAction = "fold" | "call" | "raise";
+
+/**
+ * Default baseline range to narrow from when no better prior exists.
+ * KNOWN PLACEHOLDER, same pattern as hero's "BTN" position placeholder
+ * in contentScript.ts: real per-opponent position isn't tracked yet, so
+ * this uses BTN's opening range (the widest single-position range) as a
+ * deliberately wide, documented starting point rather than guessing.
+ */
+function defaultBaselineRange(): Range {
+  return getOpeningRange("BTN");
+}
+
+/**
+ * Composes the narrowing functions above into a single range estimate
+ * from an opponent's ordered action history for the hand so far. Each
+ * action narrows the range produced by the PREVIOUS action (not the
+ * original baseline) -- e.g. "raise, call" models "the range of hands
+ * that would raise, then continue with a call facing more aggression,"
+ * not two independent slices of the full baseline.
+ *
+ * "fold" actions are accepted for completeness (a caller may pass full
+ * history including folds) but have no narrowing effect here -- a
+ * folded opponent is already excluded from equity calculations
+ * upstream, so their range no longer matters.
+ *
+ * KNOWN SIMPLIFICATION: every "raise" (including an opponent's very
+ * first bet of a street, which isn't technically a re-raise) is
+ * narrowed with narrowForThreeBet, since that's the only aggression
+ * narrowing tool available. A real opening-bet range is wider than a
+ * genuine 3-bet range -- treat this as a reasonable starting model, not
+ * a precise one, consistent with the rest of this module's documented
+ * defaults.
+ */
+export function estimateOpponentRange(
+  actions: readonly OpponentAction[],
+  baseline: Range = defaultBaselineRange(),
+): Range {
+  let range = baseline;
+  for (const action of actions) {
+    if (action === "raise") {
+      range = narrowForThreeBet(range);
+    } else if (action === "call") {
+      range = narrowForCall(range);
+    }
+    // "fold" intentionally has no effect -- see doc comment above.
+  }
+  return range;
 }

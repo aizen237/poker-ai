@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { narrowExcludingTop, narrowForCall, narrowForThreeBet } from "./actionNarrowing.js";
+import { estimateOpponentRange, narrowExcludingTop, narrowForCall, narrowForThreeBet } from "./actionNarrowing.js";
 import { getOpeningRange } from "./openingRanges.js";
-import { rangeComboCount } from "./range.js";
+import { rangeComboCount, rangeFromList } from "./range.js";
 
 describe("narrowForThreeBet", () => {
   it("the narrowed range is always a genuine subset of the original", () => {
@@ -91,5 +91,38 @@ describe("combo weights carry through narrowing correctly", () => {
     for (const [hand, weight] of narrowed) {
       expect(weight).toBe(original.get(hand));
     }
+  });
+});
+
+
+describe("estimateOpponentRange", () => {
+  it("returns the baseline unchanged when there are no actions", () => {
+    const baseline = rangeFromList(["AA", "KK", "QQ", "AKs"]);
+    const result = estimateOpponentRange([], baseline);
+    expect(result).toEqual(baseline);
+  });
+
+  it("narrows to the top of the baseline on a raise", () => {
+    const baseline = rangeFromList(["AA", "KK", "QQ", "AKs"]);
+    const result = estimateOpponentRange(["raise"], baseline);
+    expect([...result.keys()]).toEqual(["AA"]);
+  });
+
+  it("narrows progressively across multiple actions", () => {
+    const baseline = getOpeningRange("BTN");
+    const afterRaise = estimateOpponentRange(["raise"], baseline);
+    const afterRaiseThenCall = estimateOpponentRange(["raise", "call"], baseline);
+    expect(rangeComboCount(afterRaiseThenCall)).toBeLessThan(rangeComboCount(afterRaise));
+  });
+
+  it("treats fold as a no-op", () => {
+    const baseline = rangeFromList(["AA", "KK", "QQ"]);
+    const result = estimateOpponentRange(["fold"], baseline);
+    expect(result).toEqual(baseline);
+  });
+
+  it("uses a documented BTN-opening-range default when no baseline is given", () => {
+    const result = estimateOpponentRange([]);
+    expect(result).toEqual(getOpeningRange("BTN"));
   });
 });

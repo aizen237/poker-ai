@@ -245,6 +245,54 @@
     return { level: "high", reasons: [] };
   }
 
+  // ../../packages/browser-reader/dist/actionHistory.js
+  function emptyActionHistory() {
+    return /* @__PURE__ */ new Map();
+  }
+  function highestActiveBet(state) {
+    let highest = 0;
+    for (const seat of state.seats) {
+      if (seat.isOccupied && !seat.isFolded && seat.currentBet !== null && seat.currentBet > highest) {
+        highest = seat.currentBet;
+      }
+    }
+    return highest;
+  }
+  function isNewHand(previous, current) {
+    const prevHero = previous.seats.find((s) => s.isYou);
+    const currHero = current.seats.find((s) => s.isYou);
+    const prevCards = prevHero?.holeCards ?? [];
+    const currCards = currHero?.holeCards ?? [];
+    if (prevCards.length !== currCards.length)
+      return true;
+    return prevCards.some((c, i) => c.rank !== currCards[i]?.rank || c.suit !== currCards[i]?.suit);
+  }
+  function updateActionHistory(history, previous, current) {
+    if (!previous || isNewHand(previous, current)) {
+      return emptyActionHistory();
+    }
+    const next = new Map(history);
+    const previousHighestBet = highestActiveBet(previous);
+    for (const seat of current.seats) {
+      if (!seat.isOccupied || seat.isYou)
+        continue;
+      const prevSeat = previous.seats.find((s) => s.seatNumber === seat.seatNumber);
+      if (!prevSeat || !prevSeat.isOccupied)
+        continue;
+      let action = null;
+      if (!prevSeat.isFolded && seat.isFolded) {
+        action = "fold";
+      } else if (seat.currentBet !== null && seat.currentBet !== prevSeat.currentBet) {
+        action = seat.currentBet > previousHighestBet ? "raise" : "call";
+      }
+      if (action) {
+        const existing = next.get(seat.seatNumber) ?? [];
+        next.set(seat.seatNumber, [...existing, { street: current.street, action }]);
+      }
+    }
+    return next;
+  }
+
   // ../../packages/poker-engine/dist/types.js
   var HandCategory;
   (function(HandCategory2) {
@@ -514,6 +562,426 @@
     14: "A"
   };
   var CHAR_TO_RANK = Object.fromEntries(RANKS.map((r) => [RANK_TO_CHAR[r], r]));
+  function formatHandType(hand) {
+    const high = RANK_TO_CHAR[hand.highRank];
+    const low = RANK_TO_CHAR[hand.lowRank];
+    if (hand.highRank === hand.lowRank)
+      return `${high}${low}`;
+    return `${high}${low}${hand.suited ? "s" : "o"}`;
+  }
+  function parseHandType(input) {
+    const trimmed = input.trim();
+    if (trimmed.length === 2) {
+      const rank = CHAR_TO_RANK[trimmed[0].toUpperCase()];
+      const rank2 = CHAR_TO_RANK[trimmed[1].toUpperCase()];
+      if (rank === void 0 || rank2 === void 0 || rank !== rank2) {
+        throw new Error(`Invalid hand type "${input}": expected a pocket pair like "77"`);
+      }
+      return { highRank: rank, lowRank: rank, suited: false };
+    }
+    if (trimmed.length === 3) {
+      const r1 = CHAR_TO_RANK[trimmed[0].toUpperCase()];
+      const r2 = CHAR_TO_RANK[trimmed[1].toUpperCase()];
+      const suitedChar = trimmed[2].toLowerCase();
+      if (r1 === void 0 || r2 === void 0 || r1 === r2) {
+        throw new Error(`Invalid hand type "${input}": unrecognized ranks`);
+      }
+      if (suitedChar !== "s" && suitedChar !== "o") {
+        throw new Error(`Invalid hand type "${input}": expected trailing "s" or "o"`);
+      }
+      const [highRank, lowRank] = r1 > r2 ? [r1, r2] : [r2, r1];
+      return { highRank, lowRank, suited: suitedChar === "s" };
+    }
+    throw new Error(`Invalid hand type "${input}": expected 2 or 3 characters`);
+  }
+  function expandHandType(hand) {
+    const combos = [];
+    if (hand.highRank === hand.lowRank) {
+      for (let i = 0; i < SUITS.length; i++) {
+        for (let j = i + 1; j < SUITS.length; j++) {
+          combos.push([
+            { rank: hand.highRank, suit: SUITS[i] },
+            { rank: hand.lowRank, suit: SUITS[j] }
+          ]);
+        }
+      }
+      return combos;
+    }
+    if (hand.suited) {
+      for (const suit of SUITS) {
+        combos.push([
+          { rank: hand.highRank, suit },
+          { rank: hand.lowRank, suit }
+        ]);
+      }
+      return combos;
+    }
+    for (const suitHigh of SUITS) {
+      for (const suitLow of SUITS) {
+        if (suitHigh === suitLow)
+          continue;
+        combos.push([
+          { rank: hand.highRank, suit: suitHigh },
+          { rank: hand.lowRank, suit: suitLow }
+        ]);
+      }
+    }
+    return combos;
+  }
+
+  // ../../packages/range-engine/dist/range.js
+  function rangeFromList(hands) {
+    const range = /* @__PURE__ */ new Map();
+    for (const h of hands) {
+      range.set(formatHandType(parseHandType(h)), 1);
+    }
+    return range;
+  }
+  function expandRange(range, excludeCards = []) {
+    const excludeIds = new Set(excludeCards.map((c) => `${c.rank}${c.suit}`));
+    const result = [];
+    for (const [handStr, weight] of range) {
+      const combos = expandHandType(parseHandType(handStr));
+      for (const combo of combos) {
+        const overlaps = combo.some((c) => excludeIds.has(`${c.rank}${c.suit}`));
+        if (!overlaps) {
+          result.push({ cards: combo, weight });
+        }
+      }
+    }
+    return result;
+  }
+
+  // ../../packages/range-engine/dist/rangeEquity.js
+  var DEFAULT_ITERATIONS2 = 1e4;
+  function weightedSample(combos, rng) {
+    const totalWeight = combos.reduce((sum, c) => sum + c.weight, 0);
+    if (totalWeight <= 0) {
+      throw new Error("Cannot sample from a range with zero total weight (empty or all-excluded range)");
+    }
+    let roll = rng() * totalWeight;
+    for (const combo of combos) {
+      roll -= combo.weight;
+      if (roll <= 0)
+        return combo;
+    }
+    return combos[combos.length - 1];
+  }
+  function calculateEquityVsRange(heroCards, opponentRange, board, options = {}) {
+    if (heroCards.length !== 2) {
+      throw new Error(`calculateEquityVsRange requires exactly 2 hero cards, got ${heroCards.length}`);
+    }
+    if (board.length > 5) {
+      throw new Error(`Board cannot have more than 5 cards, got ${board.length}`);
+    }
+    const iterations = options.iterations ?? DEFAULT_ITERATIONS2;
+    const rng = options.rng ?? Math.random;
+    const cardsToComplete = 5 - board.length;
+    const knownCards = [...heroCards, ...board];
+    const opponentCombos = expandRange(opponentRange, knownCards);
+    if (opponentCombos.length === 0) {
+      throw new Error("Opponent range has no valid combos remaining after excluding known cards");
+    }
+    let winShareSum = 0;
+    for (let i = 0; i < iterations; i++) {
+      const opponentCombo = weightedSample(opponentCombos, rng);
+      const excludeThisIteration = [...knownCards, ...opponentCombo.cards];
+      const deck = new Deck(rng, excludeThisIteration);
+      const runoutBoard = [...board, ...deck.drawMany(cardsToComplete)];
+      const heroValue = evaluateBest([...heroCards, ...runoutBoard]).value;
+      const opponentValue = evaluateBest([...opponentCombo.cards, ...runoutBoard]).value;
+      if (heroValue > opponentValue)
+        winShareSum += 1;
+      else if (heroValue === opponentValue)
+        winShareSum += 0.5;
+    }
+    return { equity: winShareSum / iterations, iterations };
+  }
+
+  // ../../packages/range-engine/dist/openingRanges.js
+  var OPENING_RANGE_HANDS = {
+    UTG: [
+      "77",
+      "88",
+      "99",
+      "TT",
+      "JJ",
+      "QQ",
+      "KK",
+      "AA",
+      "A9s",
+      "ATs",
+      "AJs",
+      "AQs",
+      "AKs",
+      "KTs",
+      "KJs",
+      "KQs",
+      "QTs",
+      "QJs",
+      "JTs",
+      "T9s",
+      "ATo",
+      "AJo",
+      "AQo",
+      "AKo",
+      "KQo"
+    ],
+    HJ: [
+      "66",
+      "77",
+      "88",
+      "99",
+      "TT",
+      "JJ",
+      "QQ",
+      "KK",
+      "AA",
+      "A7s",
+      "A8s",
+      "A9s",
+      "ATs",
+      "AJs",
+      "AQs",
+      "AKs",
+      "K9s",
+      "KTs",
+      "KJs",
+      "KQs",
+      "Q9s",
+      "QTs",
+      "QJs",
+      "J9s",
+      "JTs",
+      "T9s",
+      "98s",
+      "ATo",
+      "AJo",
+      "AQo",
+      "AKo",
+      "KJo",
+      "KQo",
+      "QJo"
+    ],
+    CO: [
+      "22",
+      "33",
+      "44",
+      "55",
+      "66",
+      "77",
+      "88",
+      "99",
+      "TT",
+      "JJ",
+      "QQ",
+      "KK",
+      "AA",
+      "A2s",
+      "A3s",
+      "A4s",
+      "A5s",
+      "A6s",
+      "A7s",
+      "A8s",
+      "A9s",
+      "ATs",
+      "AJs",
+      "AQs",
+      "AKs",
+      "K7s",
+      "K8s",
+      "K9s",
+      "KTs",
+      "KJs",
+      "KQs",
+      "Q8s",
+      "Q9s",
+      "QTs",
+      "QJs",
+      "J8s",
+      "J9s",
+      "JTs",
+      "T8s",
+      "T9s",
+      "97s",
+      "98s",
+      "87s",
+      "76s",
+      "A8o",
+      "A9o",
+      "ATo",
+      "AJo",
+      "AQo",
+      "AKo",
+      "K9o",
+      "KTo",
+      "KJo",
+      "KQo",
+      "QTo",
+      "QJo",
+      "JTo"
+    ],
+    BTN: [
+      "22",
+      "33",
+      "44",
+      "55",
+      "66",
+      "77",
+      "88",
+      "99",
+      "TT",
+      "JJ",
+      "QQ",
+      "KK",
+      "AA",
+      "A2s",
+      "A3s",
+      "A4s",
+      "A5s",
+      "A6s",
+      "A7s",
+      "A8s",
+      "A9s",
+      "ATs",
+      "AJs",
+      "AQs",
+      "AKs",
+      "K2s",
+      "K3s",
+      "K4s",
+      "K5s",
+      "K6s",
+      "K7s",
+      "K8s",
+      "K9s",
+      "KTs",
+      "KJs",
+      "KQs",
+      "Q4s",
+      "Q5s",
+      "Q6s",
+      "Q7s",
+      "Q8s",
+      "Q9s",
+      "QTs",
+      "QJs",
+      "J6s",
+      "J7s",
+      "J8s",
+      "J9s",
+      "JTs",
+      "T6s",
+      "T7s",
+      "T8s",
+      "T9s",
+      "95s",
+      "96s",
+      "97s",
+      "98s",
+      "85s",
+      "86s",
+      "87s",
+      "75s",
+      "76s",
+      "64s",
+      "65s",
+      "54s",
+      "A2o",
+      "A3o",
+      "A4o",
+      "A5o",
+      "A6o",
+      "A7o",
+      "A8o",
+      "A9o",
+      "ATo",
+      "AJo",
+      "AQo",
+      "AKo",
+      "K7o",
+      "K8o",
+      "K9o",
+      "KTo",
+      "KJo",
+      "KQo",
+      "Q9o",
+      "QTo",
+      "QJo",
+      "J9o",
+      "JTo",
+      "T9o"
+    ],
+    SB: [
+      "22",
+      "33",
+      "44",
+      "55",
+      "66",
+      "77",
+      "88",
+      "99",
+      "TT",
+      "JJ",
+      "QQ",
+      "KK",
+      "AA",
+      "A2s",
+      "A3s",
+      "A4s",
+      "A5s",
+      "A6s",
+      "A7s",
+      "A8s",
+      "A9s",
+      "ATs",
+      "AJs",
+      "AQs",
+      "AKs",
+      "K5s",
+      "K6s",
+      "K7s",
+      "K8s",
+      "K9s",
+      "KTs",
+      "KJs",
+      "KQs",
+      "Q8s",
+      "Q9s",
+      "QTs",
+      "QJs",
+      "J8s",
+      "J9s",
+      "JTs",
+      "T8s",
+      "T9s",
+      "97s",
+      "98s",
+      "87s",
+      "76s",
+      "65s",
+      "A7o",
+      "A8o",
+      "A9o",
+      "ATo",
+      "AJo",
+      "AQo",
+      "AKo",
+      "K9o",
+      "KTo",
+      "KJo",
+      "KQo",
+      "QTo",
+      "QJo",
+      "JTo"
+    ]
+  };
+  function getOpeningRange(position) {
+    if (position === "BB")
+      return rangeFromList([]);
+    return rangeFromList(OPENING_RANGE_HANDS[position]);
+  }
 
   // ../../packages/range-engine/dist/pushFold.js
   var DEFAULT_FOLD_EQUITY = 0.5;
@@ -539,6 +1007,93 @@
       foldEquityUsed: foldEquity,
       isProfitable: ev > 0
     };
+  }
+
+  // ../../packages/range-engine/dist/chenScore.js
+  function chenScore(hand) {
+    const { highRank, lowRank, suited } = hand;
+    let score;
+    if (highRank === 14)
+      score = 10;
+    else if (highRank === 13)
+      score = 8;
+    else if (highRank === 12)
+      score = 7;
+    else if (highRank === 11)
+      score = 6;
+    else if (highRank === 10)
+      score = 5;
+    else
+      score = highRank / 2;
+    if (highRank === lowRank) {
+      score = Math.max(score * 2, 5);
+      return score;
+    }
+    if (suited)
+      score += 2;
+    const gap = highRank - lowRank - 1;
+    if (gap === 1)
+      score -= 1;
+    else if (gap === 2)
+      score -= 2;
+    else if (gap === 3)
+      score -= 4;
+    else if (gap >= 4)
+      score -= 5;
+    if ((gap === 0 || gap === 1) && highRank < 12) {
+      score += 1;
+    }
+    return Math.ceil(score);
+  }
+
+  // ../../packages/range-engine/dist/actionNarrowing.js
+  function rankRangeByStrength(range) {
+    return [...range.keys()].sort((a, b) => chenScore(parseHandType(b)) - chenScore(parseHandType(a)));
+  }
+  function narrowForThreeBet(range, options = {}) {
+    const topFraction = options.topFraction ?? 0.25;
+    if (topFraction <= 0 || topFraction > 1) {
+      throw new Error(`topFraction must be between 0 (exclusive) and 1, got ${topFraction}`);
+    }
+    const ranked = rankRangeByStrength(range);
+    const keepCount = Math.max(1, Math.ceil(ranked.length * topFraction));
+    const kept = new Set(ranked.slice(0, keepCount));
+    const narrowed = /* @__PURE__ */ new Map();
+    for (const [hand, weight] of range) {
+      if (kept.has(hand))
+        narrowed.set(hand, weight);
+    }
+    return narrowed;
+  }
+  function narrowForCall(range, options = {}) {
+    const [lowerPct, upperPct] = options.band ?? [0.4, 0.75];
+    if (lowerPct < 0 || upperPct > 1 || lowerPct >= upperPct) {
+      throw new Error(`Invalid band [${lowerPct}, ${upperPct}]: must satisfy 0 <= lower < upper <= 1`);
+    }
+    const ranked = rankRangeByStrength(range);
+    const lowerIdx = Math.floor(ranked.length * lowerPct);
+    const upperIdx = Math.ceil(ranked.length * upperPct);
+    const kept = new Set(ranked.slice(lowerIdx, upperIdx));
+    const narrowed = /* @__PURE__ */ new Map();
+    for (const [hand, weight] of range) {
+      if (kept.has(hand))
+        narrowed.set(hand, weight);
+    }
+    return narrowed;
+  }
+  function defaultBaselineRange() {
+    return getOpeningRange("BTN");
+  }
+  function estimateOpponentRange(actions, baseline = defaultBaselineRange()) {
+    let range = baseline;
+    for (const action of actions) {
+      if (action === "raise") {
+        range = narrowForThreeBet(range);
+      } else if (action === "call") {
+        range = narrowForCall(range);
+      }
+    }
+    return range;
   }
 
   // src/contentScript.ts
@@ -715,6 +1270,8 @@
   }
   var lastStateJson = null;
   var lastRecommendationRequestKey = null;
+  var previousGameState = null;
+  var actionHistory = emptyActionHistory();
   setInterval(() => {
     const state = readGameState();
     if (!state) return;
@@ -722,6 +1279,8 @@
     if (stateJson !== lastStateJson) {
       console.log("[Poker AI Reader] Game state changed:", JSON.parse(stateJson));
       lastStateJson = stateJson;
+      actionHistory = updateActionHistory(actionHistory, previousGameState, state);
+      previousGameState = state;
       const bigBlindForPreflopCheck = extractBigBlind();
       checkPreflopPushFold(state, bigBlindForPreflopCheck);
       const hero = state.seats.find((s) => s.isYou);
@@ -730,12 +1289,31 @@
           (s) => s.isOccupied && !s.isYou && !s.isFolded
         ).length;
         if (numOpponents >= 1) {
-          const equityResult = calculateEquity(hero.holeCards, state.board, numOpponents, {
-            iterations: 3e3
-          });
-          console.log(
-            `[Poker AI Reader] Hero equity vs ${numOpponents} opponent(s): ${(equityResult.equity * 100).toFixed(1)}%`
-          );
+          let equityResult;
+          if (numOpponents === 1) {
+            const opponent = state.seats.find((s) => s.isOccupied && !s.isYou && !s.isFolded);
+            const opponentActions = (actionHistory.get(opponent.seatNumber) ?? []).map((r) => r.action);
+            const estimatedRange = estimateOpponentRange(opponentActions);
+            try {
+              equityResult = calculateEquityVsRange(hero.holeCards, estimatedRange, state.board, {
+                iterations: 3e3
+              });
+              console.log(
+                `[Poker AI Reader] Hero equity vs estimated range (actions so far: ${opponentActions.length > 0 ? opponentActions.join(", ") : "none yet"}): ${(equityResult.equity * 100).toFixed(1)}%`
+              );
+            } catch (error) {
+              console.warn("[Poker AI Reader] Range-based equity failed, falling back to random hands:", error);
+              equityResult = calculateEquity(hero.holeCards, state.board, numOpponents, { iterations: 3e3 });
+              console.log(
+                `[Poker AI Reader] Hero equity vs ${numOpponents} opponent(s) (random hands, fallback): ${(equityResult.equity * 100).toFixed(1)}%`
+              );
+            }
+          } else {
+            equityResult = calculateEquity(hero.holeCards, state.board, numOpponents, { iterations: 3e3 });
+            console.log(
+              `[Poker AI Reader] Hero equity vs ${numOpponents} opponent(s) (random hands -- multiway, no range model yet): ${(equityResult.equity * 100).toFixed(1)}%`
+            );
+          }
           const amountToCall = calculateAmountToCall(state);
           if (amountToCall > 0 && state.potMainValue > 0) {
             const potOdds = calculatePotOdds(state.potMainValue, amountToCall);

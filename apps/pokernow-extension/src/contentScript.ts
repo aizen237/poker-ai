@@ -1,7 +1,16 @@
-import { assembleGameState, calculateAmountToCall, computeDataConfidence, type RawSeatInput, type RawBoardCardInput } from "@poker-ai/browser-reader";
+import {
+  assembleGameState,
+  calculateAmountToCall,
+  computeDataConfidence,
+  emptyActionHistory,
+  updateActionHistory,
+  type ActionHistory,
+  type RawSeatInput,
+  type RawBoardCardInput,
+} from "@poker-ai/browser-reader";
 import { calculateEquity, calculatePotOdds } from "@poker-ai/poker-engine";
 import type { DecisionPacket } from "@poker-ai/ai-core";
-import { evaluateShove } from "@poker-ai/range-engine";
+import { calculateEquityVsRange, estimateOpponentRange, evaluateShove } from "@poker-ai/range-engine";
 console.log("[Poker AI Reader] Content script loaded on:", window.location.href);
 
 function extractBoardCards(): RawBoardCardInput[] {
@@ -133,6 +142,8 @@ function readGameState() {
   }
 }
 
+type GameState = ReturnType<typeof readGameState> extends infer T ? NonNullable<T> : never;
+
 
 const RELAY_SERVER_URL = "http://localhost:8787/recommendation"
 const POSITION_IS_KNOWN = false; // KNOWN PLACEHOLDER -- flips to true once real dealer-button tracking exists.
@@ -237,6 +248,8 @@ async function requestRecommendation(packet: DecisionPacket, stateDescription: s
 
 let lastStateJson: string | null = null;
 let lastRecommendationRequestKey: string | null = null;
+let previousGameState: GameState | null = null;
+let actionHistory: ActionHistory = emptyActionHistory();
 
 setInterval(() => {
   const state = readGameState();
@@ -246,6 +259,9 @@ setInterval(() => {
   if (stateJson !== lastStateJson) {
     console.log("[Poker AI Reader] Game state changed:", JSON.parse(stateJson));
     lastStateJson = stateJson;
+
+    actionHistory = updateActionHistory(actionHistory, previousGameState, state);
+    previousGameState = state;
 
     const bigBlindForPreflopCheck = extractBigBlind();
     checkPreflopPushFold(state, bigBlindForPreflopCheck);
@@ -257,12 +273,39 @@ setInterval(() => {
       ).length;
 
       if (numOpponents >= 1) {
-        const equityResult = calculateEquity(hero.holeCards, state.board, numOpponents, {
-          iterations: 3000,
-        });
-        console.log(
-          `[Poker AI Reader] Hero equity vs ${numOpponents} opponent(s): ${(equityResult.equity * 100).toFixed(1)}%`,
-        );
+        let equityResult: { equity: number };
+
+        if (numOpponents === 1) {
+          const opponent = state.seats.find((s) => s.isOccupied && !s.isYou && !s.isFolded)!;
+          const opponentActions = (actionHistory.get(opponent.seatNumber) ?? []).map((r) => r.action);
+          const estimatedRange = estimateOpponentRange(opponentActions);
+          try {
+            equityResult = calculateEquityVsRange(hero.holeCards, estimatedRange, state.board, {
+              iterations: 3000,
+            });
+            console.log(
+              `[Poker AI Reader] Hero equity vs estimated range (actions so far: ${
+                opponentActions.length > 0 ? opponentActions.join(", ") : "none yet"
+              }): ${(equityResult.equity * 100).toFixed(1)}%`,
+            );
+          } catch (error) {
+            // Estimated range narrowed to nothing overlapping the known
+            // cards -- fall back to equity vs random rather than crash.
+            console.warn("[Poker AI Reader] Range-based equity failed, falling back to random hands:", error);
+            equityResult = calculateEquity(hero.holeCards, state.board, numOpponents, { iterations: 3000 });
+            console.log(
+              `[Poker AI Reader] Hero equity vs ${numOpponents} opponent(s) (random hands, fallback): ${(equityResult.equity * 100).toFixed(1)}%`,
+            );
+          }
+        } else {
+          // Multiway pots: the range engine doesn't yet support equity
+          // vs multiple distinct opponent ranges at once -- documented
+          // gap, falls back to equity vs random hands for now.
+          equityResult = calculateEquity(hero.holeCards, state.board, numOpponents, { iterations: 3000 });
+          console.log(
+            `[Poker AI Reader] Hero equity vs ${numOpponents} opponent(s) (random hands -- multiway, no range model yet): ${(equityResult.equity * 100).toFixed(1)}%`,
+          );
+        }
 
         const amountToCall = calculateAmountToCall(state);
         if (amountToCall > 0 && state.potMainValue > 0) {
