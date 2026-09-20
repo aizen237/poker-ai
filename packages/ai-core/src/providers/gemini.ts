@@ -7,7 +7,7 @@ import type { AIProvider, AIProviderMetadata, GetRecommendationOptions } from ".
 
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
-const PROMPT_VERSION = "v3-equity-source";
+const PROMPT_VERSION = "v4-decision-policy";
 
 const HAND_CATEGORY_NAMES = [
   "High Card", "Pair", "Two Pair", "Three of a Kind", "Straight",
@@ -39,6 +39,7 @@ function buildPrompt(packet: DecisionPacket): string {
 
   lines.push(`Pot: ${packet.table.potBB}BB. Opponents remaining: ${packet.table.numOpponentsRemaining}.`);
   lines.push(`Facing: ${packet.facingAction.type}${packet.facingAction.amountBB ? ` of ${packet.facingAction.amountBB}BB` : ""}.`);
+  lines.push(`Candidate actions (the only ones on the table right now): ${packet.candidateActions.join(", ")}.`);
 
   const calc = packet.engineCalculations;
   if (calc.equity !== undefined) {
@@ -57,6 +58,10 @@ function buildPrompt(packet: DecisionPacket): string {
   if (calc.outs !== undefined) lines.push(`Outs: ${calc.outs}.`);
   if (calc.boardTexture) {
     lines.push(`Board texture: ${calc.boardTexture.overall} (${calc.boardTexture.suitTexture}, ${calc.boardTexture.pairTexture}, ${calc.boardTexture.connectivity}).`);
+  }
+
+  if (packet.opponentContext?.estimatedRangeDescription) {
+    lines.push(`Opponent read: ${packet.opponentContext.estimatedRangeDescription}`);
   }
 
   if (packet.dataConfidence !== "high") {

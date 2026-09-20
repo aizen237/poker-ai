@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateDecisionPacket } from "./decisionPacket.js";
+import { deriveCandidateActions, validateDecisionPacket } from "./decisionPacket.js";
 
 function validPacket() {
   return {
@@ -25,6 +25,7 @@ function validPacket() {
       type: "bet",
       amountBB: 4,
     },
+    candidateActions: ["FOLD", "CALL", "RAISE", "ALL_IN"],
     engineCalculations: {
       equity: 0.62,
       potOddsBreakevenPercent: 40,
@@ -64,6 +65,7 @@ describe("validateDecisionPacket — accepts valid packets", () => {
         numOpponentsRemaining: 5,
       },
       facingAction: { type: "none" },
+      candidateActions: ["CHECK", "BET", "ALL_IN"],
       engineCalculations: {},
     };
     expect(() => validateDecisionPacket(packet)).not.toThrow();
@@ -179,6 +181,7 @@ describe("validateDecisionPacket — equitySource", () => {
         numOpponentsRemaining: 5,
       },
       facingAction: { type: "none" },
+      candidateActions: ["CHECK", "BET", "ALL_IN"],
       engineCalculations: {},
     };
     expect(() => validateDecisionPacket(packet)).not.toThrow();
@@ -187,6 +190,45 @@ describe("validateDecisionPacket — equitySource", () => {
   it("rejects an invalid equitySource value", () => {
     const packet = validPacket();
     (packet.engineCalculations as Record<string, unknown>).equitySource = "made_up_source";
+    expect(() => validateDecisionPacket(packet)).toThrow();
+  });
+});
+
+
+describe("deriveCandidateActions", () => {
+  it("returns CHECK/BET/ALL_IN when facing nothing", () => {
+    expect(deriveCandidateActions("none")).toEqual(["CHECK", "BET", "ALL_IN"]);
+  });
+
+  it("returns FOLD/CALL/RAISE/ALL_IN when facing a bet", () => {
+    expect(deriveCandidateActions("bet")).toEqual(["FOLD", "CALL", "RAISE", "ALL_IN"]);
+  });
+
+  it("returns FOLD/CALL/RAISE/ALL_IN when facing a raise", () => {
+    expect(deriveCandidateActions("raise")).toEqual(["FOLD", "CALL", "RAISE", "ALL_IN"]);
+  });
+
+  it("returns FOLD/CALL/RAISE/ALL_IN when facing an all-in", () => {
+    expect(deriveCandidateActions("all_in")).toEqual(["FOLD", "CALL", "RAISE", "ALL_IN"]);
+  });
+});
+
+describe("validateDecisionPacket — candidateActions", () => {
+  it("rejects a packet missing candidateActions entirely", () => {
+    const packet = validPacket() as Record<string, unknown>;
+    delete packet.candidateActions;
+    expect(() => validateDecisionPacket(packet)).toThrow();
+  });
+
+  it("rejects an empty candidateActions array", () => {
+    const packet = validPacket();
+    packet.candidateActions = [];
+    expect(() => validateDecisionPacket(packet)).toThrow();
+  });
+
+  it("rejects an unrecognized action string in candidateActions", () => {
+    const packet = validPacket() as Record<string, unknown>;
+    packet.candidateActions = ["FOLD", "SURRENDER"];
     expect(() => validateDecisionPacket(packet)).toThrow();
   });
 });

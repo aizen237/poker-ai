@@ -19,6 +19,7 @@ function samplePacket(): DecisionPacket {
       numOpponentsRemaining: 1,
     },
     facingAction: { type: "none" },
+    candidateActions: ["CHECK", "BET", "ALL_IN"],
     engineCalculations: {},
     dataConfidence: "high",
   };

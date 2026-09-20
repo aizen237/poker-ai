@@ -40,6 +40,24 @@ const EquitySourceSchema = z.enum(["estimated_range", "random_hands", "unknown"]
  * exists yet before the AI is asked to reason, outs don't apply on the
  * river, board texture doesn't exist preflop).
  */
+
+const CandidateActionSchema = z.enum(["FOLD", "CHECK", "CALL", "BET", "RAISE", "ALL_IN"]);
+
+/**
+ * Pure derivation from facingAction.type -- always call this rather than
+ * hand-writing the list at each call site, so every caller stays in sync
+ * if the legal-action shape ever changes. Deliberately coarse (not
+ * stack-aware, e.g. RAISE is listed even when hero is too short to
+ * actually raise) -- exact legality is validateActionLegality's job on
+ * the relay server; this just tells the AI which category of actions is
+ * on the table before it reasons, per Rule 4's "organize evidence,
+ * don't make the model guess" philosophy.
+ */
+export function deriveCandidateActions(facingActionType: z.infer<typeof FacingActionSchema>): z.infer<typeof CandidateActionSchema>[] {
+  const facingBet = facingActionType === "bet" || facingActionType === "raise" || facingActionType === "all_in";
+  return facingBet ? ["FOLD", "CALL", "RAISE", "ALL_IN"] : ["CHECK", "BET", "ALL_IN"];
+}
+
 export const DecisionPacketSchema = z.object({
   hero: z.object({
     holeCards: z.tuple([CardSchema, CardSchema]),
@@ -58,6 +76,9 @@ export const DecisionPacketSchema = z.object({
     type: FacingActionSchema,
     amountBB: z.number().nonnegative().optional(),
   }),
+
+  /** Derived via deriveCandidateActions() -- see its doc comment above. */
+  candidateActions: z.array(CandidateActionSchema).min(1),
 
   engineCalculations: z.object({
     equity: z.number().min(0).max(1).optional(),

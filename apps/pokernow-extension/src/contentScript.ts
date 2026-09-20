@@ -8,8 +8,15 @@ import {
   type RawSeatInput,
   type RawBoardCardInput,
 } from "@poker-ai/browser-reader";
-import { calculateEquity, calculatePotOdds } from "@poker-ai/poker-engine";
-import type { DecisionPacket } from "@poker-ai/ai-core";
+import {
+  calculateCallEV,
+  calculateEquity,
+  calculateOuts,
+  calculatePotOdds,
+  calculateSPR,
+  classifyBoardTexture,
+} from "@poker-ai/poker-engine";
+import { deriveCandidateActions, type DecisionPacket } from "@poker-ai/ai-core";
 import { calculateEquityVsRange, estimateOpponentRange, evaluateShove } from "@poker-ai/range-engine";
 console.log("[Poker AI Reader] Content script loaded on:", window.location.href);
 
@@ -148,22 +155,35 @@ type GameState = ReturnType<typeof readGameState> extends infer T ? NonNullable<
 const RELAY_SERVER_URL = "http://localhost:8787/recommendation"
 const POSITION_IS_KNOWN = false; // KNOWN PLACEHOLDER -- flips to true once real dealer-button tracking exists.
 
+interface BuildDecisionPacketInput {
+  state: GameState;
+  amountToCall: number;
+  equity: number;
+  equitySource: DecisionPacket["engineCalculations"]["equitySource"];
+  bigBlind: number;
+  bigBlindWasDefaulted: boolean;
+  /** Heads-up only -- see the numOpponents branch below. */
+  opponentActionsDescription?: string | undefined;
+}
+
 /**
- * Builds a full DecisionPacket from the live game state. KNOWN GAP,
- * documented not hidden: hero's real position (BTN/CO/etc.) isn't
- * computed yet -- that requires tracking the dealer button's seat and
- * hero's seat relative to it, which isn't built. Using "BTN" as a fixed
- * placeholder for now so the AI receives *a* valid position rather than
- * an invalid one, but this is not yet a trustworthy field.
+ * Builds a full DecisionPacket from the live game state. This is the
+ * "structured decision-policy layer": every deterministic fact the AI
+ * needs -- equity, pot odds, EV, SPR, outs, board texture, candidate
+ * actions, an opponent read -- is computed and organized HERE, once, so
+ * the AI never has to (or has to guess at) any of it itself. Each
+ * engineCalculations field is only computed when its underlying
+ * function's own precondition actually holds (e.g. outs don't exist on
+ * the river) -- left undefined otherwise, never faked.
+ *
+ * KNOWN GAP, documented not hidden: hero's real position (BTN/CO/etc.)
+ * isn't computed yet -- that requires tracking the dealer button's seat
+ * and hero's seat relative to it, which isn't built. Using "BTN" as a
+ * fixed placeholder for now so the AI receives *a* valid position rather
+ * than an invalid one, but this is not yet a trustworthy field.
  */
-function buildDecisionPacket(
-  state: ReturnType<typeof readGameState> extends infer T ? NonNullable<T> : never,
-  amountToCall: number,
-  equity: number,
-  equitySource: DecisionPacket["engineCalculations"]["equitySource"],
-  bigBlind: number,
-  bigBlindWasDefaulted: boolean,
-): DecisionPacket {
+function buildDecisionPacket(input: BuildDecisionPacketInput): DecisionPacket {
+  const { state, amountToCall, equity, equitySource, bigBlind, bigBlindWasDefaulted, opponentActionsDescription } = input;
   const hero = state.seats.find((s) => s.isYou)!;
   const numOpponentsRemaining = state.seats.filter(
     (s) => s.isOccupied && !s.isYou && !s.isFolded,
@@ -178,6 +198,30 @@ function buildDecisionPacket(
     `[Poker AI Reader] Data confidence: ${confidence.level}${confidence.reasons.length > 0 ? ` (${confidence.reasons.join("; ")})` : ""}`,
   );
 
+  const facingActionType = amountToCall > 0 ? "bet" : "none";
+
+  let potOddsBreakevenPercent: number | undefined;
+  let callEV: number | undefined;
+  if (amountToCall > 0 && state.potMainValue > 0) {
+    potOddsBreakevenPercent = calculatePotOdds(state.potMainValue, amountToCall).breakevenEquityPercent;
+    callEV = calculateCallEV(equity, state.potMainValue, amountToCall).ev;
+  }
+
+  let spr: number | undefined;
+  if (hero.stack !== null && state.potMainValue > 0) {
+    spr = calculateSPR(hero.stack, state.potMainValue);
+  }
+
+  let outs: number | undefined;
+  if (state.board.length === 3 || state.board.length === 4) {
+    outs = calculateOuts(hero.holeCards, state.board).count;
+  }
+
+  let boardTexture: DecisionPacket["engineCalculations"]["boardTexture"];
+  if (state.board.length >= 3) {
+    boardTexture = classifyBoardTexture(state.board);
+  }
+
   return {
     hero: {
       holeCards: hero.holeCards as [import("@poker-ai/shared").Card, import("@poker-ai/shared").Card],
@@ -191,13 +235,20 @@ function buildDecisionPacket(
       numOpponentsRemaining,
     },
     facingAction: {
-      type: amountToCall > 0 ? "bet" : "none",
+      type: facingActionType,
       ...(amountToCall > 0 ? { amountBB: bigBlind > 0 ? amountToCall / bigBlind : amountToCall } : {}),
     },
+    candidateActions: deriveCandidateActions(facingActionType),
     engineCalculations: {
       equity,
       equitySource,
+      potOddsBreakevenPercent,
+      callEV,
+      spr,
+      outs,
+      boardTexture,
     },
+    opponentContext: opponentActionsDescription ? { estimatedRangeDescription: opponentActionsDescription } : undefined,
     dataConfidence: confidence.level,
   };
 }
@@ -277,10 +328,15 @@ setInterval(() => {
       if (numOpponents >= 1) {
         let equityResult: { equity: number };
         let equitySource: DecisionPacket["engineCalculations"]["equitySource"];
+        let opponentActionsDescription: string | undefined;
 
         if (numOpponents === 1) {
           const opponent = state.seats.find((s) => s.isOccupied && !s.isYou && !s.isFolded)!;
           const opponentActions = (actionHistory.get(opponent.seatNumber) ?? []).map((r) => r.action);
+          opponentActionsDescription =
+            opponentActions.length > 0
+              ? `Opponent's actions this hand so far (in order): ${opponentActions.join(", ")}.`
+              : "Opponent has taken no actions yet this hand.";
           const estimatedRange = estimateOpponentRange(opponentActions);
           try {
             equityResult = calculateEquityVsRange(hero.holeCards, estimatedRange, state.board, {
@@ -305,7 +361,8 @@ setInterval(() => {
         } else {
           // Multiway pots: the range engine doesn't yet support equity
           // vs multiple distinct opponent ranges at once -- documented
-          // gap, falls back to equity vs random hands for now.
+          // gap, falls back to equity vs random hands for now. No
+          // opponent-action description either, for the same reason.
           equityResult = calculateEquity(hero.holeCards, state.board, numOpponents, { iterations: 3000 });
           equitySource = "random_hands";
           console.log(
@@ -335,7 +392,15 @@ setInterval(() => {
             lastRecommendationRequestKey = requestKey;
             const bigBlind = extractBigBlind();
             const bigBlindWasDefaulted = !isBigBlindReadable();
-            const packet = buildDecisionPacket(state, amountToCall, equityResult.equity, equitySource, bigBlind, bigBlindWasDefaulted);
+            const packet = buildDecisionPacket({
+              state,
+              amountToCall,
+              equity: equityResult.equity,
+              equitySource,
+              bigBlind,
+              bigBlindWasDefaulted,
+              opponentActionsDescription,
+            });
             console.log(`[Poker AI Reader] Big blind detected: ${bigBlind}. Hero stackBB: ${packet.hero.stackBB.toFixed(2)}. Facing amountBB: ${packet.facingAction.amountBB?.toFixed(2) ?? "n/a"}`);
             console.log(
               `[Poker AI Reader] It's hero's turn -- requesting AI recommendation for street=${state.street}, board=${JSON.stringify(state.board)}, potMainValue=${state.potMainValue}`,
