@@ -281,7 +281,17 @@ function checkPreflopPushFold(state: ReturnType<typeof readGameState> extends in
   );
 }
 
-async function requestRecommendation(packet: DecisionPacket, stateDescription: string) {
+/**
+ * requestKey is the value lastRecommendationRequestKey held at the
+ * moment THIS request was sent. Fixes a real race: the existing dedup
+ * only stops the same decision point from firing twice -- it does
+ * nothing to stop an older, still-in-flight response from being treated
+ * as current once a NEWER decision point has already taken over (e.g.
+ * hero's turn came up again before the previous street's response came
+ * back). Comparing against the live lastRecommendationRequestKey at
+ * resolve-time, not send-time, is what actually catches this.
+ */
+async function requestRecommendation(packet: DecisionPacket, stateDescription: string, requestKey: string) {
   try {
     const response = await fetch(RELAY_SERVER_URL, {
       method: "POST",
@@ -289,6 +299,14 @@ async function requestRecommendation(packet: DecisionPacket, stateDescription: s
       body: JSON.stringify({ mode: "fast", decisionPacket: packet }),
     });
     const data = await response.json();
+
+    if (requestKey !== lastRecommendationRequestKey) {
+      console.warn(
+        `[Poker AI Reader] Discarding stale AI response (for: ${stateDescription}) -- a newer decision point is already current.`,
+      );
+      return;
+    }
+
     if (data.ok) {
       console.log(`[Poker AI Reader] AI recommendation (for: ${stateDescription}):`, data.result);
     } else {
@@ -405,7 +423,7 @@ setInterval(() => {
             console.log(
               `[Poker AI Reader] It's hero's turn -- requesting AI recommendation for street=${state.street}, board=${JSON.stringify(state.board)}, potMainValue=${state.potMainValue}`,
             );
-            requestRecommendation(packet, `${state.street} | board: ${JSON.stringify(state.board)} | pot: ${state.potMainValue}`);
+            requestRecommendation(packet, `${state.street} | board: ${JSON.stringify(state.board)} | pot: ${state.potMainValue}`, requestKey);
           }
         }
       }

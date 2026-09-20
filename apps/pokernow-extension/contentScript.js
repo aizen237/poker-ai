@@ -5547,7 +5547,7 @@
       `[Poker AI Reader] PREFLOP push/fold check (${stackBB.toFixed(1)}BB effective): ${shove.isProfitable ? "SHOVE profitable" : "SHOVE not profitable"} (EV: ${shove.ev.toFixed(2)}BB, equity if called: ${(shove.equityIfCalled * 100).toFixed(1)}%, assumed fold equity: ${(shove.foldEquityUsed * 100).toFixed(0)}%)`
     );
   }
-  async function requestRecommendation(packet, stateDescription) {
+  async function requestRecommendation(packet, stateDescription, requestKey) {
     try {
       const response = await fetch(RELAY_SERVER_URL, {
         method: "POST",
@@ -5555,6 +5555,12 @@
         body: JSON.stringify({ mode: "fast", decisionPacket: packet })
       });
       const data = await response.json();
+      if (requestKey !== lastRecommendationRequestKey) {
+        console.warn(
+          `[Poker AI Reader] Discarding stale AI response (for: ${stateDescription}) -- a newer decision point is already current.`
+        );
+        return;
+      }
       if (data.ok) {
         console.log(`[Poker AI Reader] AI recommendation (for: ${stateDescription}):`, data.result);
       } else {
@@ -5644,7 +5650,7 @@
               console.log(
                 `[Poker AI Reader] It's hero's turn -- requesting AI recommendation for street=${state.street}, board=${JSON.stringify(state.board)}, potMainValue=${state.potMainValue}`
               );
-              requestRecommendation(packet, `${state.street} | board: ${JSON.stringify(state.board)} | pot: ${state.potMainValue}`);
+              requestRecommendation(packet, `${state.street} | board: ${JSON.stringify(state.board)} | pot: ${state.potMainValue}`, requestKey);
             }
           }
         }
