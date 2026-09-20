@@ -7,3 +7,4 @@ export * from "./providers/gemini.js";
 export * from "./modelRegistry.js";
 export * from "./modelRouter.js";
 export * from "./actionLegality.js";
+export * from "./consistencyCheck.js";

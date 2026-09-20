@@ -20,6 +20,22 @@ export enum HandCategory {
 }
 
 /**
+ * Display names indexed by HandCategory's numeric value -- the single
+ * canonical source, since both AI providers' prompts and the reasoning
+ * consistency checker all need the exact same mapping.
+ */
+export const HAND_CATEGORY_NAMES = [
+  "High Card",
+  "Pair",
+  "Two Pair",
+  "Three of a Kind",
+  "Straight",
+  "Flush",
+  "Full House",
+  "Four of a Kind",
+  "Straight Flush",
+] as const;
+/**
  * A fully evaluated 5-card hand, ready to compare against another.
  *
  * `value` packs category + up to 5 tiebreaker ranks into a single number,

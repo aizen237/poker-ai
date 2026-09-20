@@ -10,6 +10,7 @@ import {
   getModelsByProvider,
   validateDecisionPacket,
   validateActionLegality,
+  validateReasoningConsistency,
   type RouterOptions,
 } from "@poker-ai/ai-core";
 
@@ -82,10 +83,20 @@ app.post("/recommendation", async (req, res) => {
       console.warn(`[Relay Server] AI recommendation rejected as illegal: ${legality.reason}`);
     }
 
+    // Checked against whatever is actually being returned (post-legality
+    // fallback, if any) -- non-blocking, unlike legality: a contradiction
+    // here doesn't mean the action is wrong, just that the AI's stated
+    // reasoning doesn't match a fact it was given. Surfaced, not acted on.
+    const consistency = validateReasoningConsistency(legality.effectiveRecommendation, packet);
+    if (!consistency.isConsistent) {
+      console.warn(`[Relay Server] AI reasoning may be inconsistent with the facts: ${consistency.warnings.join(" ")}`);
+    }
+
     res.json({
       ok: true,
       result: legality.effectiveRecommendation,
       ...(legality.isLegal ? {} : { blocked: true, blockedReason: "illegal_action", originalReason: legality.reason }),
+      ...(consistency.isConsistent ? {} : { consistencyWarnings: consistency.warnings }),
     });
   } catch (error) {
     console.error("[Relay Server] Error handling /recommendation:", error);

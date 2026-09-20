@@ -1,5 +1,5 @@
 import { formatCards } from "@poker-ai/shared";
-import { evaluateBest } from "@poker-ai/poker-engine";
+import { evaluateBest, HAND_CATEGORY_NAMES } from "@poker-ai/poker-engine";
 import { buildAuditRecord } from "../auditRecord.js";
 import type { DecisionPacket } from "../decisionPacket.js";
 import { parseRecommendation, type Recommendation } from "../recommendation.js";
@@ -8,11 +8,6 @@ import type { AIProvider, AIProviderMetadata, GetRecommendationOptions } from ".
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 const PROMPT_VERSION = "v4-decision-policy";
-
-const HAND_CATEGORY_NAMES = [
-  "High Card", "Pair", "Two Pair", "Three of a Kind", "Straight",
-  "Flush", "Full House", "Four of a Kind", "Straight Flush",
-];
 
 /**
  * Builds the prompt from a decision packet. Deliberately concise and
