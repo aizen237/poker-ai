@@ -20,6 +20,113 @@ import { deriveCandidateActions, type DecisionPacket } from "@poker-ai/ai-core";
 import { calculateEquityVsRange, estimateOpponentRange, evaluateShove } from "@poker-ai/range-engine";
 console.log("[Poker AI Reader] Content script loaded on:", window.location.href);
 
+// ---------------------------------------------------------------------
+// On-page overlay: replaces "go check devtools" with a small visible
+// panel on the table itself. Deliberately minimal -- one fixed-position
+// box, re-rendered in full from a single state object each time
+// anything changes, rather than hand-patched DOM nodes. pointer-events
+// is off on the container so it never blocks clicks on the real table
+// underneath it.
+// ---------------------------------------------------------------------
+
+type AIStatus = "idle" | "waiting" | "received" | "blocked" | "error";
+
+interface OverlayState {
+  street: string;
+  equityLine: string | null;
+  potOddsLine: string | null;
+  preflopLine: string | null;
+  aiStatus: AIStatus;
+  aiResult: { action: string; confidence: number; reasoning: string } | null;
+  aiWarnings: string[];
+}
+
+const overlayState: OverlayState = {
+  street: "-",
+  equityLine: null,
+  potOddsLine: null,
+  preflopLine: null,
+  aiStatus: "idle",
+  aiResult: null,
+  aiWarnings: [],
+};
+
+const OVERLAY_ID = "poker-ai-reader-overlay";
+
+function ensureOverlay(): HTMLElement {
+  const existing = document.getElementById(OVERLAY_ID);
+  if (existing) return existing;
+
+  const el = document.createElement("div");
+  el.id = OVERLAY_ID;
+  el.style.cssText = `
+    position: fixed;
+    top: 12px;
+    right: 12px;
+    z-index: 999999;
+    width: 280px;
+    max-height: 90vh;
+    overflow-y: auto;
+    background: rgba(20, 20, 24, 0.92);
+    color: #eee;
+    font-family: -apple-system, "Segoe UI", sans-serif;
+    font-size: 12px;
+    line-height: 1.4;
+    border-radius: 8px;
+    padding: 10px 12px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+    pointer-events: none;
+  `.trim();
+  document.body.appendChild(el);
+  return el;
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+const AI_STATUS_COLORS: Record<AIStatus, string> = {
+  idle: "#888888",
+  waiting: "#e0a030",
+  received: "#4caf50",
+  blocked: "#e05050",
+  error: "#e05050",
+};
+
+function renderOverlay() {
+  const el = ensureOverlay();
+  const s = overlayState;
+  const parts: string[] = [];
+
+  parts.push(`<div style="font-weight:600; margin-bottom:6px; color:#9ad;">Poker AI Reader</div>`);
+  parts.push(`<div>Street: <b>${escapeHtml(s.street)}</b></div>`);
+  if (s.equityLine) parts.push(`<div>${escapeHtml(s.equityLine)}</div>`);
+  if (s.potOddsLine) parts.push(`<div>${escapeHtml(s.potOddsLine)}</div>`);
+  if (s.preflopLine) {
+    parts.push(
+      `<div style="margin-top:6px; padding-top:6px; border-top:1px solid #444;">${escapeHtml(s.preflopLine)}</div>`,
+    );
+  }
+
+  parts.push(`<div style="margin-top:8px; padding-top:8px; border-top:1px solid #444;">`);
+  parts.push(
+    `<div style="color:${AI_STATUS_COLORS[s.aiStatus]}; font-weight:600;">${escapeHtml(s.aiStatus.toUpperCase())}</div>`,
+  );
+  if (s.aiResult) {
+    parts.push(`<div style="font-size:16px; font-weight:700; margin:4px 0;">${escapeHtml(s.aiResult.action)}</div>`);
+    parts.push(`<div>Confidence: ${(s.aiResult.confidence * 100).toFixed(0)}%</div>`);
+    parts.push(`<div style="margin-top:4px; color:#ccc;">${escapeHtml(s.aiResult.reasoning)}</div>`);
+  }
+  if (s.aiWarnings.length > 0) {
+    parts.push(
+      `<div style="margin-top:6px; color:#e0a030;">${s.aiWarnings.map((w) => escapeHtml(w)).join("<br/>")}</div>`,
+    );
+  }
+  parts.push(`</div>`);
+
+  el.innerHTML = parts.join("");
+}
+
 function extractBoardCards(): RawBoardCardInput[] {
   const boardContainer = document.querySelector(".table-cards");
   if (!boardContainer) return [];
@@ -274,11 +381,12 @@ function checkPreflopPushFold(state: ReturnType<typeof readGameState> extends in
   if (potBB <= 0) return;
 
   const shove = evaluateShove(hero.holeCards, stackBB, potBB, { iterations: 2000 });
-  console.log(
-    `[Poker AI Reader] PREFLOP push/fold check (${stackBB.toFixed(1)}BB effective): ` +
-      `${shove.isProfitable ? "SHOVE profitable" : "SHOVE not profitable"} (EV: ${shove.ev.toFixed(2)}BB, ` +
-      `equity if called: ${(shove.equityIfCalled * 100).toFixed(1)}%, assumed fold equity: ${(shove.foldEquityUsed * 100).toFixed(0)}%)`,
-  );
+  const preflopLine = `PREFLOP (${stackBB.toFixed(1)}BB effective): ${
+    shove.isProfitable ? "SHOVE profitable" : "SHOVE not profitable"
+  } (EV: ${shove.ev.toFixed(2)}BB, equity if called: ${(shove.equityIfCalled * 100).toFixed(1)}%, assumed fold equity: ${(shove.foldEquityUsed * 100).toFixed(0)}%)`;
+  console.log(`[Poker AI Reader] ${preflopLine}`);
+  overlayState.preflopLine = preflopLine;
+  renderOverlay();
 }
 
 /**
@@ -289,7 +397,9 @@ function checkPreflopPushFold(state: ReturnType<typeof readGameState> extends in
  * as current once a NEWER decision point has already taken over (e.g.
  * hero's turn came up again before the previous street's response came
  * back). Comparing against the live lastRecommendationRequestKey at
- * resolve-time, not send-time, is what actually catches this.
+ * resolve-time, not send-time, is what actually catches this -- and the
+ * overlay reuses the exact same check, so it can never show a stale
+ * result either.
  */
 async function requestRecommendation(packet: DecisionPacket, stateDescription: string, requestKey: string) {
   try {
@@ -309,11 +419,31 @@ async function requestRecommendation(packet: DecisionPacket, stateDescription: s
 
     if (data.ok) {
       console.log(`[Poker AI Reader] AI recommendation (for: ${stateDescription}):`, data.result);
+      overlayState.aiResult = {
+        action: data.result.action,
+        confidence: data.result.confidence,
+        reasoning: data.result.reasoning,
+      };
+      overlayState.aiWarnings = [
+        ...(data.blocked ? [`Blocked: ${data.blockedReason}${data.originalReason ? ` -- ${data.originalReason}` : ""}`] : []),
+        ...(data.consistencyWarnings ?? []),
+      ];
+      overlayState.aiStatus = data.blocked ? "blocked" : "received";
     } else {
       console.error(`[Poker AI Reader] Relay server returned an error (for: ${stateDescription}):`, data.error);
+      overlayState.aiStatus = "error";
+      overlayState.aiResult = null;
+      overlayState.aiWarnings = [String(data.error)];
     }
+    renderOverlay();
   } catch (error) {
     console.error(`[Poker AI Reader] Failed to reach relay server (for: ${stateDescription}):`, error);
+    if (requestKey === lastRecommendationRequestKey) {
+      overlayState.aiStatus = "error";
+      overlayState.aiResult = null;
+      overlayState.aiWarnings = ["Failed to reach relay server -- is it running?"];
+      renderOverlay();
+    }
   }
 }
 
@@ -330,6 +460,10 @@ setInterval(() => {
   if (stateJson !== lastStateJson) {
     console.log("[Poker AI Reader] Game state changed:", JSON.parse(stateJson));
     lastStateJson = stateJson;
+
+    overlayState.street = state.street;
+    overlayState.preflopLine = null;
+    renderOverlay();
 
     actionHistory = updateActionHistory(actionHistory, previousGameState, state);
     previousGameState = state;
@@ -388,15 +522,20 @@ setInterval(() => {
           );
         }
 
+        overlayState.equityLine = `Equity: ${(equityResult.equity * 100).toFixed(1)}% (${equitySource === "estimated_range" ? "vs estimated range" : "vs random hands"})`;
+
         const amountToCall = calculateAmountToCall(state);
         if (amountToCall > 0 && state.potMainValue > 0) {
           const potOdds = calculatePotOdds(state.potMainValue, amountToCall);
           console.log(
             `[Poker AI Reader] Amount to call: ${amountToCall}. Breakeven equity needed: ${potOdds.breakevenEquityPercent.toFixed(1)}%`,
           );
+          overlayState.potOddsLine = `To call: ${amountToCall} (breakeven: ${potOdds.breakevenEquityPercent.toFixed(1)}%)`;
         } else if (amountToCall === 0) {
           console.log("[Poker AI Reader] No bet facing hero (check or already matched) -- pot odds not applicable.");
+          overlayState.potOddsLine = null;
         }
+        renderOverlay();
 
         // Only actually call the AI when it's genuinely hero's turn --
         // otherwise this would fire a real API request on every single
@@ -408,6 +547,11 @@ setInterval(() => {
           const requestKey = `${state.street}:${state.board.length}:${amountToCall}:${state.potMainValue}`;
           if (requestKey !== lastRecommendationRequestKey) {
             lastRecommendationRequestKey = requestKey;
+            overlayState.aiStatus = "waiting";
+            overlayState.aiResult = null;
+            overlayState.aiWarnings = [];
+            renderOverlay();
+
             const bigBlind = extractBigBlind();
             const bigBlindWasDefaulted = !isBigBlindReadable();
             const packet = buildDecisionPacket({
