@@ -299,6 +299,40 @@
     return next;
   }
 
+  // ../../packages/browser-reader/dist/position.js
+  function assignPositions(seats, dealerSeatNumber) {
+    const occupied = seats.filter((s) => s.isOccupied).sort((a, b) => a.seatNumber - b.seatNumber);
+    const positions = /* @__PURE__ */ new Map();
+    if (occupied.length === 0)
+      return positions;
+    const dealerIndex = occupied.findIndex((s) => s.seatNumber === dealerSeatNumber);
+    if (dealerIndex === -1) {
+      return positions;
+    }
+    const clockwise = [...occupied.slice(dealerIndex), ...occupied.slice(0, dealerIndex)];
+    const n = clockwise.length;
+    clockwise.forEach((seat, i) => {
+      let position;
+      if (i === 0) {
+        position = "BTN";
+      } else if (n === 2) {
+        position = "BB";
+      } else if (i === 1) {
+        position = "SB";
+      } else if (i === 2) {
+        position = "BB";
+      } else if (i === n - 1) {
+        position = "CO";
+      } else if (i === n - 2 && n >= 6) {
+        position = "HJ";
+      } else {
+        position = "UTG";
+      }
+      positions.set(seat.seatNumber, position);
+    });
+    return positions;
+  }
+
   // ../../packages/poker-engine/dist/types.js
   var HandCategory;
   (function(HandCategory2) {
@@ -5513,6 +5547,14 @@
       total: totalEl?.textContent ?? null
     };
   }
+  function extractDealerSeatNumber() {
+    const dealerEl = document.querySelector('[class*="dealer-position-"]');
+    if (!dealerEl) return null;
+    const match = [...dealerEl.classList].find((c) => c.startsWith("dealer-position-"));
+    if (!match) return null;
+    const seatNumber = Number(match.replace("dealer-position-", ""));
+    return Number.isNaN(seatNumber) ? null : seatNumber;
+  }
   function extractBigBlind() {
     const blindValueEls = document.querySelectorAll(".blind-value .chips-value .normal-value");
     const bigBlindText = blindValueEls[1]?.textContent;
@@ -5545,9 +5587,18 @@
     }
   }
   var RELAY_SERVER_URL = "http://localhost:8787/recommendation";
-  var POSITION_IS_KNOWN = false;
   function buildDecisionPacket(input) {
-    const { state, amountToCall, equity, equitySource, bigBlind, bigBlindWasDefaulted, opponentActionsDescription } = input;
+    const {
+      state,
+      amountToCall,
+      equity,
+      equitySource,
+      bigBlind,
+      bigBlindWasDefaulted,
+      heroPosition,
+      isPositionKnown,
+      opponentActionsDescription
+    } = input;
     const hero = state.seats.find((s) => s.isYou);
     const numOpponentsRemaining = state.seats.filter(
       (s) => s.isOccupied && !s.isYou && !s.isFolded
@@ -5555,7 +5606,7 @@
     const confidence = computeDataConfidence(state, {
       amountToCall,
       bigBlindWasDefaulted,
-      isPositionKnown: POSITION_IS_KNOWN
+      isPositionKnown
     });
     console.log(
       `[Poker AI Reader] Data confidence: ${confidence.level}${confidence.reasons.length > 0 ? ` (${confidence.reasons.join("; ")})` : ""}`
@@ -5582,8 +5633,7 @@
     return {
       hero: {
         holeCards: hero.holeCards,
-        position: "BTN",
-        // KNOWN PLACEHOLDER -- see POSITION_IS_KNOWN above
+        position: heroPosition,
         stackBB: bigBlind > 0 ? (hero.stack ?? 0) / bigBlind : hero.stack ?? 0
       },
       table: {
@@ -5686,6 +5736,8 @@
       const bigBlindForPreflopCheck = extractBigBlind();
       checkPreflopPushFold(state, bigBlindForPreflopCheck);
       const hero = state.seats.find((s) => s.isYou);
+      const dealerSeatNumber = extractDealerSeatNumber();
+      const positions = dealerSeatNumber !== null ? assignPositions(state.seats, dealerSeatNumber) : /* @__PURE__ */ new Map();
       if (hero && hero.holeCards.length === 2 && state.street !== "preflop") {
         const numOpponents = state.seats.filter(
           (s) => s.isOccupied && !s.isYou && !s.isFolded
@@ -5698,7 +5750,8 @@
             const opponent = state.seats.find((s) => s.isOccupied && !s.isYou && !s.isFolded);
             const opponentActions = (actionHistory.get(opponent.seatNumber) ?? []).map((r) => r.action);
             opponentActionsDescription = opponentActions.length > 0 ? `Opponent's actions this hand so far (in order): ${opponentActions.join(", ")}.` : "Opponent has taken no actions yet this hand.";
-            const estimatedRange = estimateOpponentRange(opponentActions);
+            const opponentPosition = positions.get(opponent.seatNumber);
+            const estimatedRange = opponentPosition ? estimateOpponentRange(opponentActions, getOpeningRange(opponentPosition)) : estimateOpponentRange(opponentActions);
             try {
               equityResult = calculateEquityVsRange(hero.holeCards, estimatedRange, state.board, {
                 iterations: 3e3
@@ -5752,6 +5805,8 @@
                 equitySource,
                 bigBlind,
                 bigBlindWasDefaulted,
+                heroPosition: positions.get(hero.seatNumber) ?? "BTN",
+                isPositionKnown: positions.has(hero.seatNumber),
                 opponentActionsDescription
               });
               console.log(`[Poker AI Reader] Big blind detected: ${bigBlind}. Hero stackBB: ${packet.hero.stackBB.toFixed(2)}. Facing amountBB: ${packet.facingAction.amountBB?.toFixed(2) ?? "n/a"}`);

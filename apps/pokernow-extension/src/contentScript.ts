@@ -1,10 +1,12 @@
 import {
   assembleGameState,
+  assignPositions,
   calculateAmountToCall,
   computeDataConfidence,
   emptyActionHistory,
   updateActionHistory,
   type ActionHistory,
+  type Position,
   type RawSeatInput,
   type RawBoardCardInput,
 } from "@poker-ai/browser-reader";
@@ -17,7 +19,7 @@ import {
   classifyBoardTexture,
 } from "@poker-ai/poker-engine";
 import { deriveCandidateActions, type DecisionPacket } from "@poker-ai/ai-core";
-import { calculateEquityVsRange, estimateOpponentRange, evaluateShove } from "@poker-ai/range-engine";
+import { calculateEquityVsRange, estimateOpponentRange, evaluateShove, getOpeningRange } from "@poker-ai/range-engine";
 console.log("[Poker AI Reader] Content script loaded on:", window.location.href);
 
 // ---------------------------------------------------------------------
@@ -215,6 +217,15 @@ function extractPotValues(): { main: string; total: string | null } {
   };
 }
 
+function extractDealerSeatNumber(): number | null {
+  const dealerEl = document.querySelector('[class*="dealer-position-"]');
+  if (!dealerEl) return null;
+  const match = [...dealerEl.classList].find((c) => c.startsWith("dealer-position-"));
+  if (!match) return null;
+  const seatNumber = Number(match.replace("dealer-position-", ""));
+  return Number.isNaN(seatNumber) ? null : seatNumber;
+}
+
 function extractBigBlind(): number {
   const blindValueEls = document.querySelectorAll(".blind-value .chips-value .normal-value");
   // First is small blind, second is big blind, per confirmed DOM structure.
@@ -260,7 +271,6 @@ type GameState = ReturnType<typeof readGameState> extends infer T ? NonNullable<
 
 
 const RELAY_SERVER_URL = "http://localhost:8787/recommendation"
-const POSITION_IS_KNOWN = false; // KNOWN PLACEHOLDER -- flips to true once real dealer-button tracking exists.
 
 interface BuildDecisionPacketInput {
   state: GameState;
@@ -269,6 +279,9 @@ interface BuildDecisionPacketInput {
   equitySource: DecisionPacket["engineCalculations"]["equitySource"];
   bigBlind: number;
   bigBlindWasDefaulted: boolean;
+  /** From assignPositions() -- "BTN" fallback and isPositionKnown: false when the dealer button couldn't be read this tick. */
+  heroPosition: Position;
+  isPositionKnown: boolean;
   /** Heads-up only -- see the numOpponents branch below. */
   opponentActionsDescription?: string | undefined;
 }
@@ -283,14 +296,24 @@ interface BuildDecisionPacketInput {
  * function's own precondition actually holds (e.g. outs don't exist on
  * the river) -- left undefined otherwise, never faked.
  *
- * KNOWN GAP, documented not hidden: hero's real position (BTN/CO/etc.)
- * isn't computed yet -- that requires tracking the dealer button's seat
- * and hero's seat relative to it, which isn't built. Using "BTN" as a
- * fixed placeholder for now so the AI receives *a* valid position rather
- * than an invalid one, but this is not yet a trustworthy field.
+ * Hero's real position now comes from assignPositions() (dealer-button
+ * detection), passed in as heroPosition/isPositionKnown -- "BTN" is
+ * still used as a fallback label on the rare tick where the button
+ * couldn't be read, but isPositionKnown correctly reflects that it's a
+ * guess, not a fixed placeholder for every tick anymore.
  */
 function buildDecisionPacket(input: BuildDecisionPacketInput): DecisionPacket {
-  const { state, amountToCall, equity, equitySource, bigBlind, bigBlindWasDefaulted, opponentActionsDescription } = input;
+  const {
+    state,
+    amountToCall,
+    equity,
+    equitySource,
+    bigBlind,
+    bigBlindWasDefaulted,
+    heroPosition,
+    isPositionKnown,
+    opponentActionsDescription,
+  } = input;
   const hero = state.seats.find((s) => s.isYou)!;
   const numOpponentsRemaining = state.seats.filter(
     (s) => s.isOccupied && !s.isYou && !s.isFolded,
@@ -299,7 +322,7 @@ function buildDecisionPacket(input: BuildDecisionPacketInput): DecisionPacket {
   const confidence = computeDataConfidence(state, {
     amountToCall,
     bigBlindWasDefaulted,
-    isPositionKnown: POSITION_IS_KNOWN,
+    isPositionKnown,
   });
   console.log(
     `[Poker AI Reader] Data confidence: ${confidence.level}${confidence.reasons.length > 0 ? ` (${confidence.reasons.join("; ")})` : ""}`,
@@ -332,7 +355,7 @@ function buildDecisionPacket(input: BuildDecisionPacketInput): DecisionPacket {
   return {
     hero: {
       holeCards: hero.holeCards as [import("@poker-ai/shared").Card, import("@poker-ai/shared").Card],
-      position: "BTN", // KNOWN PLACEHOLDER -- see POSITION_IS_KNOWN above
+      position: heroPosition,
       stackBB: bigBlind > 0 ? (hero.stack ?? 0) / bigBlind : (hero.stack ?? 0),
     },
     table: {
@@ -472,6 +495,9 @@ setInterval(() => {
     checkPreflopPushFold(state, bigBlindForPreflopCheck);
 
     const hero = state.seats.find((s) => s.isYou);
+    const dealerSeatNumber = extractDealerSeatNumber();
+    const positions = dealerSeatNumber !== null ? assignPositions(state.seats, dealerSeatNumber) : new Map<number, Position>();
+
     if (hero && hero.holeCards.length === 2 && state.street !== "preflop") {
       const numOpponents = state.seats.filter(
         (s) => s.isOccupied && !s.isYou && !s.isFolded,
@@ -489,7 +515,10 @@ setInterval(() => {
             opponentActions.length > 0
               ? `Opponent's actions this hand so far (in order): ${opponentActions.join(", ")}.`
               : "Opponent has taken no actions yet this hand.";
-          const estimatedRange = estimateOpponentRange(opponentActions);
+          const opponentPosition = positions.get(opponent.seatNumber);
+          const estimatedRange = opponentPosition
+            ? estimateOpponentRange(opponentActions, getOpeningRange(opponentPosition))
+            : estimateOpponentRange(opponentActions);
           try {
             equityResult = calculateEquityVsRange(hero.holeCards, estimatedRange, state.board, {
               iterations: 3000,
@@ -561,6 +590,8 @@ setInterval(() => {
               equitySource,
               bigBlind,
               bigBlindWasDefaulted,
+              heroPosition: positions.get(hero.seatNumber) ?? "BTN",
+              isPositionKnown: positions.has(hero.seatNumber),
               opponentActionsDescription,
             });
             console.log(`[Poker AI Reader] Big blind detected: ${bigBlind}. Hero stackBB: ${packet.hero.stackBB.toFixed(2)}. Facing amountBB: ${packet.facingAction.amountBB?.toFixed(2) ?? "n/a"}`);
