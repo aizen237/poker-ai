@@ -390,18 +390,22 @@ const SHORT_STACK_BB_THRESHOLD = 20;
  * which need real position data we don't have yet -- see the placeholder
  * note on buildDecisionPacket). Only fires below a stack-depth threshold,
  * since push/fold logic isn't the right tool for deep-stacked preflop
- * decisions. Deep-stack preflop is an honest, documented gap for now,
- * not silently faked.
+ * decisions -- deep-stack preflop instead goes through the same general
+ * AI pipeline as every other street (see the caller below). Returns
+ * whether it actually fired, so the caller can keep the two advice
+ * sources mutually exclusive -- a short stack should never get both a
+ * push/fold verdict AND a separate, possibly contradictory, AI
+ * recommendation for the same decision.
  */
-function checkPreflopPushFold(state: ReturnType<typeof readGameState> extends infer T ? NonNullable<T> : never, bigBlind: number) {
+function checkPreflopPushFold(state: ReturnType<typeof readGameState> extends infer T ? NonNullable<T> : never, bigBlind: number): boolean {
   const hero = state.seats.find((s) => s.isYou);
-  if (!hero || hero.holeCards.length !== 2 || !hero.isCurrentToAct || state.street !== "preflop") return;
+  if (!hero || hero.holeCards.length !== 2 || !hero.isCurrentToAct || state.street !== "preflop") return false;
 
   const stackBB = bigBlind > 0 ? (hero.stack ?? 0) / bigBlind : 0;
-  if (stackBB <= 0 || stackBB > SHORT_STACK_BB_THRESHOLD) return;
+  if (stackBB <= 0 || stackBB > SHORT_STACK_BB_THRESHOLD) return false;
 
   const potBB = bigBlind > 0 ? state.potMainValue / bigBlind : state.potMainValue;
-  if (potBB <= 0) return;
+  if (potBB <= 0) return false;
 
   const shove = evaluateShove(hero.holeCards, stackBB, potBB, { iterations: 2000 });
   const preflopLine = `PREFLOP (${stackBB.toFixed(1)}BB effective): ${
@@ -410,6 +414,7 @@ function checkPreflopPushFold(state: ReturnType<typeof readGameState> extends in
   console.log(`[Poker AI Reader] ${preflopLine}`);
   overlayState.preflopLine = preflopLine;
   renderOverlay();
+  return true;
 }
 
 /**
@@ -492,13 +497,18 @@ setInterval(() => {
     previousGameState = state;
 
     const bigBlindForPreflopCheck = extractBigBlind();
-    checkPreflopPushFold(state, bigBlindForPreflopCheck);
+    const shortStackPushFoldFired = checkPreflopPushFold(state, bigBlindForPreflopCheck);
 
     const hero = state.seats.find((s) => s.isYou);
     const dealerSeatNumber = extractDealerSeatNumber();
     const positions = dealerSeatNumber !== null ? assignPositions(state.seats, dealerSeatNumber) : new Map<number, Position>();
 
-    if (hero && hero.holeCards.length === 2 && state.street !== "preflop") {
+    // Runs for every street EXCEPT when the short-stack push/fold advice
+    // above already fired for this exact decision -- deep-stack preflop
+    // (or preflop with no valid push/fold read, e.g. pot not yet posted)
+    // now goes through the same general pipeline as postflop, rather
+    // than being silently skipped.
+    if (hero && hero.holeCards.length === 2 && !shortStackPushFoldFired) {
       const numOpponents = state.seats.filter(
         (s) => s.isOccupied && !s.isYou && !s.isFolded,
       ).length;

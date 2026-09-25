@@ -5663,16 +5663,17 @@
   var SHORT_STACK_BB_THRESHOLD = 20;
   function checkPreflopPushFold(state, bigBlind) {
     const hero = state.seats.find((s) => s.isYou);
-    if (!hero || hero.holeCards.length !== 2 || !hero.isCurrentToAct || state.street !== "preflop") return;
+    if (!hero || hero.holeCards.length !== 2 || !hero.isCurrentToAct || state.street !== "preflop") return false;
     const stackBB = bigBlind > 0 ? (hero.stack ?? 0) / bigBlind : 0;
-    if (stackBB <= 0 || stackBB > SHORT_STACK_BB_THRESHOLD) return;
+    if (stackBB <= 0 || stackBB > SHORT_STACK_BB_THRESHOLD) return false;
     const potBB = bigBlind > 0 ? state.potMainValue / bigBlind : state.potMainValue;
-    if (potBB <= 0) return;
+    if (potBB <= 0) return false;
     const shove = evaluateShove(hero.holeCards, stackBB, potBB, { iterations: 2e3 });
     const preflopLine = `PREFLOP (${stackBB.toFixed(1)}BB effective): ${shove.isProfitable ? "SHOVE profitable" : "SHOVE not profitable"} (EV: ${shove.ev.toFixed(2)}BB, equity if called: ${(shove.equityIfCalled * 100).toFixed(1)}%, assumed fold equity: ${(shove.foldEquityUsed * 100).toFixed(0)}%)`;
     console.log(`[Poker AI Reader] ${preflopLine}`);
     overlayState.preflopLine = preflopLine;
     renderOverlay();
+    return true;
   }
   async function requestRecommendation(packet, stateDescription, requestKey) {
     try {
@@ -5734,11 +5735,11 @@
       actionHistory = updateActionHistory(actionHistory, previousGameState, state);
       previousGameState = state;
       const bigBlindForPreflopCheck = extractBigBlind();
-      checkPreflopPushFold(state, bigBlindForPreflopCheck);
+      const shortStackPushFoldFired = checkPreflopPushFold(state, bigBlindForPreflopCheck);
       const hero = state.seats.find((s) => s.isYou);
       const dealerSeatNumber = extractDealerSeatNumber();
       const positions = dealerSeatNumber !== null ? assignPositions(state.seats, dealerSeatNumber) : /* @__PURE__ */ new Map();
-      if (hero && hero.holeCards.length === 2 && state.street !== "preflop") {
+      if (hero && hero.holeCards.length === 2 && !shortStackPushFoldFired) {
         const numOpponents = state.seats.filter(
           (s) => s.isOccupied && !s.isYou && !s.isFolded
         ).length;
