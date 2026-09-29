@@ -232,3 +232,18 @@ describe("validateDecisionPacket — candidateActions", () => {
     expect(() => validateDecisionPacket(packet)).toThrow();
   });
 });
+
+
+describe("validateDecisionPacket — potBB", () => {
+  it("accepts a potBB of exactly 0 (the very first action of a hand)", () => {
+    const packet = validPacket();
+    packet.table.potBB = 0;
+    expect(() => validateDecisionPacket(packet)).not.toThrow();
+  });
+
+  it("rejects a negative potBB", () => {
+    const packet = validPacket();
+    packet.table.potBB = -1;
+    expect(() => validateDecisionPacket(packet)).toThrow();
+  });
+});

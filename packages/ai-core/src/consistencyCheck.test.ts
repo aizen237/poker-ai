@@ -138,3 +138,65 @@ describe("validateReasoningConsistency", () => {
     expect(result.warnings).toEqual([]);
   });
 });
+
+
+describe("validateReasoningConsistency — false-positive regressions (from live testing)", () => {
+  it("does not treat 'paired board' as a claim about hero's hand", () => {
+    const result = validateReasoningConsistency(
+      recommendationWithReasoning("Hero has two pair (Kings and Queens) on a paired, semi-wet board."),
+      twoPairPacket(),
+    );
+    expect(result.isConsistent).toBe(true);
+  });
+
+  it("recognizes a hyphenated 'two-pair' as Two Pair", () => {
+    const result = validateReasoningConsistency(
+      recommendationWithReasoning("Hero has two-pair (KKQQ) here."),
+      twoPairPacket(),
+    );
+    expect(result.isConsistent).toBe(true);
+  });
+
+  it("recognizes a non-breaking-hyphen 'two\u2011pair' as Two Pair", () => {
+    const result = validateReasoningConsistency(
+      recommendationWithReasoning("Hero has two\u2011pair (KKQQ) here."),
+      twoPairPacket(),
+    );
+    expect(result.isConsistent).toBe(true);
+  });
+
+  it("does not treat categories mentioned about the board or opponents as claims about hero", () => {
+    const result = validateReasoningConsistency(
+      recommendationWithReasoning("Hero has two pair, but the board allows a flush and opponents could hold a straight."),
+      twoPairPacket(),
+    );
+    expect(result.isConsistent).toBe(true);
+  });
+
+  it("does not treat a draw as a made-hand claim", () => {
+    const result = validateReasoningConsistency(
+      recommendationWithReasoning("Hero has a flush draw here, so betting carries extra equity."),
+      twoPairPacket(),
+    );
+    expect(result.isConsistent).toBe(true);
+  });
+
+  it("still flags a genuine contradiction phrased with 'only'", () => {
+    const result = validateReasoningConsistency(
+      recommendationWithReasoning("Hero has only a middle pair here."),
+      twoPairPacket(),
+    );
+    expect(result.isConsistent).toBe(false);
+    expect(result.warnings[0]).toContain("Pair");
+  });
+
+  it("reads 'straight flush' as one claim, not also 'straight' and 'flush' separately", () => {
+    const result = validateReasoningConsistency(
+      recommendationWithReasoning("Hero has a straight flush."),
+      tripsPacket(),
+    );
+    expect(result.isConsistent).toBe(false);
+    expect(result.warnings[0]).toContain("Straight Flush");
+    expect(result.warnings[0]).not.toContain("/");
+  });
+});

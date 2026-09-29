@@ -66,7 +66,7 @@ export const DecisionPacketSchema = z.object({
   }),
 
   table: z.object({
-    potBB: z.number().positive(),
+    potBB: z.number().nonnegative(), // 0 is valid: the very first action of a hand, before blinds have registered in the main pot display
     board: z.array(CardSchema).max(5),
     street: StreetSchema,
     numOpponentsRemaining: z.number().int().min(1),
