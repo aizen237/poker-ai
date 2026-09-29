@@ -4766,7 +4766,8 @@
       stackBB: external_exports.number().positive()
     }),
     table: external_exports.object({
-      potBB: external_exports.number().positive(),
+      potBB: external_exports.number().nonnegative(),
+      // 0 is valid: the very first action of a hand, before blinds have registered in the main pot display
       board: external_exports.array(CardSchema).max(5),
       street: StreetSchema,
       numOpponentsRemaining: external_exports.number().int().min(1)
@@ -5739,6 +5740,12 @@
       const hero = state.seats.find((s) => s.isYou);
       const dealerSeatNumber = extractDealerSeatNumber();
       const positions = dealerSeatNumber !== null ? assignPositions(state.seats, dealerSeatNumber) : /* @__PURE__ */ new Map();
+      if ((!hero || !hero.isCurrentToAct) && overlayState.aiStatus !== "idle") {
+        overlayState.aiStatus = "idle";
+        overlayState.aiResult = null;
+        overlayState.aiWarnings = [];
+        renderOverlay();
+      }
       if (hero && hero.holeCards.length === 2 && !shortStackPushFoldFired) {
         const numOpponents = state.seats.filter(
           (s) => s.isOccupied && !s.isYou && !s.isFolded

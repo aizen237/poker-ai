@@ -503,6 +503,18 @@ setInterval(() => {
     const dealerSeatNumber = extractDealerSeatNumber();
     const positions = dealerSeatNumber !== null ? assignPositions(state.seats, dealerSeatNumber) : new Map<number, Position>();
 
+    // Clear any stale AI recommendation as soon as it's no longer hero's
+    // decision -- otherwise the overlay keeps showing the last answer
+    // through showdown, into the next hand, or during other players'
+    // turns, which reads as a live (and possibly wrong) recommendation
+    // even though nothing current is being computed.
+    if ((!hero || !hero.isCurrentToAct) && overlayState.aiStatus !== "idle") {
+      overlayState.aiStatus = "idle";
+      overlayState.aiResult = null;
+      overlayState.aiWarnings = [];
+      renderOverlay();
+    }
+
     // Runs for every street EXCEPT when the short-stack push/fold advice
     // above already fired for this exact decision -- deep-stack preflop
     // (or preflop with no valid push/fold read, e.g. pot not yet posted)
