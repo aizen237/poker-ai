@@ -65,4 +65,21 @@ describe("parsePlayerNameAndStack — real captured example (fc6666, 585)", () =
   it("throws if the stack text is unrecognized", () => {
     expect(() => parsePlayerNameAndStack("Talion", "not-a-number")).toThrow();
   });
+
+  
+  it("returns a null stack (not a throw) when the stack text is 'All In' -- confirmed live", () => {
+    const result = parsePlayerNameAndStack("aizennnnn", "All In");
+    expect(result.name).toBe("aizennnnn");
+    expect(result.stack).toBeNull();
+  });
+
+  it("recognizes 'All In' case-insensitively and with surrounding whitespace", () => {
+    expect(parsePlayerNameAndStack("Talion", "  all in  ").stack).toBeNull();
+    expect(parsePlayerNameAndStack("Talion", "ALL IN").stack).toBeNull();
+  });
+
+  it("still throws for genuinely unrecognized stack text, not just blanket-accepting anything", () => {
+    expect(() => parsePlayerNameAndStack("Talion", "allin")).toThrow();
+    expect(() => parsePlayerNameAndStack("Talion", "all-in")).toThrow();
+  });
 });

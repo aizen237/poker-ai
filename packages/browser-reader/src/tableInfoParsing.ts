@@ -41,18 +41,36 @@ export function parsePotSizeInfo(mainValueText: string, totalValueText: string |
 
 export interface PlayerNameAndStack {
   name: string;
-  stack: number;
+  /**
+   * null specifically when PokerNow shows the literal text "All In"
+   * instead of a number -- confirmed live: a player's stack display
+   * itself (not just their bet amount) can read "All In" once they've
+   * committed everything. The exact amount they had isn't recoverable
+   * from this text, so null is the honest answer rather than guessing.
+   * CRITICAL: previously this threw here, which propagated uncaught all
+   * the way up through assembleGameState's try/catch, silently failing
+   * the ENTIRE state read for that poll tick whenever any seat showed
+   * this text -- not just losing this one field.
+   */
+  stack: number | null;
 }
+
+const ALL_IN_STACK_TEXT = "all in";
 
 /**
  * Parses a player's name + stack from their infos-ctn-container text
  * content. Confirmed live: name is plain text inside an <a> tag, stack
- * uses the same chips-value/normal-value pattern as pot size.
+ * uses the same chips-value/normal-value pattern as pot size -- except
+ * when the player is all-in, where PokerNow shows "All In" as literal
+ * text in place of the number (see the stack field's doc comment).
  */
 export function parsePlayerNameAndStack(nameText: string, stackText: string): PlayerNameAndStack {
   const name = nameText.trim();
   if (name.length === 0) {
     throw new Error("Player name text is empty");
+  }
+  if (stackText.trim().toLowerCase() === ALL_IN_STACK_TEXT) {
+    return { name, stack: null };
   }
   return {
     name,

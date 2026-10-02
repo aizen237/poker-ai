@@ -98,10 +98,14 @@
       totalValue: totalValueText !== null ? parseChipsValueText(totalValueText) : null
     };
   }
+  var ALL_IN_STACK_TEXT = "all in";
   function parsePlayerNameAndStack(nameText, stackText) {
     const name = nameText.trim();
     if (name.length === 0) {
       throw new Error("Player name text is empty");
+    }
+    if (stackText.trim().toLowerCase() === ALL_IN_STACK_TEXT) {
+      return { name, stack: null };
     }
     return {
       name,
