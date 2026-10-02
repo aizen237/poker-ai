@@ -595,7 +595,15 @@ setInterval(() => {
         // same exact turn doesn't trigger multiple requests if polled
         // more than once before the state next changes.
         if (hero.isCurrentToAct) {
-          const requestKey = `${state.street}:${state.board.length}:${amountToCall}:${state.potMainValue}`;
+          // Hero's hole cards are folded into the key so two decision
+          // points that happen to share the same street/board-length/
+          // amountToCall/pot -- plausible on a table with consistent
+          // blinds and bet sizing -- are never mistaken for the same
+          // decision across different hands. A fresh deal always means
+          // different cards (the same signal actionHistory.ts already
+          // relies on to detect a new hand).
+          const heroCardsKey = hero.holeCards.map((c) => `${c.rank}${c.suit}`).join(",");
+          const requestKey = `${heroCardsKey}:${state.street}:${state.board.length}:${amountToCall}:${state.potMainValue}`;
           if (requestKey !== lastRecommendationRequestKey) {
             lastRecommendationRequestKey = requestKey;
             overlayState.aiStatus = "waiting";

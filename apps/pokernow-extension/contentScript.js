@@ -5797,7 +5797,8 @@
           }
           renderOverlay();
           if (hero.isCurrentToAct) {
-            const requestKey = `${state.street}:${state.board.length}:${amountToCall}:${state.potMainValue}`;
+            const heroCardsKey = hero.holeCards.map((c) => `${c.rank}${c.suit}`).join(",");
+            const requestKey = `${heroCardsKey}:${state.street}:${state.board.length}:${amountToCall}:${state.potMainValue}`;
             if (requestKey !== lastRecommendationRequestKey) {
               lastRecommendationRequestKey = requestKey;
               overlayState.aiStatus = "waiting";
