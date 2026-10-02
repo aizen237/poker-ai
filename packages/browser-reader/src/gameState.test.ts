@@ -242,3 +242,55 @@ describe("calculateAmountToCall", () => {
     expect(calculateAmountToCall(state)).toBe(5); // heroBet defaults to 0
   });
 });
+
+describe("assembleGameState — isChecking", () => {
+  function minimalRawInput(betValueText: string | null): RawTableInput {
+    return {
+      potMainValueText: "10",
+      potTotalValueText: "10",
+      boardCards: [],
+      seats: [
+        {
+          seatNumber: 1,
+          isOccupied: true,
+          isYou: false,
+          playerNameText: "villain",
+          stackText: "100",
+          betValueText,
+          statusClasses: [],
+          holeCardClassLists: [],
+        },
+      ],
+    };
+  }
+
+  it("is true when the bet-value text is literally 'check'", () => {
+    const result = assembleGameState(minimalRawInput("check"));
+    expect(result.seats[0].isChecking).toBe(true);
+    expect(result.seats[0].currentBet).toBeNull();
+  });
+
+  it("is true case-insensitively and with surrounding whitespace", () => {
+    expect(assembleGameState(minimalRawInput("  CHECK  ")).seats[0].isChecking).toBe(true);
+    expect(assembleGameState(minimalRawInput("Check")).seats[0].isChecking).toBe(true);
+  });
+
+  it("is false when there is no bet-value text at all (no action yet this street)", () => {
+    const result = assembleGameState(minimalRawInput(null));
+    expect(result.seats[0].isChecking).toBe(false);
+    expect(result.seats[0].currentBet).toBeNull();
+  });
+
+  it("is false for a genuine numeric bet", () => {
+    const result = assembleGameState(minimalRawInput("6"));
+    expect(result.seats[0].isChecking).toBe(false);
+    expect(result.seats[0].currentBet).toBe(6);
+  });
+
+  it("is false for an unoccupied seat", () => {
+    const raw = minimalRawInput(null);
+    raw.seats[0].isOccupied = false;
+    const result = assembleGameState(raw);
+    expect(result.seats[0].isChecking).toBe(false);
+  });
+});

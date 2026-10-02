@@ -41,6 +41,15 @@ export interface SeatState {
   holeCards: Card[];
   /** Amount currently bet this street, or null if it's not a numeric bet (e.g. "check"/"call" text labels, or no action yet). */
   currentBet: number | null;
+  /**
+   * True when PokerNow's bet-value element for this seat literally reads
+   * "check" -- confirmed live: the same element that normally shows a
+   * numeric bet amount instead shows the class "check" and the text
+   * "check" when a player checks. Previously indistinguishable from "no
+   * action yet this street" (both parsed to currentBet: null); this is
+   * the first time a genuine check can be told apart from that.
+   */
+  isChecking: boolean;
 }
 
 export interface PokerGameState {
@@ -75,6 +84,10 @@ function parseBetValue(betValueText: string | null): number | null {
   return Number.isNaN(value) ? null : value;
 }
 
+function isCheckText(betValueText: string | null): boolean {
+  return betValueText !== null && betValueText.trim().toLowerCase() === "check";
+}
+
 function assembleSeat(raw: RawSeatInput): SeatState {
   if (!raw.isOccupied) {
     return {
@@ -88,6 +101,7 @@ function assembleSeat(raw: RawSeatInput): SeatState {
       isOffline: false,
       holeCards: [],
       currentBet: null,
+      isChecking: false,
     };
   }
 
@@ -122,6 +136,7 @@ function assembleSeat(raw: RawSeatInput): SeatState {
     isOffline,
     holeCards,
     currentBet: parseBetValue(raw.betValueText),
+    isChecking: isCheckText(raw.betValueText),
   };
 }
 
