@@ -135,6 +135,9 @@
     const value = Number(cleaned);
     return Number.isNaN(value) ? null : value;
   }
+  function isCheckText(betValueText) {
+    return betValueText !== null && betValueText.trim().toLowerCase() === "check";
+  }
   function assembleSeat(raw) {
     if (!raw.isOccupied) {
       return {
@@ -147,7 +150,8 @@
         isCurrentToAct: false,
         isOffline: false,
         holeCards: [],
-        currentBet: null
+        currentBet: null,
+        isChecking: false
       };
     }
     const isFolded = raw.statusClasses.includes("fold");
@@ -171,7 +175,8 @@
       isCurrentToAct,
       isOffline,
       holeCards,
-      currentBet: parseBetValue(raw.betValueText)
+      currentBet: parseBetValue(raw.betValueText),
+      isChecking: isCheckText(raw.betValueText)
     };
   }
   function assembleGameState(raw) {
@@ -4835,7 +4840,7 @@
 
   // ../../packages/ai-core/dist/modelRegistry.js
   var ModelConfigSchema = external_exports.object({
-    provider: external_exports.enum(["groq", "gemini"]),
+    provider: external_exports.enum(["groq", "gemini", "nvidia"]),
     modelId: external_exports.string().min(1),
     supportsVision: external_exports.boolean(),
     supportsStructuredOutput: external_exports.boolean(),
@@ -4851,6 +4856,21 @@
      *  docs rather than guessing). null means never verified. */
     lastVerifiedAt: external_exports.string().datetime().nullable()
   });
+
+  // ../../packages/ai-core/dist/consistencyCheck.js
+  var SEP = "[\\s\\-\\u2010-\\u2013]";
+  var CATEGORY_PATTERNS = [
+    { name: "High Card", pattern: `high${SEP}card` },
+    { name: "Pair", pattern: "pairs?" },
+    { name: "Two Pair", pattern: `two${SEP}pairs?` },
+    { name: "Three of a Kind", pattern: `three${SEP}of${SEP}a${SEP}kind` },
+    // Negative lookahead so "straight flush" isn't ALSO read as a "straight" claim.
+    { name: "Straight", pattern: `straight(?!${SEP}flush)` },
+    { name: "Flush", pattern: "flush" },
+    { name: "Full House", pattern: `full${SEP}house` },
+    { name: "Four of a Kind", pattern: `four${SEP}of${SEP}a${SEP}kind` },
+    { name: "Straight Flush", pattern: `straight${SEP}flush` }
+  ];
 
   // ../../packages/range-engine/dist/handNotation.js
   var RANK_TO_CHAR = {

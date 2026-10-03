@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const ModelConfigSchema = z.object({
-  provider: z.enum(["groq", "gemini"]),
+  provider: z.enum(["groq", "gemini", "nvidia"]),
   modelId: z.string().min(1),
   supportsVision: z.boolean(),
   supportsStructuredOutput: z.boolean(),
@@ -48,6 +48,16 @@ export const MODEL_REGISTRY: ModelConfig[] = [
     speedTier: "slow",
     measuredLatencyMs: 9469,
     lastVerifiedAt: "2026-09-13T13:54:27.000Z",
+  },
+  {
+    provider: "nvidia",
+    modelId: "openai/gpt-oss-20b",
+    supportsVision: false,
+    supportsStructuredOutput: false,
+    costTier: "free",
+    speedTier: "moderate",
+    // Unmeasured, so fast-mode failover places NVIDIA after measured providers.
+    lastVerifiedAt: null,
   },
 ];
 

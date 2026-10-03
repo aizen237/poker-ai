@@ -6,6 +6,7 @@ import cors from "cors";
 import {
   createGroqProvider,
   createGeminiProvider,
+  createNvidiaProvider,
   createModelRouter,
   getModelsByProvider,
   validateDecisionPacket,
@@ -19,6 +20,7 @@ config({ path: path.resolve(__dirname, "../../../.env") });
 
 const groqKey = process.env.GROQ_API_KEY;
 const geminiKey = process.env.GEMINI_API_KEY;
+const nvidiaKey = process.env.NVIDIA_API_KEY;
 
 if (!groqKey) {
   throw new Error("GROQ_API_KEY not found in .env -- the relay server cannot start without at least one provider key");
@@ -37,6 +39,16 @@ if (geminiKey) {
     registeredProviders.push({
       provider: createGeminiProvider({ apiKey: geminiKey, model: geminiModel.modelId }),
       config: geminiModel,
+    });
+  }
+}
+
+if (nvidiaKey) {
+  const [nvidiaModel] = getModelsByProvider("nvidia");
+  if (nvidiaModel) {
+    registeredProviders.push({
+      provider: createNvidiaProvider({ apiKey: nvidiaKey, model: nvidiaModel.modelId }),
+      config: nvidiaModel,
     });
   }
 }
