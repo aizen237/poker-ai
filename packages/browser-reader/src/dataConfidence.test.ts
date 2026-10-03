@@ -56,6 +56,7 @@ function validContext(overrides: Partial<ConfidenceContext> = {}): ConfidenceCon
   return {
     amountToCall: 5,
     bigBlindWasDefaulted: false,
+    potSemanticsVerified: true,
     isPositionKnown: true,
     ...overrides,
   };
@@ -207,9 +208,9 @@ describe("computeDataConfidence — low confidence (contradictory state)", () =>
 });
 
 describe("computeDataConfidence — medium confidence (non-critical uncertainty)", () => {
-  it("returns medium when hero's real position is not yet known", () => {
+  it("returns low when hero's real position is not yet known", () => {
     const result = computeDataConfidence(validState(), validContext({ isPositionKnown: false }));
-    expect(result.level).toBe("medium");
+    expect(result.level).toBe("low");
     expect(result.reasons.join(" ")).toContain("position is not yet known");
   });
 

@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { parseChipsValueText, parsePlayerNameAndStack, parsePotSizeInfo } from "./tableInfoParsing.js";
+import { parseChipsValueText, parsePlayerNameAndStack, parsePotSizeInfo, parseBlindValues } from "./tableInfoParsing.js";
 
 describe("parseChipsValueText — real captured examples", () => {
+  it.each(["Infinity", "-Infinity", "NaN", "-1", "0x10", "1e3", "1,2", "1,,000", "1,000 chips"])("rejects invalid or ambiguous chip text %s", (text) => {
+    expect(() => parseChipsValueText(text)).toThrow();
+  });
+
+  it("preserves numeric zero and decimal chip values", () => {
+    expect(parseChipsValueText("0")).toBe(0);
+    expect(parseChipsValueText(" 1,234.50 ")).toBe(1234.5);
+  });
   it("parses a real captured stack value (585)", () => {
     expect(parseChipsValueText("585")).toBe(585);
   });
@@ -81,5 +89,13 @@ describe("parsePlayerNameAndStack — real captured example (fc6666, 585)", () =
   it("still throws for genuinely unrecognized stack text, not just blanket-accepting anything", () => {
     expect(() => parsePlayerNameAndStack("Talion", "allin")).toThrow();
     expect(() => parsePlayerNameAndStack("Talion", "all-in")).toThrow();
+  });
+});
+
+describe("parseBlindValues", () => {
+  it("keeps missing values unknown and never uses a numeric fallback", () => {
+    expect(parseBlindValues([])).toEqual({ smallBlind: null, bigBlind: null });
+    expect(parseBlindValues(["1"])).toEqual({ smallBlind: 1, bigBlind: null });
+    expect(parseBlindValues(["0", "Infinity"])).toEqual({ smallBlind: null, bigBlind: null });
   });
 });

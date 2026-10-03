@@ -233,13 +233,13 @@ describe("calculateAmountToCall", () => {
     expect(calculateAmountToCall(state)).toBe(5);
   });
 
-  it("returns 0 when hero is not found in the seats (defensive default)", () => {
+  it("returns unknown when hero is not found instead of assuming no prior contribution", () => {
     const raw = realisticRawInput();
     raw.seats[0]!.isYou = false; // no one marked as hero
     raw.seats[1]!.betValueText = "5";
     raw.seats[1]!.statusClasses = [];
     const state = assembleGameState(raw);
-    expect(calculateAmountToCall(state)).toBe(5); // heroBet defaults to 0
+    expect(calculateAmountToCall(state)).toBeNull();
   });
 });
 

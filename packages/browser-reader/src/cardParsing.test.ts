@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import { parseBoardCardFromText, parseHoleCardFromClassList } from "./cardParsing.js";
 
 describe("parseHoleCardFromClassList — real captured PokerNow examples", () => {
+  it("does not guess when visible card classes contain conflicting ranks or suits", () => {
+    expect(parseHoleCardFromClassList(["flipped", "card-h", "card-s", "card-s-Q"])).toBeNull();
+    expect(parseHoleCardFromClassList(["flipped", "card-h", "card-s-Q", "card-s-T"])).toBeNull();
+  });
   it("parses 5 of spades (real capture: card-container card-s   card-s-5 flipped card-p1)", () => {
     const classList = ["card-container", "card-s", "card-s-5", "flipped", "card-p1", "med", "sub-suit"];
     expect(parseHoleCardFromClassList(classList)).toEqual({ rank: 5, suit: "s" });

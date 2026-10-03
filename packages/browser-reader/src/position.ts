@@ -29,8 +29,8 @@ export function assignPositions(seats: readonly SeatState[], dealerSeatNumber: n
     return positions;
   }
 
-  // Rotate so the button seat is first, in clockwise (ascending,
-  // wrapping) seat-number order from there.
+  // Existing assumption, still awaiting live confirmation: ascending seat
+  // numbers (wrapping) are clockwise. Diagnostics expose this mapping.
   const clockwise = [...occupied.slice(dealerIndex), ...occupied.slice(0, dealerIndex)];
   const n = clockwise.length;
 

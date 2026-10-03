@@ -1,14 +1,11 @@
 import {
-  assembleGameState,
-  assignPositions,
-  calculateAmountToCall,
-  computeDataConfidence,
+  assessLiveState,
   emptyActionHistory,
   updateActionHistory,
   type ActionHistory,
   type Position,
-  type RawSeatInput,
-  type RawBoardCardInput,
+  type PokerGameState,
+  type ConfidenceResult,
 } from "@poker-ai/browser-reader";
 import {
   calculateCallEV,
@@ -20,6 +17,8 @@ import {
 } from "@poker-ai/poker-engine";
 import { deriveCandidateActions, type DecisionPacket } from "@poker-ai/ai-core";
 import { calculateEquityVsRange, estimateOpponentRange, evaluateShove, getOpeningRange } from "@poker-ai/range-engine";
+import { readLiveTable } from "./tableRead.js";
+import { logLiveDiagnostics } from "./diagnostics.js";
 console.log("[Poker AI Reader] Content script loaded on:", window.location.href);
 
 // ---------------------------------------------------------------------
@@ -129,146 +128,7 @@ function renderOverlay() {
   el.innerHTML = parts.join("");
 }
 
-function extractBoardCards(): RawBoardCardInput[] {
-  const boardContainer = document.querySelector(".table-cards");
-  if (!boardContainer) return [];
-
-  const cards: RawBoardCardInput[] = [];
-  const cardContainers = boardContainer.querySelectorAll(".card-container");
-
-  for (const container of cardContainers) {
-    const valueEl = container.querySelector(".value");
-    const suitEl = container.querySelector(".suit");
-    if (valueEl?.textContent && suitEl?.textContent) {
-      cards.push({ valueText: valueEl.textContent, suitText: suitEl.textContent });
-    }
-  }
-
-  return cards;
-}
-
-function extractSeats(): RawSeatInput[] {
-  const seats: RawSeatInput[] = [];
-
-  for (let seatNumber = 1; seatNumber <= 10; seatNumber++) {
-    const seatEl = document.querySelector(`.table-player-${seatNumber}`);
-    if (!seatEl) {
-      seats.push({
-        seatNumber,
-        isOccupied: false,
-        isYou: false,
-        playerNameText: null,
-        stackText: null,
-        statusClasses: [],
-        holeCardClassLists: [],
-        betValueText: null,
-      });
-      continue;
-    }
-
-    const classList = [...seatEl.classList];
-    // An empty/unsat seat still has a "table-player-N" div (with just a
-    // Sit button, per what we confirmed during DOM inspection) -- detect
-    // real occupancy by checking for the player-name element instead of
-    // just "does this div exist".
-    const nameEl = seatEl.querySelector(".table-player-name a");
-    const stackEl = seatEl.querySelector(".table-player-stack .normal-value");
-
-    if (!nameEl || !stackEl) {
-      seats.push({
-        seatNumber,
-        isOccupied: false,
-        isYou: false,
-        playerNameText: null,
-        stackText: null,
-        statusClasses: [],
-        holeCardClassLists: [],
-        betValueText: null,
-      });
-      continue;
-    }
-
-    const holeCardEls = seatEl.querySelectorAll(".table-player-cards .card-container");
-    const holeCardClassLists = [...holeCardEls].map((el) => [...el.classList]);
-
-    const betValueEl = seatEl.querySelector(".table-player-bet-value");
-
-    seats.push({
-      seatNumber,
-      isOccupied: true,
-      isYou: classList.includes("you-player"),
-      playerNameText: nameEl.textContent,
-      stackText: stackEl.textContent,
-      statusClasses: classList,
-      holeCardClassLists,
-      betValueText: betValueEl?.textContent ?? null,
-    });
-  }
-
-  return seats;
-}
-
-function extractPotValues(): { main: string; total: string | null } {
-  const mainEl = document.querySelector(".table-pot-size .main-value .normal-value");
-  const totalEl = document.querySelector(".table-pot-size .add-on-container .normal-value");
-  return {
-    main: mainEl?.textContent ?? "0",
-    total: totalEl?.textContent ?? null,
-  };
-}
-
-function extractDealerSeatNumber(): number | null {
-  const dealerEl = document.querySelector('[class*="dealer-position-"]');
-  if (!dealerEl) return null;
-  const match = [...dealerEl.classList].find((c) => c.startsWith("dealer-position-"));
-  if (!match) return null;
-  const seatNumber = Number(match.replace("dealer-position-", ""));
-  return Number.isNaN(seatNumber) ? null : seatNumber;
-}
-
-function extractBigBlind(): number {
-  const blindValueEls = document.querySelectorAll(".blind-value .chips-value .normal-value");
-  // First is small blind, second is big blind, per confirmed DOM structure.
-  const bigBlindText = blindValueEls[1]?.textContent;
-  if (!bigBlindText) {
-    console.warn("[Poker AI Reader] Could not find big blind value, defaulting to 1 (BB conversions will be wrong)");
-    return 1;
-  }
-  const bigBlind = Number(bigBlindText.trim());
-  return Number.isNaN(bigBlind) || bigBlind <= 0 ? 1 : bigBlind;
-}
-
-/**
- * Independent check for whether the big blind is actually readable from
- * the DOM right now. Kept separate from extractBigBlind() on purpose --
- * this only feeds data-confidence and never changes what
- * extractBigBlind() itself returns to its existing callers (preflop
- * push/fold, BB conversions).
- */
-function isBigBlindReadable(): boolean {
-  const blindValueEls = document.querySelectorAll(".blind-value .chips-value .normal-value");
-  const bigBlindText = blindValueEls[1]?.textContent;
-  if (!bigBlindText) return false;
-  const bigBlind = Number(bigBlindText.trim());
-  return !Number.isNaN(bigBlind) && bigBlind > 0;
-}
-function readGameState() {
-  const pot = extractPotValues();
-  try {
-    return assembleGameState({
-      seats: extractSeats(),
-      boardCards: extractBoardCards(),
-      potMainValueText: pot.main,
-      potTotalValueText: pot.total,
-    });
-  } catch (error) {
-    console.error("[Poker AI Reader] Failed to assemble game state:", error);
-    return null;
-  }
-}
-
-type GameState = ReturnType<typeof readGameState> extends infer T ? NonNullable<T> : never;
-
+type GameState = PokerGameState;
 
 const RELAY_SERVER_URL = "http://localhost:8787/recommendation"
 
@@ -278,10 +138,10 @@ interface BuildDecisionPacketInput {
   equity: number;
   equitySource: DecisionPacket["engineCalculations"]["equitySource"];
   bigBlind: number;
-  bigBlindWasDefaulted: boolean;
-  /** From assignPositions() -- "BTN" fallback and isPositionKnown: false when the dealer button couldn't be read this tick. */
+  decisionPot: number;
+  confidence: ConfidenceResult;
+  /** A detected position is required; no BTN fallback. */
   heroPosition: Position;
-  isPositionKnown: boolean;
   /** Heads-up only -- see the numOpponents branch below. */
   opponentActionsDescription?: string | undefined;
 }
@@ -296,11 +156,8 @@ interface BuildDecisionPacketInput {
  * function's own precondition actually holds (e.g. outs don't exist on
  * the river) -- left undefined otherwise, never faked.
  *
- * Hero's real position now comes from assignPositions() (dealer-button
- * detection), passed in as heroPosition/isPositionKnown -- "BTN" is
- * still used as a fallback label on the rare tick where the button
- * couldn't be read, but isPositionKnown correctly reflects that it's a
- * guess, not a fixed placeholder for every tick anymore.
+ * Inputs must pass the live-read gate first: no fallback stack, blind,
+ * position, or unverified displayed pot is substituted into this packet.
  */
 function buildDecisionPacket(input: BuildDecisionPacketInput): DecisionPacket {
   const {
@@ -309,9 +166,9 @@ function buildDecisionPacket(input: BuildDecisionPacketInput): DecisionPacket {
     equity,
     equitySource,
     bigBlind,
-    bigBlindWasDefaulted,
+    decisionPot,
+    confidence,
     heroPosition,
-    isPositionKnown,
     opponentActionsDescription,
   } = input;
   const hero = state.seats.find((s) => s.isYou)!;
@@ -319,11 +176,9 @@ function buildDecisionPacket(input: BuildDecisionPacketInput): DecisionPacket {
     (s) => s.isOccupied && !s.isYou && !s.isFolded,
   ).length;
 
-  const confidence = computeDataConfidence(state, {
-    amountToCall,
-    bigBlindWasDefaulted,
-    isPositionKnown,
-  });
+  if (confidence.level === "low" || hero.stack === null || !Number.isFinite(bigBlind) || bigBlind <= 0) {
+    throw new Error("Cannot build a DecisionPacket from an untrusted table read");
+  }
   console.log(
     `[Poker AI Reader] Data confidence: ${confidence.level}${confidence.reasons.length > 0 ? ` (${confidence.reasons.join("; ")})` : ""}`,
   );
@@ -332,14 +187,14 @@ function buildDecisionPacket(input: BuildDecisionPacketInput): DecisionPacket {
 
   let potOddsBreakevenPercent: number | undefined;
   let callEV: number | undefined;
-  if (amountToCall > 0 && state.potMainValue > 0) {
-    potOddsBreakevenPercent = calculatePotOdds(state.potMainValue, amountToCall).breakevenEquityPercent;
-    callEV = calculateCallEV(equity, state.potMainValue, amountToCall).ev;
+  if (amountToCall > 0 && decisionPot > 0) {
+    potOddsBreakevenPercent = calculatePotOdds(decisionPot, amountToCall).breakevenEquityPercent;
+    callEV = calculateCallEV(equity, decisionPot, amountToCall).ev;
   }
 
   let spr: number | undefined;
-  if (hero.stack !== null && state.potMainValue > 0) {
-    spr = calculateSPR(hero.stack, state.potMainValue);
+  if (hero.stack !== null && decisionPot > 0) {
+    spr = calculateSPR(hero.stack, decisionPot);
   }
 
   let outs: number | undefined;
@@ -356,17 +211,17 @@ function buildDecisionPacket(input: BuildDecisionPacketInput): DecisionPacket {
     hero: {
       holeCards: hero.holeCards as [import("@poker-ai/shared").Card, import("@poker-ai/shared").Card],
       position: heroPosition,
-      stackBB: bigBlind > 0 ? (hero.stack ?? 0) / bigBlind : (hero.stack ?? 0),
+      stackBB: hero.stack / bigBlind,
     },
     table: {
-      potBB: bigBlind > 0 ? state.potMainValue / bigBlind : state.potMainValue,
+      potBB: decisionPot / bigBlind,
       board: state.board,
       street: state.street,
       numOpponentsRemaining,
     },
     facingAction: {
       type: facingActionType,
-      ...(amountToCall > 0 ? { amountBB: bigBlind > 0 ? amountToCall / bigBlind : amountToCall } : {}),
+      ...(amountToCall > 0 ? { amountBB: amountToCall / bigBlind } : {}),
     },
     candidateActions: deriveCandidateActions(facingActionType),
     engineCalculations: {
@@ -397,14 +252,15 @@ const SHORT_STACK_BB_THRESHOLD = 20;
  * push/fold verdict AND a separate, possibly contradictory, AI
  * recommendation for the same decision.
  */
-function checkPreflopPushFold(state: ReturnType<typeof readGameState> extends infer T ? NonNullable<T> : never, bigBlind: number): boolean {
+function checkPreflopPushFold(state: GameState, bigBlind: number, decisionPot: number): boolean {
   const hero = state.seats.find((s) => s.isYou);
   if (!hero || hero.holeCards.length !== 2 || !hero.isCurrentToAct || state.street !== "preflop") return false;
 
-  const stackBB = bigBlind > 0 ? (hero.stack ?? 0) / bigBlind : 0;
+  if (hero.stack === null || !Number.isFinite(bigBlind) || bigBlind <= 0) return false;
+  const stackBB = hero.stack / bigBlind;
   if (stackBB <= 0 || stackBB > SHORT_STACK_BB_THRESHOLD) return false;
 
-  const potBB = bigBlind > 0 ? state.potMainValue / bigBlind : state.potMainValue;
+  const potBB = decisionPot / bigBlind;
   if (potBB <= 0) return false;
 
   const shove = evaluateShove(hero.holeCards, stackBB, potBB, { iterations: 2000 });
@@ -475,45 +331,46 @@ async function requestRecommendation(packet: DecisionPacket, stateDescription: s
   }
 }
 
+let requestSequence = 0;
 let lastStateJson: string | null = null;
 let lastRecommendationRequestKey: string | null = null;
 let previousGameState: GameState | null = null;
 let actionHistory: ActionHistory = emptyActionHistory();
 
 setInterval(() => {
-  const state = readGameState();
-  if (!state) return;
-
-  const stateJson = JSON.stringify(state);
+  const read = readLiveTable();
+  const assessment = assessLiveState(read.raw, read.context);
+  logLiveDiagnostics(read, assessment);
+  // Include blinds, dealer, and extraction failures in the identity of a read.
+  const stateJson = JSON.stringify({ raw: read.raw, context: read.context });
   if (stateJson !== lastStateJson) {
-    console.log("[Poker AI Reader] Game state changed:", JSON.parse(stateJson));
     lastStateJson = stateJson;
-
-    overlayState.street = state.street;
+    // Invalidate in-flight results on every changed or failed read, including
+    // leaving hero's turn. A later identical-looking decision gets a new token.
+    lastRecommendationRequestKey = null;
+    requestSequence++;
+    const { state, confidence, bigBlind, amountToCall, positions, decisionPot } = assessment;
+    overlayState.street = state?.street ?? "unreadable";
+    overlayState.aiResult = null;
+    overlayState.equityLine = null;
+    overlayState.potOddsLine = null;
     overlayState.preflopLine = null;
+    overlayState.aiWarnings = confidence.reasons;
+    overlayState.aiStatus = "blocked";
     renderOverlay();
+    if (!state) { previousGameState = null; actionHistory = emptyActionHistory(); return; }
 
     actionHistory = updateActionHistory(actionHistory, previousGameState, state);
     previousGameState = state;
-
-    const bigBlindForPreflopCheck = extractBigBlind();
-    const shortStackPushFoldFired = checkPreflopPushFold(state, bigBlindForPreflopCheck);
-
     const hero = state.seats.find((s) => s.isYou);
-    const dealerSeatNumber = extractDealerSeatNumber();
-    const positions = dealerSeatNumber !== null ? assignPositions(state.seats, dealerSeatNumber) : new Map<number, Position>();
+    const heroPosition = hero ? positions.get(hero.seatNumber) : undefined;
+    // Gate ALL advice (including local push/fold and pot odds) before any
+    // BB conversion or request. Pot semantics remain unresolved pending capture.
+    if (confidence.level === "low" || !hero || hero.stack === null || bigBlind === null ||
+        amountToCall === null || decisionPot === null || heroPosition === undefined) return;
 
-    // Clear any stale AI recommendation as soon as it's no longer hero's
-    // decision -- otherwise the overlay keeps showing the last answer
-    // through showdown, into the next hand, or during other players'
-    // turns, which reads as a live (and possibly wrong) recommendation
-    // even though nothing current is being computed.
-    if ((!hero || !hero.isCurrentToAct) && overlayState.aiStatus !== "idle") {
-      overlayState.aiStatus = "idle";
-      overlayState.aiResult = null;
-      overlayState.aiWarnings = [];
-      renderOverlay();
-    }
+    overlayState.aiStatus = "idle";
+    const shortStackPushFoldFired = checkPreflopPushFold(state, bigBlind, decisionPot);
 
     // Runs for every street EXCEPT when the short-stack push/fold advice
     // above already fired for this exact decision -- deep-stack preflop
@@ -575,9 +432,8 @@ setInterval(() => {
 
         overlayState.equityLine = `Equity: ${(equityResult.equity * 100).toFixed(1)}% (${equitySource === "estimated_range" ? "vs estimated range" : "vs random hands"})`;
 
-        const amountToCall = calculateAmountToCall(state);
-        if (amountToCall > 0 && state.potMainValue > 0) {
-          const potOdds = calculatePotOdds(state.potMainValue, amountToCall);
+        if (amountToCall > 0 && decisionPot > 0) {
+          const potOdds = calculatePotOdds(decisionPot, amountToCall);
           console.log(
             `[Poker AI Reader] Amount to call: ${amountToCall}. Breakeven equity needed: ${potOdds.breakevenEquityPercent.toFixed(1)}%`,
           );
@@ -595,15 +451,7 @@ setInterval(() => {
         // same exact turn doesn't trigger multiple requests if polled
         // more than once before the state next changes.
         if (hero.isCurrentToAct) {
-          // Hero's hole cards are folded into the key so two decision
-          // points that happen to share the same street/board-length/
-          // amountToCall/pot -- plausible on a table with consistent
-          // blinds and bet sizing -- are never mistaken for the same
-          // decision across different hands. A fresh deal always means
-          // different cards (the same signal actionHistory.ts already
-          // relies on to detect a new hand).
-          const heroCardsKey = hero.holeCards.map((c) => `${c.rank}${c.suit}`).join(",");
-          const requestKey = `${heroCardsKey}:${state.street}:${state.board.length}:${amountToCall}:${state.potMainValue}`;
+          const requestKey = `${requestSequence}:${stateJson}`;
           if (requestKey !== lastRecommendationRequestKey) {
             lastRecommendationRequestKey = requestKey;
             overlayState.aiStatus = "waiting";
@@ -611,24 +459,22 @@ setInterval(() => {
             overlayState.aiWarnings = [];
             renderOverlay();
 
-            const bigBlind = extractBigBlind();
-            const bigBlindWasDefaulted = !isBigBlindReadable();
             const packet = buildDecisionPacket({
               state,
               amountToCall,
               equity: equityResult.equity,
               equitySource,
               bigBlind,
-              bigBlindWasDefaulted,
-              heroPosition: positions.get(hero.seatNumber) ?? "BTN",
-              isPositionKnown: positions.has(hero.seatNumber),
+              decisionPot,
+              confidence,
+              heroPosition,
               opponentActionsDescription,
             });
             console.log(`[Poker AI Reader] Big blind detected: ${bigBlind}. Hero stackBB: ${packet.hero.stackBB.toFixed(2)}. Facing amountBB: ${packet.facingAction.amountBB?.toFixed(2) ?? "n/a"}`);
             console.log(
-              `[Poker AI Reader] It's hero's turn -- requesting AI recommendation for street=${state.street}, board=${JSON.stringify(state.board)}, potMainValue=${state.potMainValue}`,
+              `[Poker AI Reader] It's hero's turn -- requesting AI recommendation for street=${state.street}, board=${JSON.stringify(state.board)}, decisionPot=${decisionPot}`,
             );
-            requestRecommendation(packet, `${state.street} | board: ${JSON.stringify(state.board)} | pot: ${state.potMainValue}`, requestKey);
+            requestRecommendation(packet, `${state.street} | board: ${JSON.stringify(state.board)} | pot: ${decisionPot}`, requestKey);
           }
         }
       }

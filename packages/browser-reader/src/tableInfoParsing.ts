@@ -6,31 +6,31 @@
  * places, so one function covers both use cases.
  */
 export function parseChipsValueText(normalValueText: string): number {
-  const cleaned = normalValueText.trim().replace(/,/g, "");
+  const text = normalValueText.trim();
+  const cleaned = text.replace(/,/g, "");
   if (cleaned.length === 0) {
     throw new Error(`Chips value text is empty (expected a number, got an empty string)`);
   }
   const value = Number(cleaned);
-  if (Number.isNaN(value)) {
+  if (!/^(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$/.test(text) || !Number.isFinite(value) || value < 0) {
     throw new Error(`Unrecognized chips value text: "${normalValueText}"`);
   }
   return value;
 }
 
 export interface PotSizeInfo {
-  /** The current betting round's pot (observed as 0 between hands/streets with no bets yet). */
+  /** Number displayed under main-value. Its betting semantics are unverified. */
   mainValue: number;
-  /** The running total pot including carryover/antes, when present. */
+  /** Number displayed under add-on-container, when present. Not a verified total. */
   totalValue: number | null;
 }
 
 /**
  * Combines a pot's main-value and (optional) add-on/total text into a
  * single result. Confirmed live: PokerNow shows two numbers -- a
- * "main-value" (current street's pot) and a "total" add-on -- worth
- * revisiting once we watch a real hand through actual betting to be
- * fully sure which number belongs in pot-odds math (flagged honestly,
- * not resolved with certainty from static inspection alone).
+ * "main-value" and an add-on. Neither their relationship nor which value
+ * belongs in pot-odds math is established by these captured strings.
+ * Preserve both independently until a live hand confirms their meaning.
  */
 export function parsePotSizeInfo(mainValueText: string, totalValueText: string | null): PotSizeInfo {
   return {
@@ -57,6 +57,24 @@ export interface PlayerNameAndStack {
 
 const ALL_IN_STACK_TEXT = "all in";
 
+export function isAllInStackText(text: string | null): boolean {
+  return text?.trim().replace(/\s+/g, " ").toLowerCase() === ALL_IN_STACK_TEXT;
+}
+
+/** Reads the existing first-SB/second-BB selector order without defaults. */
+export function parseBlindValues(texts: readonly (string | null)[]): { smallBlind: number | null; bigBlind: number | null } {
+  const parse = (text: string | null | undefined): number | null => {
+    if (text == null) return null;
+    try {
+      const value = parseChipsValueText(text);
+      return value > 0 ? value : null;
+    } catch {
+      return null;
+    }
+  };
+  return { smallBlind: parse(texts[0]), bigBlind: parse(texts[1]) };
+}
+
 /**
  * Parses a player's name + stack from their infos-ctn-container text
  * content. Confirmed live: name is plain text inside an <a> tag, stack
@@ -69,7 +87,7 @@ export function parsePlayerNameAndStack(nameText: string, stackText: string): Pl
   if (name.length === 0) {
     throw new Error("Player name text is empty");
   }
-  if (stackText.trim().toLowerCase() === ALL_IN_STACK_TEXT) {
+  if (isAllInStackText(stackText)) {
     return { name, stack: null };
   }
   return {

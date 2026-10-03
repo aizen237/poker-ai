@@ -36,9 +36,13 @@
     let rank;
     for (const cls of classList) {
       if (cls in CLASS_SUIT_MAP) {
+        if (suit !== void 0 && suit !== CLASS_SUIT_MAP[cls])
+          return null;
         suit = CLASS_SUIT_MAP[cls];
       }
       if (cls in CLASS_RANK_MAP) {
+        if (rank !== void 0 && rank !== CLASS_RANK_MAP[cls])
+          return null;
         rank = CLASS_RANK_MAP[cls];
       }
     }
@@ -82,12 +86,13 @@
 
   // ../../packages/browser-reader/dist/tableInfoParsing.js
   function parseChipsValueText(normalValueText) {
-    const cleaned = normalValueText.trim().replace(/,/g, "");
+    const text = normalValueText.trim();
+    const cleaned = text.replace(/,/g, "");
     if (cleaned.length === 0) {
       throw new Error(`Chips value text is empty (expected a number, got an empty string)`);
     }
     const value = Number(cleaned);
-    if (Number.isNaN(value)) {
+    if (!/^(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$/.test(text) || !Number.isFinite(value) || value < 0) {
       throw new Error(`Unrecognized chips value text: "${normalValueText}"`);
     }
     return value;
@@ -99,12 +104,28 @@
     };
   }
   var ALL_IN_STACK_TEXT = "all in";
+  function isAllInStackText(text) {
+    return text?.trim().replace(/\s+/g, " ").toLowerCase() === ALL_IN_STACK_TEXT;
+  }
+  function parseBlindValues(texts) {
+    const parse = (text) => {
+      if (text == null)
+        return null;
+      try {
+        const value = parseChipsValueText(text);
+        return value > 0 ? value : null;
+      } catch {
+        return null;
+      }
+    };
+    return { smallBlind: parse(texts[0]), bigBlind: parse(texts[1]) };
+  }
   function parsePlayerNameAndStack(nameText, stackText) {
     const name = nameText.trim();
     if (name.length === 0) {
       throw new Error("Player name text is empty");
     }
-    if (stackText.trim().toLowerCase() === ALL_IN_STACK_TEXT) {
+    if (isAllInStackText(stackText)) {
       return { name, stack: null };
     }
     return {
@@ -131,9 +152,11 @@
     const trimmed = betValueText.trim();
     if (trimmed.length === 0)
       return null;
-    const cleaned = trimmed.replace(/,/g, "");
-    const value = Number(cleaned);
-    return Number.isNaN(value) ? null : value;
+    try {
+      return parseChipsValueText(trimmed);
+    } catch {
+      return null;
+    }
   }
   function isCheckText(betValueText) {
     return betValueText !== null && betValueText.trim().toLowerCase() === "check";
@@ -157,12 +180,14 @@
     const isFolded = raw.statusClasses.includes("fold");
     const isCurrentToAct = raw.statusClasses.includes("decision-current");
     const isOffline = raw.statusClasses.includes("offline");
-    let playerName = null;
+    const playerName = raw.playerNameText?.trim() || null;
     let stack = null;
-    if (raw.playerNameText !== null && raw.stackText !== null) {
-      const parsed = parsePlayerNameAndStack(raw.playerNameText, raw.stackText);
-      playerName = parsed.name;
-      stack = parsed.stack;
+    if (playerName !== null && raw.stackText !== null) {
+      try {
+        stack = parsePlayerNameAndStack(playerName, raw.stackText).stack;
+      } catch {
+        stack = null;
+      }
     }
     const holeCards = raw.holeCardClassLists.map(parseHoleCardFromClassList).filter((c) => c !== null);
     return {
@@ -171,6 +196,8 @@
       isYou: raw.isYou,
       playerName,
       stack,
+      isAllIn: isAllInStackText(raw.stackText),
+      betReadError: raw.betValueText !== null && parseBetValue(raw.betValueText) === null && !isCheckText(raw.betValueText),
       isFolded,
       isCurrentToAct,
       isOffline,
@@ -180,6 +207,8 @@
     };
   }
   function assembleGameState(raw) {
+    if (raw.potMainValueText === null)
+      throw new Error("Main pot element is missing");
     const board = raw.boardCards.map((c) => parseBoardCardFromText(c.valueText, c.suitText));
     const potInfo = parsePotSizeInfo(raw.potMainValueText, raw.potTotalValueText);
     const seats = raw.seats.map(assembleSeat);
@@ -192,7 +221,13 @@
     };
   }
   function calculateAmountToCall(state) {
-    const hero = state.seats.find((s) => s.isYou);
+    const heroes = state.seats.filter((s) => s.isOccupied && s.isYou);
+    const hero = heroes[0];
+    if (heroes.length !== 1 || !hero || hero.isFolded)
+      return null;
+    const relevantSeats = state.seats.filter((s) => s.isOccupied && !s.isFolded);
+    if (relevantSeats.some((s) => s.betReadError || s.currentBet !== null && (!Number.isFinite(s.currentBet) || s.currentBet < 0)))
+      return null;
     const heroBet = hero?.currentBet ?? 0;
     const highestOpponentBet = state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded && s.currentBet !== null).reduce((max, s) => Math.max(max, s.currentBet), 0);
     return Math.max(0, highestOpponentBet - heroBet);
@@ -209,7 +244,16 @@
     const criticalReasons = [];
     const uncertainReasons = [];
     const hero = state.seats.find((s) => s.isYou);
-    if (!hero) {
+    if (state.seats.filter((s) => s.isOccupied && s.isYou).length > 1) {
+      criticalReasons.push("multiple hero seats found");
+    }
+    if (state.seats.filter((s) => s.isOccupied && s.isCurrentToAct).length !== 1) {
+      criticalReasons.push("current player to act is missing or ambiguous");
+    }
+    if (new Set(state.seats.map((s) => s.seatNumber)).size !== state.seats.length) {
+      criticalReasons.push("duplicate seat numbers");
+    }
+    if (!hero || !hero.isOccupied) {
       criticalReasons.push("hero seat not found in state");
     } else {
       if (hero.holeCards.length !== 2) {
@@ -229,16 +273,32 @@
       }
     }
     const expectedBoardCount = EXPECTED_BOARD_COUNT[state.street];
+    const visibleCards = [...state.board, ...state.seats.filter((s) => s.isOccupied).flatMap((s) => s.holeCards)];
+    if (new Set(visibleCards.map((c) => `${c.rank}${c.suit}`)).size !== visibleCards.length) {
+      criticalReasons.push("duplicate visible cards -- the table read is inconsistent");
+    }
     if (state.board.length !== expectedBoardCount) {
       criticalReasons.push(`board card count (${state.board.length}) does not match street "${state.street}" (expected ${expectedBoardCount})`);
     }
     if (!Number.isFinite(state.potMainValue) || state.potMainValue < 0) {
       criticalReasons.push("pot value missing or invalid");
     }
-    if (!Number.isFinite(context.amountToCall) || context.amountToCall < 0) {
+    if (state.potTotalValue !== null && (!Number.isFinite(state.potTotalValue) || state.potTotalValue < 0)) {
+      criticalReasons.push("add-on pot value is invalid");
+    }
+    if (!context.potSemanticsVerified) {
+      criticalReasons.push("main/add-on pot meaning needs live confirmation -- pot-based recommendations withheld");
+    }
+    if (context.amountToCall === null || !Number.isFinite(context.amountToCall) || context.amountToCall < 0) {
       criticalReasons.push("amount-to-call is missing or invalid");
     }
     const activeOpponents = state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded);
+    if (state.seats.some((s) => s.isOccupied && !s.isFolded && (s.betReadError || s.currentBet !== null && (!Number.isFinite(s.currentBet) || s.currentBet < 0)))) {
+      criticalReasons.push("current street contribution is unreadable");
+    }
+    if (activeOpponents.some((s) => !s.isAllIn && (s.stack === null || !Number.isFinite(s.stack) || s.stack < 0))) {
+      criticalReasons.push("active opponent stack missing or invalid");
+    }
     if (activeOpponents.length < 1) {
       criticalReasons.push("no active opponents remain -- hand is already decided");
     }
@@ -249,7 +309,7 @@
       uncertainReasons.push("at least one active opponent is showing as offline -- their state may be stale");
     }
     if (!context.isPositionKnown) {
-      uncertainReasons.push("hero's real table position is not yet known (placeholder in use)");
+      criticalReasons.push("hero's real table position is not yet known -- no fallback position will be sent");
     }
     if (criticalReasons.length > 0) {
       return { level: "low", reasons: criticalReasons };
@@ -340,6 +400,51 @@
       positions.set(seat.seatNumber, position);
     });
     return positions;
+  }
+
+  // ../../packages/browser-reader/dist/liveState.js
+  function assessLiveState(raw, context) {
+    const blinds = parseBlindValues(context.blindTexts);
+    const readErrors = [...context.readErrors];
+    if (blinds.smallBlind === null)
+      readErrors.push("small blind could not be read");
+    if (blinds.bigBlind === null)
+      readErrors.push("big blind could not be read -- BB conversions disabled");
+    if (blinds.smallBlind !== null && blinds.bigBlind !== null && blinds.smallBlind > blinds.bigBlind) {
+      readErrors.push("small blind exceeds big blind -- verify selector order");
+    }
+    let state;
+    try {
+      state = assembleGameState(raw);
+    } catch (error) {
+      return {
+        state: null,
+        ...blinds,
+        positions: /* @__PURE__ */ new Map(),
+        amountToCall: null,
+        activeOpponents: null,
+        decisionPot: null,
+        confidence: { level: "low", reasons: [...readErrors, error instanceof Error ? error.message : String(error)] }
+      };
+    }
+    const positions = context.dealerSeatNumber === null ? /* @__PURE__ */ new Map() : assignPositions(state.seats, context.dealerSeatNumber);
+    const hero = state.seats.find((s) => s.isYou);
+    const amountToCall = calculateAmountToCall(state);
+    const confidence = computeDataConfidence(state, {
+      amountToCall,
+      bigBlindWasDefaulted: blinds.bigBlind === null,
+      isPositionKnown: hero !== void 0 && positions.has(hero.seatNumber),
+      potSemanticsVerified: false
+    });
+    return {
+      state,
+      ...blinds,
+      positions,
+      amountToCall,
+      decisionPot: null,
+      activeOpponents: state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded).length,
+      confidence: readErrors.length > 0 ? { level: "low", reasons: [...readErrors, ...confidence.reasons] } : confidence
+    };
   }
 
   // ../../packages/poker-engine/dist/types.js
@@ -473,6 +578,27 @@
   // ../../packages/shared/dist/card.js
   var SUITS = ["s", "h", "d", "c"];
   var RANKS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
+  var RANK_TO_CHAR = {
+    2: "2",
+    3: "3",
+    4: "4",
+    5: "5",
+    6: "6",
+    7: "7",
+    8: "8",
+    9: "9",
+    10: "T",
+    11: "J",
+    12: "Q",
+    13: "K",
+    14: "A"
+  };
+  function formatCard(card) {
+    return `${RANK_TO_CHAR[card.rank]}${card.suit}`;
+  }
+  function formatCards(cards) {
+    return cards.map(formatCard).join(" ");
+  }
 
   // ../../packages/shared/dist/deck.js
   function fullDeck() {
@@ -4873,7 +4999,7 @@
   ];
 
   // ../../packages/range-engine/dist/handNotation.js
-  var RANK_TO_CHAR = {
+  var RANK_TO_CHAR2 = {
     2: "2",
     3: "3",
     4: "4",
@@ -4888,10 +5014,10 @@
     13: "K",
     14: "A"
   };
-  var CHAR_TO_RANK = Object.fromEntries(RANKS.map((r) => [RANK_TO_CHAR[r], r]));
+  var CHAR_TO_RANK = Object.fromEntries(RANKS.map((r) => [RANK_TO_CHAR2[r], r]));
   function formatHandType(hand) {
-    const high = RANK_TO_CHAR[hand.highRank];
-    const low = RANK_TO_CHAR[hand.lowRank];
+    const high = RANK_TO_CHAR2[hand.highRank];
+    const low = RANK_TO_CHAR2[hand.lowRank];
     if (hand.highRank === hand.lowRank)
       return `${high}${low}`;
     return `${high}${low}${hand.suited ? "s" : "o"}`;
@@ -5423,6 +5549,180 @@
     return range;
   }
 
+  // src/tableRead.ts
+  var TABLE_SELECTORS = {
+    board: ".table-cards",
+    boardCard: ".card-container",
+    boardValue: ".value",
+    boardSuit: ".suit",
+    seat: ".table-player-N (N=1..10)",
+    name: ".table-player-name a",
+    stack: ".table-player-stack .normal-value",
+    stackContainer: ".table-player-stack",
+    holeCard: ".table-player-cards .card-container",
+    bet: ".table-player-bet-value",
+    mainPot: ".table-pot-size .main-value .normal-value",
+    addOnPot: ".table-pot-size .add-on-container .normal-value",
+    potContainer: ".table-pot-size",
+    blind: ".blind-value .chips-value .normal-value",
+    dealer: '[class*="dealer-position-"]'
+  };
+  function readLiveTable() {
+    const readErrors = [];
+    const unique = (root, selector, label, required) => {
+      const matches = root.querySelectorAll(selector);
+      if (matches.length > 1 || required && matches.length === 0) {
+        readErrors.push(`${label}: expected ${required ? "one" : "at most one"} match, found ${matches.length}`);
+      }
+      return matches.length === 1 ? matches[0] : null;
+    };
+    const board = unique(document, TABLE_SELECTORS.board, "board container", true);
+    const boardCards = [...board?.querySelectorAll(TABLE_SELECTORS.boardCard) ?? []].map((card, index) => ({
+      // Do not drop an incomplete card and derive the wrong street from the survivors.
+      valueText: unique(card, TABLE_SELECTORS.boardValue, `board card ${index + 1} value`, true)?.textContent ?? "",
+      suitText: unique(card, TABLE_SELECTORS.boardSuit, `board card ${index + 1} suit`, true)?.textContent ?? ""
+    }));
+    const seatEvidence = [];
+    const seats = [];
+    for (let seatNumber = 1; seatNumber <= 10; seatNumber++) {
+      const seat = unique(document, `.table-player-${seatNumber}`, `seat ${seatNumber}`, false);
+      const classes = [...seat?.classList ?? []];
+      const name = seat ? unique(seat, TABLE_SELECTORS.name, `seat ${seatNumber} name`, false) : null;
+      const stack = seat ? unique(seat, TABLE_SELECTORS.stack, `seat ${seatNumber} stack`, false) : null;
+      const bet = seat ? unique(seat, TABLE_SELECTORS.bet, `seat ${seatNumber} bet`, false) : null;
+      const holeCards = [...seat?.querySelectorAll(TABLE_SELECTORS.holeCard) ?? []];
+      const isOccupied = name !== null;
+      if (!name && (stack || classes.includes("you-player") || classes.includes("decision-current"))) {
+        readErrors.push(`seat ${seatNumber}: player markers present but name element missing`);
+      }
+      seats.push({
+        seatNumber,
+        isOccupied,
+        isYou: classes.includes("you-player"),
+        playerNameText: name?.textContent ?? null,
+        stackText: stack?.textContent ?? null,
+        statusClasses: classes,
+        holeCardClassLists: holeCards.map((card) => [...card.classList]),
+        betValueText: bet?.textContent ?? null
+      });
+      seatEvidence.push({
+        seatNumber,
+        seatMatches: document.querySelectorAll(`.table-player-${seatNumber}`).length,
+        nameFound: name !== null,
+        stackValueFound: stack !== null,
+        betFound: bet !== null,
+        stackContainerText: seat?.querySelector(TABLE_SELECTORS.stackContainer)?.textContent ?? null,
+        seatText: seat?.textContent ?? null
+      });
+    }
+    const main = unique(document, TABLE_SELECTORS.mainPot, "main pot", true);
+    const addOn = unique(document, TABLE_SELECTORS.addOnPot, "add-on pot", false);
+    const blindTexts = [...document.querySelectorAll(TABLE_SELECTORS.blind)].map((el) => el.textContent);
+    if (blindTexts.length !== 2) readErrors.push(`blind values: expected two, found ${blindTexts.length}`);
+    const dealer = unique(document, TABLE_SELECTORS.dealer, "dealer marker", true);
+    const dealerClasses = [...dealer?.classList ?? []];
+    const dealerTokens = dealerClasses.filter((cls) => cls.startsWith("dealer-position-"));
+    const token = dealerTokens.length === 1 ? dealerTokens[0] : void 0;
+    const dealerSeatNumber = token && /^dealer-position-(?:[1-9]|10)$/.test(token) ? Number(token.slice("dealer-position-".length)) : null;
+    if (dealerSeatNumber === null) readErrors.push("dealer seat number unreadable or ambiguous");
+    const raw = {
+      seats,
+      boardCards,
+      potMainValueText: main?.textContent ?? null,
+      potTotalValueText: addOn?.textContent ?? null
+    };
+    const context = { blindTexts, dealerSeatNumber, readErrors };
+    return {
+      raw,
+      context,
+      evidence: {
+        selectors: TABLE_SELECTORS,
+        seatEvidence,
+        dealerClasses,
+        boardContainerFound: board !== null,
+        boardCardElementCount: boardCards.length,
+        mainPotFound: main !== null,
+        addOnPotFound: addOn !== null,
+        potContainerText: document.querySelector(TABLE_SELECTORS.potContainer)?.textContent ?? null
+      }
+    };
+  }
+
+  // src/diagnostics.ts
+  var DIAGNOSTICS_KEY = "poker-ai:diagnostics";
+  var lastSnapshot = null;
+  function logLiveDiagnostics(read, assessment) {
+    let enabled = false;
+    try {
+      enabled = localStorage.getItem(DIAGNOSTICS_KEY) === "1";
+    } catch {
+    }
+    if (!enabled) {
+      lastSnapshot = null;
+      return;
+    }
+    const seats = assessment.state?.seats ?? [];
+    const snapshot = {
+      raw: read.raw,
+      evidence: read.evidence,
+      context: read.context,
+      parsed: {
+        ...assessment,
+        positions: Object.fromEntries(assessment.positions),
+        boardCards: assessment.state ? formatCards(assessment.state.board) : null,
+        currentToActSeats: seats.filter((seat) => seat.isCurrentToAct).map((seat) => seat.seatNumber)
+      },
+      assumptions: {
+        pot: "UNVERIFIED: main and add-on preserved separately; decisionPot is null; no pot odds or recommendations",
+        positions: "UNVERIFIED: ascending seat numbers wrap clockwise; folded occupied seats retain positions",
+        bets: "Absent/check indicators count as zero; confirm against the visible call button; call gap is not stack-capped",
+        street: "Derived from parsed board count; not independently read from PokerNow",
+        opponents: "Occupied and non-folded; includes all-in and offline players; sitting-out semantics need live confirmation"
+      }
+    };
+    const serialized = JSON.stringify(snapshot);
+    if (serialized === lastSnapshot) return;
+    lastSnapshot = serialized;
+    console.groupCollapsed(`[Poker AI State] ${(/* @__PURE__ */ new Date()).toISOString()} | ${assessment.state?.street ?? "unreadable"} | confidence=${assessment.confidence.level}`);
+    console.log("Snapshot (raw selectors -> parsed fields -> confidence)", JSON.parse(serialized));
+    console.table(read.raw.seats.map((raw) => {
+      const seat = seats.find((s) => s.seatNumber === raw.seatNumber);
+      return {
+        seat: raw.seatNumber,
+        player: seat?.playerName ?? raw.playerNameText,
+        occupied: raw.isOccupied,
+        hero: raw.isYou,
+        position: assessment.positions.get(raw.seatNumber) ?? "unknown",
+        dealer: raw.seatNumber === read.context.dealerSeatNumber,
+        stackText: raw.stackText,
+        stack: seat?.stack ?? null,
+        allIn: seat?.isAllIn ?? false,
+        betText: raw.betValueText,
+        currentBet: seat?.currentBet ?? null,
+        betUnreadable: seat?.betReadError ?? null,
+        cards: seat ? formatCards(seat.holeCards) : "unreadable",
+        folded: seat?.isFolded ?? null,
+        toAct: seat?.isCurrentToAct ?? null,
+        offline: seat?.isOffline ?? null
+      };
+    }));
+    console.log("Pot comparison", {
+      mainText: read.raw.potMainValueText,
+      main: assessment.state?.potMainValue ?? null,
+      addOnText: read.raw.potTotalValueText,
+      addOn: assessment.state?.potTotalValue ?? null,
+      knownCurrentBetSubtotal: assessment.state ? seats.filter((s) => s.isOccupied).reduce((sum, s) => sum + (s.currentBet ?? 0), 0) : null,
+      currentBetSumHasUnknowns: seats.some((s) => s.betReadError),
+      amountToCall: assessment.amountToCall,
+      smallBlind: assessment.smallBlind,
+      bigBlind: assessment.bigBlind,
+      activeOpponents: assessment.activeOpponents,
+      decisionPot: assessment.decisionPot
+    });
+    console.log("Copyable snapshot JSON", JSON.stringify({ capturedAt: (/* @__PURE__ */ new Date()).toISOString(), ...snapshot }));
+    console.groupEnd();
+  }
+
   // src/contentScript.ts
   console.log("[Poker AI Reader] Content script loaded on:", window.location.href);
   var overlayState = {
@@ -5501,116 +5801,6 @@
     parts.push(`</div>`);
     el.innerHTML = parts.join("");
   }
-  function extractBoardCards() {
-    const boardContainer = document.querySelector(".table-cards");
-    if (!boardContainer) return [];
-    const cards = [];
-    const cardContainers = boardContainer.querySelectorAll(".card-container");
-    for (const container of cardContainers) {
-      const valueEl = container.querySelector(".value");
-      const suitEl = container.querySelector(".suit");
-      if (valueEl?.textContent && suitEl?.textContent) {
-        cards.push({ valueText: valueEl.textContent, suitText: suitEl.textContent });
-      }
-    }
-    return cards;
-  }
-  function extractSeats() {
-    const seats = [];
-    for (let seatNumber = 1; seatNumber <= 10; seatNumber++) {
-      const seatEl = document.querySelector(`.table-player-${seatNumber}`);
-      if (!seatEl) {
-        seats.push({
-          seatNumber,
-          isOccupied: false,
-          isYou: false,
-          playerNameText: null,
-          stackText: null,
-          statusClasses: [],
-          holeCardClassLists: [],
-          betValueText: null
-        });
-        continue;
-      }
-      const classList = [...seatEl.classList];
-      const nameEl = seatEl.querySelector(".table-player-name a");
-      const stackEl = seatEl.querySelector(".table-player-stack .normal-value");
-      if (!nameEl || !stackEl) {
-        seats.push({
-          seatNumber,
-          isOccupied: false,
-          isYou: false,
-          playerNameText: null,
-          stackText: null,
-          statusClasses: [],
-          holeCardClassLists: [],
-          betValueText: null
-        });
-        continue;
-      }
-      const holeCardEls = seatEl.querySelectorAll(".table-player-cards .card-container");
-      const holeCardClassLists = [...holeCardEls].map((el) => [...el.classList]);
-      const betValueEl = seatEl.querySelector(".table-player-bet-value");
-      seats.push({
-        seatNumber,
-        isOccupied: true,
-        isYou: classList.includes("you-player"),
-        playerNameText: nameEl.textContent,
-        stackText: stackEl.textContent,
-        statusClasses: classList,
-        holeCardClassLists,
-        betValueText: betValueEl?.textContent ?? null
-      });
-    }
-    return seats;
-  }
-  function extractPotValues() {
-    const mainEl = document.querySelector(".table-pot-size .main-value .normal-value");
-    const totalEl = document.querySelector(".table-pot-size .add-on-container .normal-value");
-    return {
-      main: mainEl?.textContent ?? "0",
-      total: totalEl?.textContent ?? null
-    };
-  }
-  function extractDealerSeatNumber() {
-    const dealerEl = document.querySelector('[class*="dealer-position-"]');
-    if (!dealerEl) return null;
-    const match = [...dealerEl.classList].find((c) => c.startsWith("dealer-position-"));
-    if (!match) return null;
-    const seatNumber = Number(match.replace("dealer-position-", ""));
-    return Number.isNaN(seatNumber) ? null : seatNumber;
-  }
-  function extractBigBlind() {
-    const blindValueEls = document.querySelectorAll(".blind-value .chips-value .normal-value");
-    const bigBlindText = blindValueEls[1]?.textContent;
-    if (!bigBlindText) {
-      console.warn("[Poker AI Reader] Could not find big blind value, defaulting to 1 (BB conversions will be wrong)");
-      return 1;
-    }
-    const bigBlind = Number(bigBlindText.trim());
-    return Number.isNaN(bigBlind) || bigBlind <= 0 ? 1 : bigBlind;
-  }
-  function isBigBlindReadable() {
-    const blindValueEls = document.querySelectorAll(".blind-value .chips-value .normal-value");
-    const bigBlindText = blindValueEls[1]?.textContent;
-    if (!bigBlindText) return false;
-    const bigBlind = Number(bigBlindText.trim());
-    return !Number.isNaN(bigBlind) && bigBlind > 0;
-  }
-  function readGameState() {
-    const pot = extractPotValues();
-    try {
-      return assembleGameState({
-        seats: extractSeats(),
-        boardCards: extractBoardCards(),
-        potMainValueText: pot.main,
-        potTotalValueText: pot.total
-      });
-    } catch (error) {
-      console.error("[Poker AI Reader] Failed to assemble game state:", error);
-      return null;
-    }
-  }
   var RELAY_SERVER_URL = "http://localhost:8787/recommendation";
   function buildDecisionPacket(input) {
     const {
@@ -5619,33 +5809,31 @@
       equity,
       equitySource,
       bigBlind,
-      bigBlindWasDefaulted,
+      decisionPot,
+      confidence,
       heroPosition,
-      isPositionKnown,
       opponentActionsDescription
     } = input;
     const hero = state.seats.find((s) => s.isYou);
     const numOpponentsRemaining = state.seats.filter(
       (s) => s.isOccupied && !s.isYou && !s.isFolded
     ).length;
-    const confidence = computeDataConfidence(state, {
-      amountToCall,
-      bigBlindWasDefaulted,
-      isPositionKnown
-    });
+    if (confidence.level === "low" || hero.stack === null || !Number.isFinite(bigBlind) || bigBlind <= 0) {
+      throw new Error("Cannot build a DecisionPacket from an untrusted table read");
+    }
     console.log(
       `[Poker AI Reader] Data confidence: ${confidence.level}${confidence.reasons.length > 0 ? ` (${confidence.reasons.join("; ")})` : ""}`
     );
     const facingActionType = amountToCall > 0 ? "bet" : "none";
     let potOddsBreakevenPercent;
     let callEV;
-    if (amountToCall > 0 && state.potMainValue > 0) {
-      potOddsBreakevenPercent = calculatePotOdds(state.potMainValue, amountToCall).breakevenEquityPercent;
-      callEV = calculateCallEV(equity, state.potMainValue, amountToCall).ev;
+    if (amountToCall > 0 && decisionPot > 0) {
+      potOddsBreakevenPercent = calculatePotOdds(decisionPot, amountToCall).breakevenEquityPercent;
+      callEV = calculateCallEV(equity, decisionPot, amountToCall).ev;
     }
     let spr;
-    if (hero.stack !== null && state.potMainValue > 0) {
-      spr = calculateSPR(hero.stack, state.potMainValue);
+    if (hero.stack !== null && decisionPot > 0) {
+      spr = calculateSPR(hero.stack, decisionPot);
     }
     let outs;
     if (state.board.length === 3 || state.board.length === 4) {
@@ -5659,17 +5847,17 @@
       hero: {
         holeCards: hero.holeCards,
         position: heroPosition,
-        stackBB: bigBlind > 0 ? (hero.stack ?? 0) / bigBlind : hero.stack ?? 0
+        stackBB: hero.stack / bigBlind
       },
       table: {
-        potBB: bigBlind > 0 ? state.potMainValue / bigBlind : state.potMainValue,
+        potBB: decisionPot / bigBlind,
         board: state.board,
         street: state.street,
         numOpponentsRemaining
       },
       facingAction: {
         type: facingActionType,
-        ...amountToCall > 0 ? { amountBB: bigBlind > 0 ? amountToCall / bigBlind : amountToCall } : {}
+        ...amountToCall > 0 ? { amountBB: amountToCall / bigBlind } : {}
       },
       candidateActions: deriveCandidateActions(facingActionType),
       engineCalculations: {
@@ -5686,12 +5874,13 @@
     };
   }
   var SHORT_STACK_BB_THRESHOLD = 20;
-  function checkPreflopPushFold(state, bigBlind) {
+  function checkPreflopPushFold(state, bigBlind, decisionPot) {
     const hero = state.seats.find((s) => s.isYou);
     if (!hero || hero.holeCards.length !== 2 || !hero.isCurrentToAct || state.street !== "preflop") return false;
-    const stackBB = bigBlind > 0 ? (hero.stack ?? 0) / bigBlind : 0;
+    if (hero.stack === null || !Number.isFinite(bigBlind) || bigBlind <= 0) return false;
+    const stackBB = hero.stack / bigBlind;
     if (stackBB <= 0 || stackBB > SHORT_STACK_BB_THRESHOLD) return false;
-    const potBB = bigBlind > 0 ? state.potMainValue / bigBlind : state.potMainValue;
+    const potBB = decisionPot / bigBlind;
     if (potBB <= 0) return false;
     const shove = evaluateShove(hero.holeCards, stackBB, potBB, { iterations: 2e3 });
     const preflopLine = `PREFLOP (${stackBB.toFixed(1)}BB effective): ${shove.isProfitable ? "SHOVE profitable" : "SHOVE not profitable"} (EV: ${shove.ev.toFixed(2)}BB, equity if called: ${(shove.equityIfCalled * 100).toFixed(1)}%, assumed fold equity: ${(shove.foldEquityUsed * 100).toFixed(0)}%)`;
@@ -5743,33 +5932,41 @@
       }
     }
   }
+  var requestSequence = 0;
   var lastStateJson = null;
   var lastRecommendationRequestKey = null;
   var previousGameState = null;
   var actionHistory = emptyActionHistory();
   setInterval(() => {
-    const state = readGameState();
-    if (!state) return;
-    const stateJson = JSON.stringify(state);
+    const read = readLiveTable();
+    const assessment = assessLiveState(read.raw, read.context);
+    logLiveDiagnostics(read, assessment);
+    const stateJson = JSON.stringify({ raw: read.raw, context: read.context });
     if (stateJson !== lastStateJson) {
-      console.log("[Poker AI Reader] Game state changed:", JSON.parse(stateJson));
       lastStateJson = stateJson;
-      overlayState.street = state.street;
+      lastRecommendationRequestKey = null;
+      requestSequence++;
+      const { state, confidence, bigBlind, amountToCall, positions, decisionPot } = assessment;
+      overlayState.street = state?.street ?? "unreadable";
+      overlayState.aiResult = null;
+      overlayState.equityLine = null;
+      overlayState.potOddsLine = null;
       overlayState.preflopLine = null;
+      overlayState.aiWarnings = confidence.reasons;
+      overlayState.aiStatus = "blocked";
       renderOverlay();
+      if (!state) {
+        previousGameState = null;
+        actionHistory = emptyActionHistory();
+        return;
+      }
       actionHistory = updateActionHistory(actionHistory, previousGameState, state);
       previousGameState = state;
-      const bigBlindForPreflopCheck = extractBigBlind();
-      const shortStackPushFoldFired = checkPreflopPushFold(state, bigBlindForPreflopCheck);
       const hero = state.seats.find((s) => s.isYou);
-      const dealerSeatNumber = extractDealerSeatNumber();
-      const positions = dealerSeatNumber !== null ? assignPositions(state.seats, dealerSeatNumber) : /* @__PURE__ */ new Map();
-      if ((!hero || !hero.isCurrentToAct) && overlayState.aiStatus !== "idle") {
-        overlayState.aiStatus = "idle";
-        overlayState.aiResult = null;
-        overlayState.aiWarnings = [];
-        renderOverlay();
-      }
+      const heroPosition = hero ? positions.get(hero.seatNumber) : void 0;
+      if (confidence.level === "low" || !hero || hero.stack === null || bigBlind === null || amountToCall === null || decisionPot === null || heroPosition === void 0) return;
+      overlayState.aiStatus = "idle";
+      const shortStackPushFoldFired = checkPreflopPushFold(state, bigBlind, decisionPot);
       if (hero && hero.holeCards.length === 2 && !shortStackPushFoldFired) {
         const numOpponents = state.seats.filter(
           (s) => s.isOccupied && !s.isYou && !s.isFolded
@@ -5808,9 +6005,8 @@
             );
           }
           overlayState.equityLine = `Equity: ${(equityResult.equity * 100).toFixed(1)}% (${equitySource === "estimated_range" ? "vs estimated range" : "vs random hands"})`;
-          const amountToCall = calculateAmountToCall(state);
-          if (amountToCall > 0 && state.potMainValue > 0) {
-            const potOdds = calculatePotOdds(state.potMainValue, amountToCall);
+          if (amountToCall > 0 && decisionPot > 0) {
+            const potOdds = calculatePotOdds(decisionPot, amountToCall);
             console.log(
               `[Poker AI Reader] Amount to call: ${amountToCall}. Breakeven equity needed: ${potOdds.breakevenEquityPercent.toFixed(1)}%`
             );
@@ -5821,32 +6017,29 @@
           }
           renderOverlay();
           if (hero.isCurrentToAct) {
-            const heroCardsKey = hero.holeCards.map((c) => `${c.rank}${c.suit}`).join(",");
-            const requestKey = `${heroCardsKey}:${state.street}:${state.board.length}:${amountToCall}:${state.potMainValue}`;
+            const requestKey = `${requestSequence}:${stateJson}`;
             if (requestKey !== lastRecommendationRequestKey) {
               lastRecommendationRequestKey = requestKey;
               overlayState.aiStatus = "waiting";
               overlayState.aiResult = null;
               overlayState.aiWarnings = [];
               renderOverlay();
-              const bigBlind = extractBigBlind();
-              const bigBlindWasDefaulted = !isBigBlindReadable();
               const packet = buildDecisionPacket({
                 state,
                 amountToCall,
                 equity: equityResult.equity,
                 equitySource,
                 bigBlind,
-                bigBlindWasDefaulted,
-                heroPosition: positions.get(hero.seatNumber) ?? "BTN",
-                isPositionKnown: positions.has(hero.seatNumber),
+                decisionPot,
+                confidence,
+                heroPosition,
                 opponentActionsDescription
               });
               console.log(`[Poker AI Reader] Big blind detected: ${bigBlind}. Hero stackBB: ${packet.hero.stackBB.toFixed(2)}. Facing amountBB: ${packet.facingAction.amountBB?.toFixed(2) ?? "n/a"}`);
               console.log(
-                `[Poker AI Reader] It's hero's turn -- requesting AI recommendation for street=${state.street}, board=${JSON.stringify(state.board)}, potMainValue=${state.potMainValue}`
+                `[Poker AI Reader] It's hero's turn -- requesting AI recommendation for street=${state.street}, board=${JSON.stringify(state.board)}, decisionPot=${decisionPot}`
               );
-              requestRecommendation(packet, `${state.street} | board: ${JSON.stringify(state.board)} | pot: ${state.potMainValue}`, requestKey);
+              requestRecommendation(packet, `${state.street} | board: ${JSON.stringify(state.board)} | pot: ${decisionPot}`, requestKey);
             }
           }
         }

@@ -1,5 +1,9 @@
 # Local development
 
+For the current live state investigation, see [LIVE_STATE_CHECK.md](LIVE_STATE_CHECK.md).
+Recommendations are withheld until the meaning of PokerNow's main/add-on pot
+values is confirmed; that guide explains the diagnostic toggle and capture steps.
+
 Run these commands from the repository root (`poker-ai`) in PowerShell or a
 terminal in VS Code. Use Node 22.12+ on the 22.x line (verified with 22.16.0),
 24.x, or 26+. The Node requirement matches the installed Vitest toolchain and

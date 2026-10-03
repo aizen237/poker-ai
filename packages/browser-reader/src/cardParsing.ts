@@ -38,9 +38,11 @@ export function parseHoleCardFromClassList(classList: readonly string[]): Card |
 
   for (const cls of classList) {
     if (cls in CLASS_SUIT_MAP) {
+      if (suit !== undefined && suit !== CLASS_SUIT_MAP[cls]) return null;
       suit = CLASS_SUIT_MAP[cls];
     }
     if (cls in CLASS_RANK_MAP) {
+      if (rank !== undefined && rank !== CLASS_RANK_MAP[cls]) return null;
       rank = CLASS_RANK_MAP[cls];
     }
   }

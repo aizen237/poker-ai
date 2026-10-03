@@ -1,6 +1,6 @@
 import type { Card } from "@poker-ai/shared";
 import { parseBoardCardFromText, parseHoleCardFromClassList } from "./cardParsing.js";
-import { parsePlayerNameAndStack, parsePotSizeInfo } from "./tableInfoParsing.js";
+import { isAllInStackText, parseChipsValueText, parsePlayerNameAndStack, parsePotSizeInfo } from "./tableInfoParsing.js";
 
 export interface RawSeatInput {
   seatNumber: number;
@@ -24,7 +24,7 @@ export interface RawBoardCardInput {
 export interface RawTableInput {
   seats: RawSeatInput[];
   boardCards: RawBoardCardInput[];
-  potMainValueText: string;
+  potMainValueText: string | null;
   potTotalValueText: string | null;
 }
 
@@ -34,6 +34,10 @@ export interface SeatState {
   isYou: boolean;
   playerName: string | null;
   stack: number | null;
+  /** Literal All In stack label, not an inferred numeric zero. */
+  isAllIn?: boolean;
+  /** A present bet label could not be interpreted as a contribution or check. */
+  betReadError?: boolean;
   isFolded: boolean;
   isCurrentToAct: boolean;
   isOffline: boolean;
@@ -79,9 +83,11 @@ function parseBetValue(betValueText: string | null): number | null {
   if (betValueText === null) return null;
   const trimmed = betValueText.trim();
   if (trimmed.length === 0) return null;
-  const cleaned = trimmed.replace(/,/g, "");
-  const value = Number(cleaned);
-  return Number.isNaN(value) ? null : value;
+  try {
+    return parseChipsValueText(trimmed);
+  } catch {
+    return null;
+  }
 }
 
 function isCheckText(betValueText: string | null): boolean {
@@ -109,12 +115,15 @@ function assembleSeat(raw: RawSeatInput): SeatState {
   const isCurrentToAct = raw.statusClasses.includes("decision-current");
   const isOffline = raw.statusClasses.includes("offline");
 
-  let playerName: string | null = null;
+  const playerName = raw.playerNameText?.trim() || null;
   let stack: number | null = null;
-  if (raw.playerNameText !== null && raw.stackText !== null) {
-    const parsed = parsePlayerNameAndStack(raw.playerNameText, raw.stackText);
-    playerName = parsed.name;
-    stack = parsed.stack;
+  if (playerName !== null && raw.stackText !== null) {
+    try {
+      stack = parsePlayerNameAndStack(playerName, raw.stackText).stack;
+    } catch {
+      // Keep an occupied seat and its identity even when the stack is unreadable.
+      stack = null;
+    }
   }
 
   // Per Rule 5: only include hole cards we could actually parse (i.e.
@@ -131,6 +140,8 @@ function assembleSeat(raw: RawSeatInput): SeatState {
     isYou: raw.isYou,
     playerName,
     stack,
+    isAllIn: isAllInStackText(raw.stackText),
+    betReadError: raw.betValueText !== null && parseBetValue(raw.betValueText) === null && !isCheckText(raw.betValueText),
     isFolded,
     isCurrentToAct,
     isOffline,
@@ -147,6 +158,7 @@ function assembleSeat(raw: RawSeatInput): SeatState {
  * RawTableInput is the browser extension's job (a separate, later step).
  */
 export function assembleGameState(raw: RawTableInput): PokerGameState {
+  if (raw.potMainValueText === null) throw new Error("Main pot element is missing");
   const board = raw.boardCards.map((c) => parseBoardCardFromText(c.valueText, c.suitText));
   const potInfo = parsePotSizeInfo(raw.potMainValueText, raw.potTotalValueText);
   const seats = raw.seats.map(assembleSeat);
@@ -164,10 +176,19 @@ export function assembleGameState(raw: RawTableInput): PokerGameState {
  * Computes the amount hero needs to call: the largest current bet among
  * still-active (occupied, non-folded) opponents, minus whatever hero has
  * already put in this street. Returns 0 if hero is already matched or
- * ahead (e.g. facing a check), never negative.
+ * ahead (e.g. facing a check), never negative. An absent indicator or an
+ * explicit check retains the existing zero-contribution interpretation;
+ * confirm that interpretation against the live call button. Other action
+ * labels (call/raise/All In) do not reveal a numeric contribution.
+ * Returns null when hero or any relevant contribution is unreadable.
+ * This is the uncapped wager gap; it is not capped at hero's stack.
  */
-export function calculateAmountToCall(state: PokerGameState): number {
-  const hero = state.seats.find((s) => s.isYou);
+export function calculateAmountToCall(state: PokerGameState): number | null {
+  const heroes = state.seats.filter((s) => s.isOccupied && s.isYou);
+  const hero = heroes[0];
+  if (heroes.length !== 1 || !hero || hero.isFolded) return null;
+  const relevantSeats = state.seats.filter((s) => s.isOccupied && !s.isFolded);
+  if (relevantSeats.some((s) => s.betReadError || (s.currentBet !== null && (!Number.isFinite(s.currentBet) || s.currentBet < 0)))) return null;
   const heroBet = hero?.currentBet ?? 0;
 
   const highestOpponentBet = state.seats
