@@ -88,10 +88,9 @@ export type OpponentAction = "fold" | "call" | "raise";
 
 /**
  * Default baseline range to narrow from when no better prior exists.
- * KNOWN PLACEHOLDER, same pattern as hero's "BTN" position placeholder
- * in contentScript.ts: real per-opponent position isn't tracked yet, so
- * this uses BTN's opening range (the widest single-position range) as a
- * deliberately wide, documented starting point rather than guessing.
+ * Uses BTN's opening range (the widest single-position range) as a
+ * deliberately wide fallback. The extension supplies a position-based
+ * baseline when dealer-button detection identifies the opponent's position.
  */
 function defaultBaselineRange(): Range {
   return getOpeningRange("BTN");

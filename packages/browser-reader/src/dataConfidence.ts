@@ -12,9 +12,9 @@ export interface ConfidenceContext {
    */
   bigBlindWasDefaulted: boolean;
   /**
-   * True once hero's real table position (BTN/CO/etc.) is computed from
-   * the dealer button rather than the documented placeholder. Always
-   * false today -- see the position placeholder note in contentScript.ts.
+   * True when hero's table position (BTN/CO/etc.) is computed from the
+   * dealer button this cycle. False when detection fails and the caller
+   * uses a fallback position label.
    */
   isPositionKnown: boolean;
 }

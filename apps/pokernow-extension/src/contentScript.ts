@@ -386,10 +386,10 @@ function buildDecisionPacket(input: BuildDecisionPacketInput): DecisionPacket {
 const SHORT_STACK_BB_THRESHOLD = 20;
 
 /**
- * Preflop push/fold advice, position-independent (unlike opening ranges,
- * which need real position data we don't have yet -- see the placeholder
- * note on buildDecisionPacket). Only fires below a stack-depth threshold,
- * since push/fold logic isn't the right tool for deep-stacked preflop
+ * Preflop push/fold advice, position-independent. Opening-range estimates
+ * elsewhere use dealer-button positions when available. Only fires below
+ * a stack-depth threshold, since push/fold logic isn't the right tool for
+ * deep-stacked preflop
  * decisions -- deep-stack preflop instead goes through the same general
  * AI pipeline as every other street (see the caller below). Returns
  * whether it actually fired, so the caller can keep the two advice
