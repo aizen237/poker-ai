@@ -8,8 +8,13 @@
     "apps/*"
   ],
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
+    "build": "npm run build:ts && npm run typecheck --workspace=@poker-ai/pokernow-extension && npm run bundle --workspace=@poker-ai/pokernow-extension",
+    "build:ts": "tsc -b --force",
+    "build:extension": "npm run build --workspace=@poker-ai/pokernow-extension",
+    "dev:relay": "npm run dev --workspace=@poker-ai/ai-relay-server",
+    "pretest": "npm run build:ts",
     "test": "npm run test --workspaces --if-present",
+    "pretypecheck": "npm run build:ts",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present"
   },
@@ -17,6 +22,6 @@
     "typescript": "^5.7.2"
   },
   "engines": {
-    "node": ">=18"
+    "node": "^22.12.0 || ^24.0.0 || >=26.0.0"
   }
 }

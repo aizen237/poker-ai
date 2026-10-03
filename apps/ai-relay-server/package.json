@@ -6,6 +6,7 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc --noEmit",
+    "predev": "npm run build --prefix ../..",
     "dev": "node --experimental-strip-types src/server.ts"
   },
   "dependencies": {

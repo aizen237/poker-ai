@@ -3,10 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "esbuild src/contentScript.ts --bundle --outfile=contentScript.js --format=iife"
+    "build": "npm run build --prefix ../..",
+    "bundle": "esbuild src/contentScript.ts --bundle --outfile=contentScript.js --format=iife",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@poker-ai/ai-core": "*",
     "@poker-ai/browser-reader": "*",
+    "@poker-ai/poker-engine": "*",
+    "@poker-ai/range-engine": "*",
     "@poker-ai/shared": "*"
   },
   "devDependencies": {
