@@ -84,7 +84,7 @@ export function narrowExcludingTop(range: Range, topFractionExcluded: number): R
   return narrowed;
 }
 
-export type OpponentAction = "fold" | "call" | "raise";
+export type OpponentAction = "check" | "call" | "bet" | "raise" | "fold" | "all-in";
 
 /**
  * Default baseline range to narrow from when no better prior exists.
@@ -104,14 +104,12 @@ function defaultBaselineRange(): Range {
  * that would raise, then continue with a call facing more aggression,"
  * not two independent slices of the full baseline.
  *
- * "fold" actions are accepted for completeness (a caller may pass full
- * history including folds) but have no narrowing effect here -- a
- * folded opponent is already excluded from equity calculations
- * upstream, so their range no longer matters.
+ * "check", "fold", and "all-in" are accepted without narrowing. An
+ * all-in label alone does not establish aggression: it may be a short
+ * call or a delayed status label. No new opponent model is inferred.
  *
- * KNOWN SIMPLIFICATION: every "raise" (including an opponent's very
- * first bet of a street, which isn't technically a re-raise) is
- * narrowed with narrowForThreeBet, since that's the only aggression
+ * KNOWN SIMPLIFICATION: observed "bet" and "raise" actions both retain
+ * the existing narrowForThreeBet treatment, the only aggression
  * narrowing tool available. A real opening-bet range is wider than a
  * genuine 3-bet range -- treat this as a reasonable starting model, not
  * a precise one, consistent with the rest of this module's documented
@@ -123,12 +121,12 @@ export function estimateOpponentRange(
 ): Range {
   let range = baseline;
   for (const action of actions) {
-    if (action === "raise") {
+    if (action === "raise" || action === "bet") {
       range = narrowForThreeBet(range);
     } else if (action === "call") {
       range = narrowForCall(range);
     }
-    // "fold" intentionally has no effect -- see doc comment above.
+    // Check/fold/all-in labels alone intentionally have no effect.
   }
   return range;
 }

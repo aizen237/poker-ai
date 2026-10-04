@@ -340,9 +340,22 @@ let actionHistory: ActionHistory = emptyActionHistory();
 setInterval(() => {
   const read = readLiveTable();
   const assessment = assessLiveState(read.raw, read.context);
-  logLiveDiagnostics(read, assessment);
   // Include blinds, dealer, and extraction failures in the identity of a read.
   const stateJson = JSON.stringify({ raw: read.raw, context: read.context });
+  if (stateJson !== lastStateJson) {
+    const state = assessment.state;
+    if (!state || read.context.readErrors.length > 0) {
+      previousGameState = null;
+      actionHistory = emptyActionHistory();
+    } else {
+      actionHistory = updateActionHistory(actionHistory, previousGameState, state, {
+        bigBlind: assessment.bigBlind,
+        dealerSeatNumber: read.context.dealerSeatNumber,
+      });
+      previousGameState = state;
+    }
+  }
+  logLiveDiagnostics(read, assessment, actionHistory);
   if (stateJson !== lastStateJson) {
     lastStateJson = stateJson;
     // Invalidate in-flight results on every changed or failed read, including
@@ -358,10 +371,7 @@ setInterval(() => {
     overlayState.aiWarnings = confidence.reasons;
     overlayState.aiStatus = "blocked";
     renderOverlay();
-    if (!state) { previousGameState = null; actionHistory = emptyActionHistory(); return; }
-
-    actionHistory = updateActionHistory(actionHistory, previousGameState, state);
-    previousGameState = state;
+    if (!state) return;
     const hero = state.seats.find((s) => s.isYou);
     const heroPosition = hero ? positions.get(hero.seatNumber) : undefined;
     // Gate ALL advice (including local push/fold and pot odds) before any
@@ -389,11 +399,14 @@ setInterval(() => {
 
         if (numOpponents === 1) {
           const opponent = state.seats.find((s) => s.isOccupied && !s.isYou && !s.isFolded)!;
-          const opponentActions = (actionHistory.get(opponent.seatNumber) ?? []).map((r) => r.action);
+          const opponentRecords = actionHistory.records.get(opponent.seatNumber) ?? [];
+          const opponentActions = opponentRecords.map((r) => r.action);
           opponentActionsDescription =
             opponentActions.length > 0
-              ? `Opponent's actions this hand so far (in order): ${opponentActions.join(", ")}.`
-              : "Opponent has taken no actions yet this hand.";
+              ? `Observed opponent actions (partial polling history): ${opponentRecords.map((r) =>
+                `${r.street} ${r.action}${r.wagerAction ? ` (${r.wagerAction})` : ""}${r.amount !== null ? ` to ${r.amount} chips this street` : ""} [observation ${r.observation}]`).join(", ")}.`
+              : "No opponent actions were observed; this does not establish that none occurred.";
+          if (actionHistory.notes.length > 0) opponentActionsDescription += ` Reconstruction notes: ${actionHistory.notes.join(" ")}`;
           const opponentPosition = positions.get(opponent.seatNumber);
           const estimatedRange = opponentPosition
             ? estimateOpponentRange(opponentActions, getOpeningRange(opponentPosition))

@@ -322,47 +322,178 @@
 
   // ../../packages/browser-reader/dist/actionHistory.js
   function emptyActionHistory() {
-    return /* @__PURE__ */ new Map();
+    return {
+      records: /* @__PURE__ */ new Map(),
+      observation: 0,
+      lastHeroCards: null,
+      lastHeroIdentity: null,
+      dealerSeatNumber: null,
+      streetContributions: /* @__PURE__ */ new Map(),
+      awaitingStreetBaseline: false,
+      notes: []
+    };
   }
-  function highestActiveBet(state) {
-    let highest = 0;
-    for (const seat of state.seats) {
-      if (seat.isOccupied && !seat.isFolded && seat.currentBet !== null && seat.currentBet > highest) {
-        highest = seat.currentBet;
+  function identity(seat) {
+    return seat?.isOccupied && seat.playerName ? `${seat.seatNumber}:${seat.playerName}` : null;
+  }
+  function heroCards(state) {
+    const cards = state.seats.find((s) => s.isYou && s.isOccupied)?.holeCards;
+    return cards?.length === 2 ? cards.map((c) => `${c.rank}${c.suit}`).sort().join(",") : null;
+  }
+  function contribution(seat) {
+    if (seat.betReadError)
+      return null;
+    if (seat.currentBet === null)
+      return 0;
+    return Number.isFinite(seat.currentBet) && seat.currentBet >= 0 ? seat.currentBet : null;
+  }
+  function boundaryReason(history, previous, current, context) {
+    const streets = ["preflop", "flop", "turn", "river"];
+    if (streets.indexOf(current.street) < streets.indexOf(previous.street))
+      return "Board/street regressed; started a fresh history baseline.";
+    if (previous.board.some((card, i) => current.board[i]?.rank !== card.rank || current.board[i]?.suit !== card.suit)) {
+      return "Board was cleared or replaced; started a fresh history baseline.";
+    }
+    const currentIdentity = identity(current.seats.find((s) => s.isYou));
+    const priorIdentity = history.lastHeroIdentity ?? identity(previous.seats.find((s) => s.isYou));
+    const knownCards = history.lastHeroCards ?? heroCards(previous);
+    const cards = heroCards(current);
+    if (currentIdentity !== null && currentIdentity === priorIdentity && knownCards !== null && cards !== null && cards !== knownCards) {
+      return "A different complete hero hand was observed; started a fresh history baseline.";
+    }
+    if (current.street === "preflop" && context.dealerSeatNumber != null && history.dealerSeatNumber !== null && context.dealerSeatNumber !== history.dealerSeatNumber) {
+      return "Dealer changed preflop; started a fresh history baseline.";
+    }
+    if (current.seats.some((seat) => {
+      const before = previous.seats.find((s) => s.seatNumber === seat.seatNumber);
+      return identity(seat) !== null && identity(seat) === identity(before) && before?.isFolded && !seat.isFolded;
+    }))
+      return "A folded player became active again; hand continuity is uncertain, so history was reset.";
+    return null;
+  }
+  function updateActionHistory(history, previous, current, context = {}) {
+    const boundary = previous ? boundaryReason(history, previous, current, context) : "No preceding read; actions before this baseline are unknown.";
+    const reset = boundary !== null;
+    const next = reset ? emptyActionHistory() : {
+      ...history,
+      records: new Map(history.records),
+      streetContributions: new Map(history.streetContributions),
+      notes: [...history.notes]
+    };
+    next.observation = history.observation + 1;
+    const note = (message) => {
+      if (!next.notes.includes(message))
+        next.notes.push(message);
+    };
+    if (boundary)
+      note(boundary);
+    const heroIdentity = identity(current.seats.find((s) => s.isYou));
+    if (heroIdentity !== null && heroIdentity !== next.lastHeroIdentity) {
+      next.lastHeroIdentity = heroIdentity;
+      next.lastHeroCards = null;
+    }
+    next.lastHeroCards = heroCards(current) ?? next.lastHeroCards ?? (previous && !reset ? heroCards(previous) : null);
+    next.dealerSeatNumber = context.dealerSeatNumber ?? next.dealerSeatNumber;
+    for (const seatNumber of next.records.keys()) {
+      const before = previous?.seats.find((s) => s.seatNumber === seatNumber);
+      const now = current.seats.find((s) => s.seatNumber === seatNumber);
+      if (identity(now) === null || identity(now) !== identity(before)) {
+        next.records.delete(seatNumber);
+        next.streetContributions.delete(seatNumber);
+        note("A seat disappeared or changed identity; its previous actions were discarded.");
       }
     }
-    return highest;
-  }
-  function isNewHand(previous, current) {
-    const prevHero = previous.seats.find((s) => s.isYou);
-    const currHero = current.seats.find((s) => s.isYou);
-    const prevCards = prevHero?.holeCards ?? [];
-    const currCards = currHero?.holeCards ?? [];
-    if (prevCards.length !== currCards.length)
-      return true;
-    return prevCards.some((c, i) => c.rank !== currCards[i]?.rank || c.suit !== currCards[i]?.suit);
-  }
-  function updateActionHistory(history, previous, current) {
-    if (!previous || isNewHand(previous, current)) {
-      return emptyActionHistory();
+    const sameStreet = previous !== null && previous.street === current.street;
+    const cleanStreet = current.seats.filter((s) => s.isOccupied && !s.isFolded).every((s) => contribution(s) === 0 && !s.isChecking);
+    if (!reset && (!sameStreet || history.awaitingStreetBaseline)) {
+      next.awaitingStreetBaseline = !cleanStreet;
+      next.streetContributions.clear();
+      if (next.awaitingStreetBaseline)
+        note("Street boundary has non-cleared action labels; waiting for a clean betting baseline.");
     }
-    const next = new Map(history);
-    const previousHighestBet = highestActiveBet(previous);
+    if (!sameStreet)
+      next.streetContributions.clear();
+    const baselineTotals = new Map(next.streetContributions);
+    if (!reset && sameStreet && !history.awaitingStreetBaseline && previous) {
+      for (const seat of previous.seats) {
+        const total = contribution(seat);
+        if (seat.isOccupied && total !== null)
+          baselineTotals.set(seat.seatNumber, Math.max(baselineTotals.get(seat.seatNumber) ?? 0, total));
+      }
+    }
     for (const seat of current.seats) {
-      if (!seat.isOccupied || seat.isYou)
-        continue;
-      const prevSeat = previous.seats.find((s) => s.seatNumber === seat.seatNumber);
-      if (!prevSeat || !prevSeat.isOccupied)
-        continue;
-      let action = null;
-      if (!prevSeat.isFolded && seat.isFolded) {
-        action = "fold";
-      } else if (seat.currentBet !== null && seat.currentBet !== prevSeat.currentBet) {
-        action = seat.currentBet > previousHighestBet ? "raise" : "call";
+      const before = previous?.seats.find((s) => s.seatNumber === seat.seatNumber);
+      if (identity(seat) === null || identity(seat) !== identity(before)) {
+        baselineTotals.delete(seat.seatNumber);
+        next.streetContributions.delete(seat.seatNumber);
       }
+      const total = contribution(seat);
+      if (seat.isOccupied && total !== null)
+        next.streetContributions.set(seat.seatNumber, Math.max(baselineTotals.get(seat.seatNumber) ?? 0, total));
+    }
+    if (reset || !previous)
+      return next;
+    if (!sameStreet) {
+      note("Street changed; actions spanning the transition were not reconstructed.");
+      return next;
+    }
+    if (history.awaitingStreetBaseline)
+      return next;
+    const pairs = current.seats.flatMap((seat) => {
+      const before = previous.seats.find((s) => s.seatNumber === seat.seatNumber);
+      return before && identity(seat) !== null && identity(seat) === identity(before) ? [{ seat, before }] : [];
+    });
+    const increased = pairs.filter(({ seat, before }) => !seat.isFolded && !before.isFolded && contribution(seat) !== null && contribution(seat) > (baselineTotals.get(seat.seatNumber) ?? 0));
+    const activeBefore = previous.seats.filter((s) => s.isOccupied && !s.isFolded);
+    const unknownWager = activeBefore.some((s) => contribution(s) === null) || current.seats.some((s) => s.isOccupied && !s.isFolded && contribution(s) === null);
+    const rosterChanged = previous.seats.some((s) => identity(s) !== identity(current.seats.find((now) => now.seatNumber === s.seatNumber))) || current.seats.some((s) => identity(s) !== identity(previous.seats.find((before) => before.seatNumber === s.seatNumber)));
+    const previousHighest = Math.max(0, ...activeBefore.map((s) => baselineTotals.get(s.seatNumber) ?? contribution(s) ?? 0));
+    if (increased.length > 1)
+      note("Multiple wagers changed in one observation; bet/call/raise order is unknown and was omitted.");
+    if (unknownWager)
+      note("An active contribution was unreadable; numeric action classification was omitted.");
+    if (rosterChanged)
+      note("Seat identities changed during the observation; numeric action classification was omitted.");
+    for (const { seat, before } of pairs) {
+      if (seat.isYou || before.isFolded)
+        continue;
+      const records = next.records.get(seat.seatNumber) ?? [];
+      const total = contribution(seat);
+      const priorTotal = baselineTotals.get(seat.seatNumber) ?? 0;
+      let action = null;
+      let wagerAction = null;
+      const grew = total !== null && total > priorTotal;
+      const possiblePosting = current.street === "preflop" && (!before.isCurrentToAct || previousHighest === 0 || priorTotal === 0 && context.bigBlind != null && total !== null && total <= context.bigBlind);
+      if (possiblePosting && (grew || !before.isAllIn && seat.isAllIn)) {
+        note("Preflop posting or unobserved turn: wager/all-in was not treated as a voluntary action.");
+      }
+      if (grew && !unknownWager && !rosterChanged && increased.length === 1 && !possiblePosting) {
+        if (previousHighest === 0)
+          wagerAction = "bet";
+        else if (total > previousHighest)
+          wagerAction = "raise";
+        else if (total === previousHighest || seat.isAllIn)
+          wagerAction = "call";
+        else
+          note("A partial contribution without an all-in label was omitted.");
+      }
+      if (!before.isFolded && seat.isFolded)
+        action = "fold";
+      else if (!before.isAllIn && seat.isAllIn && !possiblePosting && !records.some((r) => r.action === "all-in"))
+        action = "all-in";
+      else if (seat.isChecking && !before.isChecking && !seat.isAllIn && !before.isAllIn && !unknownWager && previousHighest <= priorTotal && !records.some((r) => r.street === current.street && r.action === "check"))
+        action = "check";
+      else if (!seat.isAllIn && !before.isAllIn)
+        action = wagerAction;
       if (action) {
-        const existing = next.get(seat.seatNumber) ?? [];
-        next.set(seat.seatNumber, [...existing, { street: current.street, action }]);
+        next.records.set(seat.seatNumber, [...records, {
+          street: current.street,
+          action,
+          seat: seat.seatNumber,
+          observation: next.observation,
+          amount: action === "check" || action === "fold" || seat.currentBet === null ? null : total,
+          wagerAction: action === "all-in" ? wagerAction : null
+        }]);
       }
     }
     return next;
@@ -645,9 +776,9 @@
 
   // ../../packages/poker-engine/dist/equity.js
   var DEFAULT_ITERATIONS = 1e4;
-  function calculateEquity(heroCards, board, numOpponents, options = {}) {
-    if (heroCards.length !== 2) {
-      throw new Error(`calculateEquity requires exactly 2 hero cards, got ${heroCards.length}`);
+  function calculateEquity(heroCards2, board, numOpponents, options = {}) {
+    if (heroCards2.length !== 2) {
+      throw new Error(`calculateEquity requires exactly 2 hero cards, got ${heroCards2.length}`);
     }
     if (board.length > 5) {
       throw new Error(`Board cannot have more than 5 cards, got ${board.length}`);
@@ -662,7 +793,7 @@
     let wins = 0;
     let ties = 0;
     let losses = 0;
-    const knownCards = [...heroCards, ...board];
+    const knownCards = [...heroCards2, ...board];
     for (let i = 0; i < iterations; i++) {
       const deck = new Deck(rng, knownCards);
       const opponentHoleCards = [];
@@ -670,7 +801,7 @@
         opponentHoleCards.push(deck.drawMany(2));
       }
       const runoutBoard = [...board, ...deck.drawMany(cardsToComplete)];
-      const heroValue = evaluateBest([...heroCards, ...runoutBoard]).value;
+      const heroValue = evaluateBest([...heroCards2, ...runoutBoard]).value;
       const opponentValues = opponentHoleCards.map((hole) => evaluateBest([...hole, ...runoutBoard]).value);
       const maxValue = Math.max(heroValue, ...opponentValues);
       if (heroValue < maxValue) {
@@ -5120,9 +5251,9 @@
     }
     return combos[combos.length - 1];
   }
-  function calculateEquityVsRange(heroCards, opponentRange, board, options = {}) {
-    if (heroCards.length !== 2) {
-      throw new Error(`calculateEquityVsRange requires exactly 2 hero cards, got ${heroCards.length}`);
+  function calculateEquityVsRange(heroCards2, opponentRange, board, options = {}) {
+    if (heroCards2.length !== 2) {
+      throw new Error(`calculateEquityVsRange requires exactly 2 hero cards, got ${heroCards2.length}`);
     }
     if (board.length > 5) {
       throw new Error(`Board cannot have more than 5 cards, got ${board.length}`);
@@ -5130,7 +5261,7 @@
     const iterations = options.iterations ?? DEFAULT_ITERATIONS2;
     const rng = options.rng ?? Math.random;
     const cardsToComplete = 5 - board.length;
-    const knownCards = [...heroCards, ...board];
+    const knownCards = [...heroCards2, ...board];
     const opponentCombos = expandRange(opponentRange, knownCards);
     if (opponentCombos.length === 0) {
       throw new Error("Opponent range has no valid combos remaining after excluding known cards");
@@ -5141,7 +5272,7 @@
       const excludeThisIteration = [...knownCards, ...opponentCombo.cards];
       const deck = new Deck(rng, excludeThisIteration);
       const runoutBoard = [...board, ...deck.drawMany(cardsToComplete)];
-      const heroValue = evaluateBest([...heroCards, ...runoutBoard]).value;
+      const heroValue = evaluateBest([...heroCards2, ...runoutBoard]).value;
       const opponentValue = evaluateBest([...opponentCombo.cards, ...runoutBoard]).value;
       if (heroValue > opponentValue)
         winShareSum += 1;
@@ -5438,7 +5569,7 @@
 
   // ../../packages/range-engine/dist/pushFold.js
   var DEFAULT_FOLD_EQUITY = 0.5;
-  function evaluateShove(heroCards, effectiveStackBB, potBB, options = {}) {
+  function evaluateShove(heroCards2, effectiveStackBB, potBB, options = {}) {
     if (effectiveStackBB <= 0) {
       throw new Error(`effectiveStackBB must be positive, got ${effectiveStackBB}`);
     }
@@ -5449,7 +5580,7 @@
     if (foldEquity < 0 || foldEquity > 1) {
       throw new Error(`foldEquity must be between 0 and 1, got ${foldEquity}`);
     }
-    const equityResult = calculateEquity(heroCards, [], 1, {
+    const equityResult = calculateEquity(heroCards2, [], 1, {
       ...options.iterations !== void 0 ? { iterations: options.iterations } : {},
       ...options.rng !== void 0 ? { rng: options.rng } : {}
     });
@@ -5540,7 +5671,7 @@
   function estimateOpponentRange(actions, baseline = defaultBaselineRange()) {
     let range = baseline;
     for (const action of actions) {
-      if (action === "raise") {
+      if (action === "raise" || action === "bet") {
         range = narrowForThreeBet(range);
       } else if (action === "call") {
         range = narrowForCall(range);
@@ -5651,7 +5782,7 @@
   // src/diagnostics.ts
   var DIAGNOSTICS_KEY = "poker-ai:diagnostics";
   var lastSnapshot = null;
-  function logLiveDiagnostics(read, assessment) {
+  function logLiveDiagnostics(read, assessment, history) {
     let enabled = false;
     try {
       enabled = localStorage.getItem(DIAGNOSTICS_KEY) === "1";
@@ -5666,6 +5797,7 @@
       raw: read.raw,
       evidence: read.evidence,
       context: read.context,
+      actionHistory: { records: Object.fromEntries(history.records), observation: history.observation, notes: history.notes },
       parsed: {
         ...assessment,
         positions: Object.fromEntries(assessment.positions),
@@ -5685,6 +5817,7 @@
     lastSnapshot = serialized;
     console.groupCollapsed(`[Poker AI State] ${(/* @__PURE__ */ new Date()).toISOString()} | ${assessment.state?.street ?? "unreadable"} | confidence=${assessment.confidence.level}`);
     console.log("Snapshot (raw selectors -> parsed fields -> confidence)", JSON.parse(serialized));
+    console.table([...history.records.values()].flat());
     console.table(read.raw.seats.map((raw) => {
       const seat = seats.find((s) => s.seatNumber === raw.seatNumber);
       return {
@@ -5940,8 +6073,21 @@
   setInterval(() => {
     const read = readLiveTable();
     const assessment = assessLiveState(read.raw, read.context);
-    logLiveDiagnostics(read, assessment);
     const stateJson = JSON.stringify({ raw: read.raw, context: read.context });
+    if (stateJson !== lastStateJson) {
+      const state = assessment.state;
+      if (!state || read.context.readErrors.length > 0) {
+        previousGameState = null;
+        actionHistory = emptyActionHistory();
+      } else {
+        actionHistory = updateActionHistory(actionHistory, previousGameState, state, {
+          bigBlind: assessment.bigBlind,
+          dealerSeatNumber: read.context.dealerSeatNumber
+        });
+        previousGameState = state;
+      }
+    }
+    logLiveDiagnostics(read, assessment, actionHistory);
     if (stateJson !== lastStateJson) {
       lastStateJson = stateJson;
       lastRecommendationRequestKey = null;
@@ -5955,13 +6101,7 @@
       overlayState.aiWarnings = confidence.reasons;
       overlayState.aiStatus = "blocked";
       renderOverlay();
-      if (!state) {
-        previousGameState = null;
-        actionHistory = emptyActionHistory();
-        return;
-      }
-      actionHistory = updateActionHistory(actionHistory, previousGameState, state);
-      previousGameState = state;
+      if (!state) return;
       const hero = state.seats.find((s) => s.isYou);
       const heroPosition = hero ? positions.get(hero.seatNumber) : void 0;
       if (confidence.level === "low" || !hero || hero.stack === null || bigBlind === null || amountToCall === null || decisionPot === null || heroPosition === void 0) return;
@@ -5977,8 +6117,10 @@
           let opponentActionsDescription;
           if (numOpponents === 1) {
             const opponent = state.seats.find((s) => s.isOccupied && !s.isYou && !s.isFolded);
-            const opponentActions = (actionHistory.get(opponent.seatNumber) ?? []).map((r) => r.action);
-            opponentActionsDescription = opponentActions.length > 0 ? `Opponent's actions this hand so far (in order): ${opponentActions.join(", ")}.` : "Opponent has taken no actions yet this hand.";
+            const opponentRecords = actionHistory.records.get(opponent.seatNumber) ?? [];
+            const opponentActions = opponentRecords.map((r) => r.action);
+            opponentActionsDescription = opponentActions.length > 0 ? `Observed opponent actions (partial polling history): ${opponentRecords.map((r) => `${r.street} ${r.action}${r.wagerAction ? ` (${r.wagerAction})` : ""}${r.amount !== null ? ` to ${r.amount} chips this street` : ""} [observation ${r.observation}]`).join(", ")}.` : "No opponent actions were observed; this does not establish that none occurred.";
+            if (actionHistory.notes.length > 0) opponentActionsDescription += ` Reconstruction notes: ${actionHistory.notes.join(" ")}`;
             const opponentPosition = positions.get(opponent.seatNumber);
             const estimatedRange = opponentPosition ? estimateOpponentRange(opponentActions, getOpeningRange(opponentPosition)) : estimateOpponentRange(opponentActions);
             try {

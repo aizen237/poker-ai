@@ -1,5 +1,8 @@
 # Verify one live PokerNow hand
 
+Action records and reconstruction notes now appear in the same diagnostics.
+See [ACTION_HISTORY.md](ACTION_HISTORY.md) for their meaning and polling limits.
+
 The reader currently withholds recommendations, local push/fold output, and
 pot odds because the meaning of the displayed main/add-on pot values has not
 been confirmed. The overlay shows BLOCKED and explains the missing evidence.

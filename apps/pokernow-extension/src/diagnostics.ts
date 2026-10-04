@@ -1,4 +1,4 @@
-import type { LiveStateAssessment } from "@poker-ai/browser-reader";
+import type { ActionHistory, LiveStateAssessment } from "@poker-ai/browser-reader";
 import { formatCards } from "@poker-ai/shared";
 import type { LiveTableRead } from "./tableRead.js";
 
@@ -6,13 +6,14 @@ const DIAGNOSTICS_KEY = "poker-ai:diagnostics";
 let lastSnapshot: string | null = null;
 
 /** Opt in from the PokerNow tab console; re-read the toggle on every poll. */
-export function logLiveDiagnostics(read: LiveTableRead, assessment: LiveStateAssessment): void {
+export function logLiveDiagnostics(read: LiveTableRead, assessment: LiveStateAssessment, history: ActionHistory): void {
   let enabled = false;
   try { enabled = localStorage.getItem(DIAGNOSTICS_KEY) === "1"; } catch { /* Storage disabled: diagnostics stay off. */ }
   if (!enabled) { lastSnapshot = null; return; }
   const seats = assessment.state?.seats ?? [];
   const snapshot = {
     raw: read.raw, evidence: read.evidence, context: read.context,
+    actionHistory: { records: Object.fromEntries(history.records), observation: history.observation, notes: history.notes },
     parsed: {
       ...assessment, positions: Object.fromEntries(assessment.positions),
       boardCards: assessment.state ? formatCards(assessment.state.board) : null,
@@ -32,6 +33,7 @@ export function logLiveDiagnostics(read: LiveTableRead, assessment: LiveStateAss
   console.groupCollapsed(`[Poker AI State] ${new Date().toISOString()} | ${assessment.state?.street ?? "unreadable"} | confidence=${assessment.confidence.level}`);
   // Serialize/parse so DevTools cannot display a later mutation of the snapshot.
   console.log("Snapshot (raw selectors -> parsed fields -> confidence)", JSON.parse(serialized));
+  console.table([...history.records.values()].flat());
   console.table(read.raw.seats.map((raw) => {
     const seat = seats.find((s) => s.seatNumber === raw.seatNumber);
     return {

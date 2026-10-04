@@ -96,6 +96,25 @@ describe("combo weights carry through narrowing correctly", () => {
 
 
 describe("estimateOpponentRange", () => {
+  it("accepts an opening bet with the existing simple aggression treatment", () => {
+    const baseline = getOpeningRange("BTN");
+    expect(estimateOpponentRange(["bet"], baseline)).toEqual(estimateOpponentRange(["raise"], baseline));
+  });
+
+  it.each(["check", "fold", "all-in"] as const)("does not invent range information from %s alone", (action) => {
+    const baseline = getOpeningRange("BTN");
+    expect(estimateOpponentRange([action], baseline)).toEqual(baseline);
+  });
+
+  it("does not narrow twice when an all-in status arrives after a bet", () => {
+    const baseline = getOpeningRange("BTN");
+    expect(estimateOpponentRange(["bet", "all-in"], baseline)).toEqual(estimateOpponentRange(["bet"], baseline));
+  });
+
+  it("accepts the expanded action vocabulary in a mixed observed history", () => {
+    const baseline = getOpeningRange("BTN");
+    expect(estimateOpponentRange(["check", "bet", "call", "all-in", "fold"], baseline)).toEqual(estimateOpponentRange(["raise", "call"], baseline));
+  });
   it("returns the baseline unchanged when there are no actions", () => {
     const baseline = rangeFromList(["AA", "KK", "QQ", "AKs"]);
     const result = estimateOpponentRange([], baseline);
