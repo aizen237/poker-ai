@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { buildPreflopContext, PreflopContextSchema } from "./preflopContext.js";
 
 const CardSchema = z.object({
   rank: z.union([
@@ -79,6 +80,8 @@ export const DecisionPacketSchema = z.object({
 
   /** Derived via deriveCandidateActions() -- see its doc comment above. */
   candidateActions: z.array(CandidateActionSchema).min(1),
+  /** Optional for legacy packets; preflop requests without it yield uncertainty. */
+  preflop: PreflopContextSchema.optional(),
 
   engineCalculations: z.object({
     equity: z.number().min(0).max(1).optional(),
@@ -114,5 +117,14 @@ export type DecisionPacket = z.infer<typeof DecisionPacketSchema>;
 
 /** Validates and returns a typed packet, throwing with a clear message on any schema violation. */
 export function validateDecisionPacket(input: unknown): DecisionPacket {
-  return DecisionPacketSchema.parse(input);
+  const packet = DecisionPacketSchema.parse(input);
+  if (packet.preflop) {
+    if (packet.table.street !== "preflop") throw new Error("Preflop context cannot accompany a postflop packet");
+    const context = buildPreflopContext(packet.preflop);
+    if (context.heroPosition !== packet.hero.position || context.heroStackBB !== packet.hero.stackBB ||
+        context.potBB !== packet.table.potBB || context.activeOpponents !== packet.table.numOpponentsRemaining ||
+        context.amountToCallBB !== (packet.facingAction.amountBB ?? 0)) throw new Error("Preflop context contradicts the DecisionPacket");
+    packet.preflop = context;
+  }
+  return packet;
 }

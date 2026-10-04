@@ -10,6 +10,7 @@ import {
   createModelRouter,
   getModelsByProvider,
   validateDecisionPacket,
+  preflopUncertainty,
   validateActionLegality,
   validateReasoningConsistency,
   type RouterOptions,
@@ -64,6 +65,11 @@ app.post("/recommendation", async (req, res) => {
     const packet = validateDecisionPacket(req.body.decisionPacket);
     const mode: RouterOptions["mode"] = req.body.mode ?? "fast";
 
+    const uncertainty = preflopUncertainty(packet);
+    if (uncertainty) {
+      res.json({ ok: true, result: null, blocked: true, blockedReason: "preflop_model_uncertain", uncertainty });
+      return;
+    }
     if (packet.dataConfidence === "low") {
       res.json({
         ok: true,

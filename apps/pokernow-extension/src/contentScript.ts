@@ -1,3 +1,4 @@
+import { buildLivePreflopContext } from "./preflop.js";
 import {
   assessLiveState,
   emptyActionHistory,
@@ -15,8 +16,8 @@ import {
   calculateSPR,
   classifyBoardTexture,
 } from "@poker-ai/poker-engine";
-import { deriveCandidateActions, type DecisionPacket } from "@poker-ai/ai-core";
-import { calculateEquityVsRange, estimateOpponentRange, evaluateShove, getOpeningRange } from "@poker-ai/range-engine";
+import { preflopUncertainty, deriveCandidateActions, type DecisionPacket } from "@poker-ai/ai-core";
+import { calculateEquityVsRange, estimateOpponentRange, getOpeningRange } from "@poker-ai/range-engine";
 import { readLiveTable } from "./tableRead.js";
 import { logLiveDiagnostics } from "./diagnostics.js";
 console.log("[Poker AI Reader] Content script loaded on:", window.location.href);
@@ -238,41 +239,6 @@ function buildDecisionPacket(input: BuildDecisionPacketInput): DecisionPacket {
   };
 }
 
-const SHORT_STACK_BB_THRESHOLD = 20;
-
-/**
- * Preflop push/fold advice, position-independent. Opening-range estimates
- * elsewhere use dealer-button positions when available. Only fires below
- * a stack-depth threshold, since push/fold logic isn't the right tool for
- * deep-stacked preflop
- * decisions -- deep-stack preflop instead goes through the same general
- * AI pipeline as every other street (see the caller below). Returns
- * whether it actually fired, so the caller can keep the two advice
- * sources mutually exclusive -- a short stack should never get both a
- * push/fold verdict AND a separate, possibly contradictory, AI
- * recommendation for the same decision.
- */
-function checkPreflopPushFold(state: GameState, bigBlind: number, decisionPot: number): boolean {
-  const hero = state.seats.find((s) => s.isYou);
-  if (!hero || hero.holeCards.length !== 2 || !hero.isCurrentToAct || state.street !== "preflop") return false;
-
-  if (hero.stack === null || !Number.isFinite(bigBlind) || bigBlind <= 0) return false;
-  const stackBB = hero.stack / bigBlind;
-  if (stackBB <= 0 || stackBB > SHORT_STACK_BB_THRESHOLD) return false;
-
-  const potBB = decisionPot / bigBlind;
-  if (potBB <= 0) return false;
-
-  const shove = evaluateShove(hero.holeCards, stackBB, potBB, { iterations: 2000 });
-  const preflopLine = `PREFLOP (${stackBB.toFixed(1)}BB effective): ${
-    shove.isProfitable ? "SHOVE profitable" : "SHOVE not profitable"
-  } (EV: ${shove.ev.toFixed(2)}BB, equity if called: ${(shove.equityIfCalled * 100).toFixed(1)}%, assumed fold equity: ${(shove.foldEquityUsed * 100).toFixed(0)}%)`;
-  console.log(`[Poker AI Reader] ${preflopLine}`);
-  overlayState.preflopLine = preflopLine;
-  renderOverlay();
-  return true;
-}
-
 /**
  * requestKey is the value lastRecommendationRequestKey held at the
  * moment THIS request was sent. Fixes a real race: the existing dedup
@@ -301,7 +267,11 @@ async function requestRecommendation(packet: DecisionPacket, stateDescription: s
       return;
     }
 
-    if (data.ok) {
+    if (data.ok && data.result === null && data.blocked) {
+      overlayState.aiResult = null;
+      overlayState.aiStatus = "blocked";
+      overlayState.aiWarnings = data.uncertainty ?? [data.blockedReason];
+    } else if (data.ok) {
       console.log(`[Poker AI Reader] AI recommendation (for: ${stateDescription}):`, data.result);
       overlayState.aiResult = {
         action: data.result.action,
@@ -355,7 +325,8 @@ setInterval(() => {
       previousGameState = state;
     }
   }
-  logLiveDiagnostics(read, assessment, actionHistory);
+  const preflop = buildLivePreflopContext(assessment, actionHistory);
+  logLiveDiagnostics(read, assessment, actionHistory, preflop);
   if (stateJson !== lastStateJson) {
     lastStateJson = stateJson;
     // Invalidate in-flight results on every changed or failed read, including
@@ -374,20 +345,46 @@ setInterval(() => {
     if (!state) return;
     const hero = state.seats.find((s) => s.isYou);
     const heroPosition = hero ? positions.get(hero.seatNumber) : undefined;
-    // Gate ALL advice (including local push/fold and pot odds) before any
-    // BB conversion or request. Pot semantics remain unresolved pending capture.
+    if (preflop) {
+      overlayState.preflopLine = "Preflop: " + preflop.situation + (preflop.decisionSupport === "uncertain" ? " - insufficient strategic model / uncertain" : "");
+      overlayState.aiWarnings = [...confidence.reasons, ...preflop.reasons];
+      renderOverlay();
+    }
+    // Gate ALL advice (including preflop and pot odds) before any
+    // strategic calculation or request. Pot semantics remain unresolved pending capture.
     if (confidence.level === "low" || !hero || hero.stack === null || bigBlind === null ||
         amountToCall === null || decisionPot === null || heroPosition === undefined) return;
 
     overlayState.aiStatus = "idle";
-    const shortStackPushFoldFired = checkPreflopPushFold(state, bigBlind, decisionPot);
-
-    // Runs for every street EXCEPT when the short-stack push/fold advice
-    // above already fired for this exact decision -- deep-stack preflop
-    // (or preflop with no valid push/fold read, e.g. pot not yet posted)
-    // now goes through the same general pipeline as postflop, rather
-    // than being silently skipped.
-    if (hero && hero.holeCards.length === 2 && !shortStackPushFoldFired) {
+    if (state.street === "preflop") {
+      if (!preflop) {
+        overlayState.aiStatus = "blocked";
+        overlayState.aiWarnings = ["Structured preflop context is unavailable."];
+        renderOverlay();
+        return;
+      }
+      const facing = amountToCall > 0 ? "raise" : "none";
+      const packet: DecisionPacket = {
+        hero: { holeCards: hero.holeCards as DecisionPacket["hero"]["holeCards"], position: heroPosition, stackBB: hero.stack / bigBlind },
+        table: { potBB: decisionPot / bigBlind, board: [], street: "preflop", numOpponentsRemaining: preflop.activeOpponents },
+        facingAction: { type: facing, ...(amountToCall > 0 ? { amountBB: amountToCall / bigBlind } : {}) },
+        candidateActions: deriveCandidateActions(facing), engineCalculations: {}, dataConfidence: confidence.level, preflop,
+      };
+      const uncertainty = preflopUncertainty(packet);
+      overlayState.preflopLine = "Preflop: " + preflop.situation;
+      if (uncertainty) {
+        overlayState.aiStatus = "blocked";
+        overlayState.aiWarnings = uncertainty;
+      } else if (hero.isCurrentToAct && hero.holeCards.length === 2) {
+        const requestKey = requestSequence + ":" + stateJson;
+        lastRecommendationRequestKey = requestKey;
+        overlayState.aiStatus = "waiting";
+        requestRecommendation(packet, "structured preflop", requestKey);
+      }
+      renderOverlay();
+      return;
+    }
+    if (hero && hero.holeCards.length === 2) {
       const numOpponents = state.seats.filter(
         (s) => s.isOccupied && !s.isYou && !s.isFolded,
       ).length;

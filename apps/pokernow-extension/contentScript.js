@@ -6,956 +6,6 @@
       __defProp(target, name, { get: all[name], enumerable: true });
   };
 
-  // ../../packages/browser-reader/dist/cardParsing.js
-  var CLASS_SUIT_MAP = {
-    "card-s": "s",
-    "card-h": "h",
-    "card-d": "d",
-    "card-c": "c"
-  };
-  var CLASS_RANK_MAP = {
-    "card-s-2": 2,
-    "card-s-3": 3,
-    "card-s-4": 4,
-    "card-s-5": 5,
-    "card-s-6": 6,
-    "card-s-7": 7,
-    "card-s-8": 8,
-    "card-s-9": 9,
-    "card-s-T": 10,
-    "card-s-J": 11,
-    "card-s-Q": 12,
-    "card-s-K": 13,
-    "card-s-A": 14
-  };
-  function parseHoleCardFromClassList(classList) {
-    if (!classList.includes("flipped")) {
-      return null;
-    }
-    let suit;
-    let rank;
-    for (const cls of classList) {
-      if (cls in CLASS_SUIT_MAP) {
-        if (suit !== void 0 && suit !== CLASS_SUIT_MAP[cls])
-          return null;
-        suit = CLASS_SUIT_MAP[cls];
-      }
-      if (cls in CLASS_RANK_MAP) {
-        if (rank !== void 0 && rank !== CLASS_RANK_MAP[cls])
-          return null;
-        rank = CLASS_RANK_MAP[cls];
-      }
-    }
-    if (suit === void 0 || rank === void 0) {
-      return null;
-    }
-    return { rank, suit };
-  }
-  var TEXT_SUIT_MAP = {
-    h: "h",
-    s: "s",
-    d: "d",
-    c: "c"
-  };
-  var TEXT_RANK_MAP = {
-    "2": 2,
-    "3": 3,
-    "4": 4,
-    "5": 5,
-    "6": 6,
-    "7": 7,
-    "8": 8,
-    "9": 9,
-    "10": 10,
-    J: 11,
-    Q: 12,
-    K: 13,
-    A: 14
-  };
-  function parseBoardCardFromText(valueText, suitText) {
-    const rank = TEXT_RANK_MAP[valueText.trim()];
-    const suit = TEXT_SUIT_MAP[suitText.trim().toLowerCase()];
-    if (rank === void 0) {
-      throw new Error(`Unrecognized board card value text: "${valueText}"`);
-    }
-    if (suit === void 0) {
-      throw new Error(`Unrecognized board card suit text: "${suitText}"`);
-    }
-    return { rank, suit };
-  }
-
-  // ../../packages/browser-reader/dist/tableInfoParsing.js
-  function parseChipsValueText(normalValueText) {
-    const text = normalValueText.trim();
-    const cleaned = text.replace(/,/g, "");
-    if (cleaned.length === 0) {
-      throw new Error(`Chips value text is empty (expected a number, got an empty string)`);
-    }
-    const value = Number(cleaned);
-    if (!/^(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$/.test(text) || !Number.isFinite(value) || value < 0) {
-      throw new Error(`Unrecognized chips value text: "${normalValueText}"`);
-    }
-    return value;
-  }
-  function parsePotSizeInfo(mainValueText, totalValueText) {
-    return {
-      mainValue: parseChipsValueText(mainValueText),
-      totalValue: totalValueText !== null ? parseChipsValueText(totalValueText) : null
-    };
-  }
-  var ALL_IN_STACK_TEXT = "all in";
-  function isAllInStackText(text) {
-    return text?.trim().replace(/\s+/g, " ").toLowerCase() === ALL_IN_STACK_TEXT;
-  }
-  function parseBlindValues(texts) {
-    const parse = (text) => {
-      if (text == null)
-        return null;
-      try {
-        const value = parseChipsValueText(text);
-        return value > 0 ? value : null;
-      } catch {
-        return null;
-      }
-    };
-    return { smallBlind: parse(texts[0]), bigBlind: parse(texts[1]) };
-  }
-  function parsePlayerNameAndStack(nameText, stackText) {
-    const name = nameText.trim();
-    if (name.length === 0) {
-      throw new Error("Player name text is empty");
-    }
-    if (isAllInStackText(stackText)) {
-      return { name, stack: null };
-    }
-    return {
-      name,
-      stack: parseChipsValueText(stackText)
-    };
-  }
-
-  // ../../packages/browser-reader/dist/gameState.js
-  function deriveStreet(boardCardCount) {
-    if (boardCardCount === 0)
-      return "preflop";
-    if (boardCardCount === 3)
-      return "flop";
-    if (boardCardCount === 4)
-      return "turn";
-    if (boardCardCount === 5)
-      return "river";
-    throw new Error(`Unexpected board card count: ${boardCardCount} (expected 0, 3, 4, or 5)`);
-  }
-  function parseBetValue(betValueText) {
-    if (betValueText === null)
-      return null;
-    const trimmed = betValueText.trim();
-    if (trimmed.length === 0)
-      return null;
-    try {
-      return parseChipsValueText(trimmed);
-    } catch {
-      return null;
-    }
-  }
-  function isCheckText(betValueText) {
-    return betValueText !== null && betValueText.trim().toLowerCase() === "check";
-  }
-  function assembleSeat(raw) {
-    if (!raw.isOccupied) {
-      return {
-        seatNumber: raw.seatNumber,
-        isOccupied: false,
-        isYou: false,
-        playerName: null,
-        stack: null,
-        isFolded: false,
-        isCurrentToAct: false,
-        isOffline: false,
-        holeCards: [],
-        currentBet: null,
-        isChecking: false
-      };
-    }
-    const isFolded = raw.statusClasses.includes("fold");
-    const isCurrentToAct = raw.statusClasses.includes("decision-current");
-    const isOffline = raw.statusClasses.includes("offline");
-    const playerName = raw.playerNameText?.trim() || null;
-    let stack = null;
-    if (playerName !== null && raw.stackText !== null) {
-      try {
-        stack = parsePlayerNameAndStack(playerName, raw.stackText).stack;
-      } catch {
-        stack = null;
-      }
-    }
-    const holeCards = raw.holeCardClassLists.map(parseHoleCardFromClassList).filter((c) => c !== null);
-    return {
-      seatNumber: raw.seatNumber,
-      isOccupied: true,
-      isYou: raw.isYou,
-      playerName,
-      stack,
-      isAllIn: isAllInStackText(raw.stackText),
-      betReadError: raw.betValueText !== null && parseBetValue(raw.betValueText) === null && !isCheckText(raw.betValueText),
-      isFolded,
-      isCurrentToAct,
-      isOffline,
-      holeCards,
-      currentBet: parseBetValue(raw.betValueText),
-      isChecking: isCheckText(raw.betValueText)
-    };
-  }
-  function assembleGameState(raw) {
-    if (raw.potMainValueText === null)
-      throw new Error("Main pot element is missing");
-    const board = raw.boardCards.map((c) => parseBoardCardFromText(c.valueText, c.suitText));
-    const potInfo = parsePotSizeInfo(raw.potMainValueText, raw.potTotalValueText);
-    const seats = raw.seats.map(assembleSeat);
-    return {
-      seats,
-      board,
-      potMainValue: potInfo.mainValue,
-      potTotalValue: potInfo.totalValue,
-      street: deriveStreet(board.length)
-    };
-  }
-  function calculateAmountToCall(state) {
-    const heroes = state.seats.filter((s) => s.isOccupied && s.isYou);
-    const hero = heroes[0];
-    if (heroes.length !== 1 || !hero || hero.isFolded)
-      return null;
-    const relevantSeats = state.seats.filter((s) => s.isOccupied && !s.isFolded);
-    if (relevantSeats.some((s) => s.betReadError || s.currentBet !== null && (!Number.isFinite(s.currentBet) || s.currentBet < 0)))
-      return null;
-    const heroBet = hero?.currentBet ?? 0;
-    const highestOpponentBet = state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded && s.currentBet !== null).reduce((max, s) => Math.max(max, s.currentBet), 0);
-    return Math.max(0, highestOpponentBet - heroBet);
-  }
-
-  // ../../packages/browser-reader/dist/dataConfidence.js
-  var EXPECTED_BOARD_COUNT = {
-    preflop: 0,
-    flop: 3,
-    turn: 4,
-    river: 5
-  };
-  function computeDataConfidence(state, context) {
-    const criticalReasons = [];
-    const uncertainReasons = [];
-    const hero = state.seats.find((s) => s.isYou);
-    if (state.seats.filter((s) => s.isOccupied && s.isYou).length > 1) {
-      criticalReasons.push("multiple hero seats found");
-    }
-    if (state.seats.filter((s) => s.isOccupied && s.isCurrentToAct).length !== 1) {
-      criticalReasons.push("current player to act is missing or ambiguous");
-    }
-    if (new Set(state.seats.map((s) => s.seatNumber)).size !== state.seats.length) {
-      criticalReasons.push("duplicate seat numbers");
-    }
-    if (!hero || !hero.isOccupied) {
-      criticalReasons.push("hero seat not found in state");
-    } else {
-      if (hero.holeCards.length !== 2) {
-        criticalReasons.push(`hero hole cards incomplete (${hero.holeCards.length}/2)`);
-      }
-      if (hero.stack === null || !Number.isFinite(hero.stack) || hero.stack < 0) {
-        criticalReasons.push("hero stack missing or invalid");
-      }
-      if (hero.isFolded) {
-        criticalReasons.push("hero has already folded -- no decision to make");
-      }
-      if (!hero.isCurrentToAct) {
-        criticalReasons.push("it is not hero's turn -- unsafe to base a decision on this state");
-      }
-      if (hero.isOffline) {
-        criticalReasons.push("hero is showing as offline");
-      }
-    }
-    const expectedBoardCount = EXPECTED_BOARD_COUNT[state.street];
-    const visibleCards = [...state.board, ...state.seats.filter((s) => s.isOccupied).flatMap((s) => s.holeCards)];
-    if (new Set(visibleCards.map((c) => `${c.rank}${c.suit}`)).size !== visibleCards.length) {
-      criticalReasons.push("duplicate visible cards -- the table read is inconsistent");
-    }
-    if (state.board.length !== expectedBoardCount) {
-      criticalReasons.push(`board card count (${state.board.length}) does not match street "${state.street}" (expected ${expectedBoardCount})`);
-    }
-    if (!Number.isFinite(state.potMainValue) || state.potMainValue < 0) {
-      criticalReasons.push("pot value missing or invalid");
-    }
-    if (state.potTotalValue !== null && (!Number.isFinite(state.potTotalValue) || state.potTotalValue < 0)) {
-      criticalReasons.push("add-on pot value is invalid");
-    }
-    if (!context.potSemanticsVerified) {
-      criticalReasons.push("main/add-on pot meaning needs live confirmation -- pot-based recommendations withheld");
-    }
-    if (context.amountToCall === null || !Number.isFinite(context.amountToCall) || context.amountToCall < 0) {
-      criticalReasons.push("amount-to-call is missing or invalid");
-    }
-    const activeOpponents = state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded);
-    if (state.seats.some((s) => s.isOccupied && !s.isFolded && (s.betReadError || s.currentBet !== null && (!Number.isFinite(s.currentBet) || s.currentBet < 0)))) {
-      criticalReasons.push("current street contribution is unreadable");
-    }
-    if (activeOpponents.some((s) => !s.isAllIn && (s.stack === null || !Number.isFinite(s.stack) || s.stack < 0))) {
-      criticalReasons.push("active opponent stack missing or invalid");
-    }
-    if (activeOpponents.length < 1) {
-      criticalReasons.push("no active opponents remain -- hand is already decided");
-    }
-    if (context.bigBlindWasDefaulted) {
-      criticalReasons.push("big blind could not be read from the table -- BB-based sizing is unreliable");
-    }
-    if (activeOpponents.some((s) => s.isOffline)) {
-      uncertainReasons.push("at least one active opponent is showing as offline -- their state may be stale");
-    }
-    if (!context.isPositionKnown) {
-      criticalReasons.push("hero's real table position is not yet known -- no fallback position will be sent");
-    }
-    if (criticalReasons.length > 0) {
-      return { level: "low", reasons: criticalReasons };
-    }
-    if (uncertainReasons.length > 0) {
-      return { level: "medium", reasons: uncertainReasons };
-    }
-    return { level: "high", reasons: [] };
-  }
-
-  // ../../packages/browser-reader/dist/actionHistory.js
-  function emptyActionHistory() {
-    return {
-      records: /* @__PURE__ */ new Map(),
-      observation: 0,
-      lastHeroCards: null,
-      lastHeroIdentity: null,
-      dealerSeatNumber: null,
-      streetContributions: /* @__PURE__ */ new Map(),
-      awaitingStreetBaseline: false,
-      notes: []
-    };
-  }
-  function identity(seat) {
-    return seat?.isOccupied && seat.playerName ? `${seat.seatNumber}:${seat.playerName}` : null;
-  }
-  function heroCards(state) {
-    const cards = state.seats.find((s) => s.isYou && s.isOccupied)?.holeCards;
-    return cards?.length === 2 ? cards.map((c) => `${c.rank}${c.suit}`).sort().join(",") : null;
-  }
-  function contribution(seat) {
-    if (seat.betReadError)
-      return null;
-    if (seat.currentBet === null)
-      return 0;
-    return Number.isFinite(seat.currentBet) && seat.currentBet >= 0 ? seat.currentBet : null;
-  }
-  function boundaryReason(history, previous, current, context) {
-    const streets = ["preflop", "flop", "turn", "river"];
-    if (streets.indexOf(current.street) < streets.indexOf(previous.street))
-      return "Board/street regressed; started a fresh history baseline.";
-    if (previous.board.some((card, i) => current.board[i]?.rank !== card.rank || current.board[i]?.suit !== card.suit)) {
-      return "Board was cleared or replaced; started a fresh history baseline.";
-    }
-    const currentIdentity = identity(current.seats.find((s) => s.isYou));
-    const priorIdentity = history.lastHeroIdentity ?? identity(previous.seats.find((s) => s.isYou));
-    const knownCards = history.lastHeroCards ?? heroCards(previous);
-    const cards = heroCards(current);
-    if (currentIdentity !== null && currentIdentity === priorIdentity && knownCards !== null && cards !== null && cards !== knownCards) {
-      return "A different complete hero hand was observed; started a fresh history baseline.";
-    }
-    if (current.street === "preflop" && context.dealerSeatNumber != null && history.dealerSeatNumber !== null && context.dealerSeatNumber !== history.dealerSeatNumber) {
-      return "Dealer changed preflop; started a fresh history baseline.";
-    }
-    if (current.seats.some((seat) => {
-      const before = previous.seats.find((s) => s.seatNumber === seat.seatNumber);
-      return identity(seat) !== null && identity(seat) === identity(before) && before?.isFolded && !seat.isFolded;
-    }))
-      return "A folded player became active again; hand continuity is uncertain, so history was reset.";
-    return null;
-  }
-  function updateActionHistory(history, previous, current, context = {}) {
-    const boundary = previous ? boundaryReason(history, previous, current, context) : "No preceding read; actions before this baseline are unknown.";
-    const reset = boundary !== null;
-    const next = reset ? emptyActionHistory() : {
-      ...history,
-      records: new Map(history.records),
-      streetContributions: new Map(history.streetContributions),
-      notes: [...history.notes]
-    };
-    next.observation = history.observation + 1;
-    const note = (message) => {
-      if (!next.notes.includes(message))
-        next.notes.push(message);
-    };
-    if (boundary)
-      note(boundary);
-    const heroIdentity = identity(current.seats.find((s) => s.isYou));
-    if (heroIdentity !== null && heroIdentity !== next.lastHeroIdentity) {
-      next.lastHeroIdentity = heroIdentity;
-      next.lastHeroCards = null;
-    }
-    next.lastHeroCards = heroCards(current) ?? next.lastHeroCards ?? (previous && !reset ? heroCards(previous) : null);
-    next.dealerSeatNumber = context.dealerSeatNumber ?? next.dealerSeatNumber;
-    for (const seatNumber of next.records.keys()) {
-      const before = previous?.seats.find((s) => s.seatNumber === seatNumber);
-      const now = current.seats.find((s) => s.seatNumber === seatNumber);
-      if (identity(now) === null || identity(now) !== identity(before)) {
-        next.records.delete(seatNumber);
-        next.streetContributions.delete(seatNumber);
-        note("A seat disappeared or changed identity; its previous actions were discarded.");
-      }
-    }
-    const sameStreet = previous !== null && previous.street === current.street;
-    const cleanStreet = current.seats.filter((s) => s.isOccupied && !s.isFolded).every((s) => contribution(s) === 0 && !s.isChecking);
-    if (!reset && (!sameStreet || history.awaitingStreetBaseline)) {
-      next.awaitingStreetBaseline = !cleanStreet;
-      next.streetContributions.clear();
-      if (next.awaitingStreetBaseline)
-        note("Street boundary has non-cleared action labels; waiting for a clean betting baseline.");
-    }
-    if (!sameStreet)
-      next.streetContributions.clear();
-    const baselineTotals = new Map(next.streetContributions);
-    if (!reset && sameStreet && !history.awaitingStreetBaseline && previous) {
-      for (const seat of previous.seats) {
-        const total = contribution(seat);
-        if (seat.isOccupied && total !== null)
-          baselineTotals.set(seat.seatNumber, Math.max(baselineTotals.get(seat.seatNumber) ?? 0, total));
-      }
-    }
-    for (const seat of current.seats) {
-      const before = previous?.seats.find((s) => s.seatNumber === seat.seatNumber);
-      if (identity(seat) === null || identity(seat) !== identity(before)) {
-        baselineTotals.delete(seat.seatNumber);
-        next.streetContributions.delete(seat.seatNumber);
-      }
-      const total = contribution(seat);
-      if (seat.isOccupied && total !== null)
-        next.streetContributions.set(seat.seatNumber, Math.max(baselineTotals.get(seat.seatNumber) ?? 0, total));
-    }
-    if (reset || !previous)
-      return next;
-    if (!sameStreet) {
-      note("Street changed; actions spanning the transition were not reconstructed.");
-      return next;
-    }
-    if (history.awaitingStreetBaseline)
-      return next;
-    const pairs = current.seats.flatMap((seat) => {
-      const before = previous.seats.find((s) => s.seatNumber === seat.seatNumber);
-      return before && identity(seat) !== null && identity(seat) === identity(before) ? [{ seat, before }] : [];
-    });
-    const increased = pairs.filter(({ seat, before }) => !seat.isFolded && !before.isFolded && contribution(seat) !== null && contribution(seat) > (baselineTotals.get(seat.seatNumber) ?? 0));
-    const activeBefore = previous.seats.filter((s) => s.isOccupied && !s.isFolded);
-    const unknownWager = activeBefore.some((s) => contribution(s) === null) || current.seats.some((s) => s.isOccupied && !s.isFolded && contribution(s) === null);
-    const rosterChanged = previous.seats.some((s) => identity(s) !== identity(current.seats.find((now) => now.seatNumber === s.seatNumber))) || current.seats.some((s) => identity(s) !== identity(previous.seats.find((before) => before.seatNumber === s.seatNumber)));
-    const previousHighest = Math.max(0, ...activeBefore.map((s) => baselineTotals.get(s.seatNumber) ?? contribution(s) ?? 0));
-    if (increased.length > 1)
-      note("Multiple wagers changed in one observation; bet/call/raise order is unknown and was omitted.");
-    if (unknownWager)
-      note("An active contribution was unreadable; numeric action classification was omitted.");
-    if (rosterChanged)
-      note("Seat identities changed during the observation; numeric action classification was omitted.");
-    for (const { seat, before } of pairs) {
-      if (seat.isYou || before.isFolded)
-        continue;
-      const records = next.records.get(seat.seatNumber) ?? [];
-      const total = contribution(seat);
-      const priorTotal = baselineTotals.get(seat.seatNumber) ?? 0;
-      let action = null;
-      let wagerAction = null;
-      const grew = total !== null && total > priorTotal;
-      const possiblePosting = current.street === "preflop" && (!before.isCurrentToAct || previousHighest === 0 || priorTotal === 0 && context.bigBlind != null && total !== null && total <= context.bigBlind);
-      if (possiblePosting && (grew || !before.isAllIn && seat.isAllIn)) {
-        note("Preflop posting or unobserved turn: wager/all-in was not treated as a voluntary action.");
-      }
-      if (grew && !unknownWager && !rosterChanged && increased.length === 1 && !possiblePosting) {
-        if (previousHighest === 0)
-          wagerAction = "bet";
-        else if (total > previousHighest)
-          wagerAction = "raise";
-        else if (total === previousHighest || seat.isAllIn)
-          wagerAction = "call";
-        else
-          note("A partial contribution without an all-in label was omitted.");
-      }
-      if (!before.isFolded && seat.isFolded)
-        action = "fold";
-      else if (!before.isAllIn && seat.isAllIn && !possiblePosting && !records.some((r) => r.action === "all-in"))
-        action = "all-in";
-      else if (seat.isChecking && !before.isChecking && !seat.isAllIn && !before.isAllIn && !unknownWager && previousHighest <= priorTotal && !records.some((r) => r.street === current.street && r.action === "check"))
-        action = "check";
-      else if (!seat.isAllIn && !before.isAllIn)
-        action = wagerAction;
-      if (action) {
-        next.records.set(seat.seatNumber, [...records, {
-          street: current.street,
-          action,
-          seat: seat.seatNumber,
-          observation: next.observation,
-          amount: action === "check" || action === "fold" || seat.currentBet === null ? null : total,
-          wagerAction: action === "all-in" ? wagerAction : null
-        }]);
-      }
-    }
-    return next;
-  }
-
-  // ../../packages/browser-reader/dist/position.js
-  function assignPositions(seats, dealerSeatNumber) {
-    const occupied = seats.filter((s) => s.isOccupied).sort((a, b) => a.seatNumber - b.seatNumber);
-    const positions = /* @__PURE__ */ new Map();
-    if (occupied.length === 0)
-      return positions;
-    const dealerIndex = occupied.findIndex((s) => s.seatNumber === dealerSeatNumber);
-    if (dealerIndex === -1) {
-      return positions;
-    }
-    const clockwise = [...occupied.slice(dealerIndex), ...occupied.slice(0, dealerIndex)];
-    const n = clockwise.length;
-    clockwise.forEach((seat, i) => {
-      let position;
-      if (i === 0) {
-        position = "BTN";
-      } else if (n === 2) {
-        position = "BB";
-      } else if (i === 1) {
-        position = "SB";
-      } else if (i === 2) {
-        position = "BB";
-      } else if (i === n - 1) {
-        position = "CO";
-      } else if (i === n - 2 && n >= 6) {
-        position = "HJ";
-      } else {
-        position = "UTG";
-      }
-      positions.set(seat.seatNumber, position);
-    });
-    return positions;
-  }
-
-  // ../../packages/browser-reader/dist/liveState.js
-  function assessLiveState(raw, context) {
-    const blinds = parseBlindValues(context.blindTexts);
-    const readErrors = [...context.readErrors];
-    if (blinds.smallBlind === null)
-      readErrors.push("small blind could not be read");
-    if (blinds.bigBlind === null)
-      readErrors.push("big blind could not be read -- BB conversions disabled");
-    if (blinds.smallBlind !== null && blinds.bigBlind !== null && blinds.smallBlind > blinds.bigBlind) {
-      readErrors.push("small blind exceeds big blind -- verify selector order");
-    }
-    let state;
-    try {
-      state = assembleGameState(raw);
-    } catch (error) {
-      return {
-        state: null,
-        ...blinds,
-        positions: /* @__PURE__ */ new Map(),
-        amountToCall: null,
-        activeOpponents: null,
-        decisionPot: null,
-        confidence: { level: "low", reasons: [...readErrors, error instanceof Error ? error.message : String(error)] }
-      };
-    }
-    const positions = context.dealerSeatNumber === null ? /* @__PURE__ */ new Map() : assignPositions(state.seats, context.dealerSeatNumber);
-    const hero = state.seats.find((s) => s.isYou);
-    const amountToCall = calculateAmountToCall(state);
-    const confidence = computeDataConfidence(state, {
-      amountToCall,
-      bigBlindWasDefaulted: blinds.bigBlind === null,
-      isPositionKnown: hero !== void 0 && positions.has(hero.seatNumber),
-      potSemanticsVerified: false
-    });
-    return {
-      state,
-      ...blinds,
-      positions,
-      amountToCall,
-      decisionPot: null,
-      activeOpponents: state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded).length,
-      confidence: readErrors.length > 0 ? { level: "low", reasons: [...readErrors, ...confidence.reasons] } : confidence
-    };
-  }
-
-  // ../../packages/poker-engine/dist/types.js
-  var HandCategory;
-  (function(HandCategory2) {
-    HandCategory2[HandCategory2["HighCard"] = 0] = "HighCard";
-    HandCategory2[HandCategory2["Pair"] = 1] = "Pair";
-    HandCategory2[HandCategory2["TwoPair"] = 2] = "TwoPair";
-    HandCategory2[HandCategory2["ThreeOfAKind"] = 3] = "ThreeOfAKind";
-    HandCategory2[HandCategory2["Straight"] = 4] = "Straight";
-    HandCategory2[HandCategory2["Flush"] = 5] = "Flush";
-    HandCategory2[HandCategory2["FullHouse"] = 6] = "FullHouse";
-    HandCategory2[HandCategory2["FourOfAKind"] = 7] = "FourOfAKind";
-    HandCategory2[HandCategory2["StraightFlush"] = 8] = "StraightFlush";
-  })(HandCategory || (HandCategory = {}));
-
-  // ../../packages/poker-engine/dist/combinatorics.js
-  function combinations(items, k) {
-    const results = [];
-    const combo = [];
-    function backtrack(start) {
-      if (combo.length === k) {
-        results.push([...combo]);
-        return;
-      }
-      for (let i = start; i < items.length; i++) {
-        combo.push(items[i]);
-        backtrack(i + 1);
-        combo.pop();
-      }
-    }
-    backtrack(0);
-    return results;
-  }
-
-  // ../../packages/poker-engine/dist/evaluator.js
-  function detectStraightHigh(distinctRanksDesc) {
-    if (distinctRanksDesc.length !== 5)
-      return null;
-    const set = new Set(distinctRanksDesc);
-    if ([14, 5, 4, 3, 2].every((r) => set.has(r)))
-      return 5;
-    const [a, b, c, d, e] = distinctRanksDesc;
-    if (a - b === 1 && b - c === 1 && c - d === 1 && d - e === 1)
-      return a;
-    return null;
-  }
-  function packValue(category, tiebreakers) {
-    let value = category;
-    for (let i = 0; i < 5; i++) {
-      value = value * 16 + (tiebreakers[i] ?? 0);
-    }
-    return value;
-  }
-  function evaluate5(cards) {
-    if (cards.length !== 5) {
-      throw new Error(`evaluate5 requires exactly 5 cards, got ${cards.length}`);
-    }
-    const suits = cards.map((c) => c.suit);
-    const isFlush = suits.every((s) => s === suits[0]);
-    const rankCounts = /* @__PURE__ */ new Map();
-    for (const c of cards) {
-      rankCounts.set(c.rank, (rankCounts.get(c.rank) ?? 0) + 1);
-    }
-    const distinctRanksDesc = [...rankCounts.keys()].sort((a, b) => b - a);
-    const straightHigh = detectStraightHigh(distinctRanksDesc);
-    const groups = [...rankCounts.entries()].map(([rank, count]) => ({ rank, count })).sort((a, b) => b.count !== a.count ? b.count - a.count : b.rank - a.rank);
-    const allRanksDesc = cards.map((c) => c.rank).sort((a, b) => b - a);
-    let category;
-    let tiebreakers;
-    if (isFlush && straightHigh !== null) {
-      category = HandCategory.StraightFlush;
-      tiebreakers = [straightHigh];
-    } else if (groups[0].count === 4) {
-      category = HandCategory.FourOfAKind;
-      const kicker = allRanksDesc.find((r) => r !== groups[0].rank);
-      tiebreakers = [groups[0].rank, kicker];
-    } else if (groups[0].count === 3 && groups[1]?.count === 2) {
-      category = HandCategory.FullHouse;
-      tiebreakers = [groups[0].rank, groups[1].rank];
-    } else if (isFlush) {
-      category = HandCategory.Flush;
-      tiebreakers = allRanksDesc;
-    } else if (straightHigh !== null) {
-      category = HandCategory.Straight;
-      tiebreakers = [straightHigh];
-    } else if (groups[0].count === 3) {
-      category = HandCategory.ThreeOfAKind;
-      const kickers = allRanksDesc.filter((r) => r !== groups[0].rank);
-      tiebreakers = [groups[0].rank, ...kickers];
-    } else if (groups[0].count === 2 && groups[1]?.count === 2) {
-      category = HandCategory.TwoPair;
-      const highPair = groups[0].rank;
-      const lowPair = groups[1].rank;
-      const kicker = allRanksDesc.find((r) => r !== highPair && r !== lowPair);
-      tiebreakers = [highPair, lowPair, kicker];
-    } else if (groups[0].count === 2) {
-      category = HandCategory.Pair;
-      const pairRank = groups[0].rank;
-      const kickers = allRanksDesc.filter((r) => r !== pairRank);
-      tiebreakers = [pairRank, ...kickers];
-    } else {
-      category = HandCategory.HighCard;
-      tiebreakers = allRanksDesc;
-    }
-    return {
-      category,
-      tiebreakers,
-      value: packValue(category, tiebreakers),
-      cards: [...cards]
-    };
-  }
-  function evaluateBest(cards) {
-    if (cards.length < 5) {
-      throw new Error(`evaluateBest requires at least 5 cards, got ${cards.length}`);
-    }
-    if (cards.length === 5) {
-      return evaluate5(cards);
-    }
-    const candidates = combinations(cards, 5);
-    let best = null;
-    for (const combo of candidates) {
-      const evaluated = evaluate5(combo);
-      if (!best || evaluated.value > best.value) {
-        best = evaluated;
-      }
-    }
-    return best;
-  }
-
-  // ../../packages/shared/dist/card.js
-  var SUITS = ["s", "h", "d", "c"];
-  var RANKS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
-  var RANK_TO_CHAR = {
-    2: "2",
-    3: "3",
-    4: "4",
-    5: "5",
-    6: "6",
-    7: "7",
-    8: "8",
-    9: "9",
-    10: "T",
-    11: "J",
-    12: "Q",
-    13: "K",
-    14: "A"
-  };
-  function formatCard(card) {
-    return `${RANK_TO_CHAR[card.rank]}${card.suit}`;
-  }
-  function formatCards(cards) {
-    return cards.map(formatCard).join(" ");
-  }
-
-  // ../../packages/shared/dist/deck.js
-  function fullDeck() {
-    const cards = [];
-    for (const suit of SUITS) {
-      for (const rank of RANKS) {
-        cards.push({ rank, suit });
-      }
-    }
-    return cards;
-  }
-  function shuffle(items, rng = Math.random) {
-    for (let i = items.length - 1; i > 0; i--) {
-      const j = Math.floor(rng() * (i + 1));
-      const tmp = items[i];
-      items[i] = items[j];
-      items[j] = tmp;
-    }
-    return items;
-  }
-  var Deck = class {
-    cards;
-    constructor(rng = Math.random, exclude = []) {
-      const excludeIds = new Set(exclude.map((c) => `${c.rank}${c.suit}`));
-      this.cards = shuffle(fullDeck().filter((c) => !excludeIds.has(`${c.rank}${c.suit}`)), rng);
-    }
-    /** Number of cards remaining. */
-    get remaining() {
-      return this.cards.length;
-    }
-    draw() {
-      const card = this.cards.pop();
-      if (!card)
-        throw new Error("Cannot draw from an empty deck");
-      return card;
-    }
-    drawMany(n) {
-      const drawn = [];
-      for (let i = 0; i < n; i++)
-        drawn.push(this.draw());
-      return drawn;
-    }
-  };
-
-  // ../../packages/poker-engine/dist/equity.js
-  var DEFAULT_ITERATIONS = 1e4;
-  function calculateEquity(heroCards2, board, numOpponents, options = {}) {
-    if (heroCards2.length !== 2) {
-      throw new Error(`calculateEquity requires exactly 2 hero cards, got ${heroCards2.length}`);
-    }
-    if (board.length > 5) {
-      throw new Error(`Board cannot have more than 5 cards, got ${board.length}`);
-    }
-    if (numOpponents < 1) {
-      throw new Error(`calculateEquity requires at least 1 opponent, got ${numOpponents}`);
-    }
-    const iterations = options.iterations ?? DEFAULT_ITERATIONS;
-    const rng = options.rng ?? Math.random;
-    const cardsToComplete = 5 - board.length;
-    let winShareSum = 0;
-    let wins = 0;
-    let ties = 0;
-    let losses = 0;
-    const knownCards = [...heroCards2, ...board];
-    for (let i = 0; i < iterations; i++) {
-      const deck = new Deck(rng, knownCards);
-      const opponentHoleCards = [];
-      for (let o = 0; o < numOpponents; o++) {
-        opponentHoleCards.push(deck.drawMany(2));
-      }
-      const runoutBoard = [...board, ...deck.drawMany(cardsToComplete)];
-      const heroValue = evaluateBest([...heroCards2, ...runoutBoard]).value;
-      const opponentValues = opponentHoleCards.map((hole) => evaluateBest([...hole, ...runoutBoard]).value);
-      const maxValue = Math.max(heroValue, ...opponentValues);
-      if (heroValue < maxValue) {
-        losses++;
-      } else {
-        const winnersCount = 1 + opponentValues.filter((v) => v === maxValue).length;
-        winShareSum += 1 / winnersCount;
-        if (winnersCount === 1) {
-          wins++;
-        } else {
-          ties++;
-        }
-      }
-    }
-    return {
-      equity: winShareSum / iterations,
-      wins,
-      ties,
-      losses,
-      iterations
-    };
-  }
-
-  // ../../packages/poker-engine/dist/ev.js
-  function calculatePotOdds(currentPot, amountToCall) {
-    if (currentPot < 0)
-      throw new Error(`currentPot cannot be negative, got ${currentPot}`);
-    if (amountToCall <= 0) {
-      throw new Error(`amountToCall must be positive, got ${amountToCall} (use 0 only for a check, which has no pot odds concept)`);
-    }
-    const breakevenEquity = amountToCall / (currentPot + amountToCall);
-    return {
-      breakevenEquity,
-      breakevenEquityPercent: breakevenEquity * 100
-    };
-  }
-  function calculateCallEV(equity, currentPot, amountToCall) {
-    if (equity < 0 || equity > 1)
-      throw new Error(`equity must be between 0 and 1, got ${equity}`);
-    if (amountToCall <= 0)
-      throw new Error(`amountToCall must be positive, got ${amountToCall}`);
-    const ev = equity * currentPot - (1 - equity) * amountToCall;
-    return { ev };
-  }
-  function calculateBetEV(equityIfCalled, foldEquity, currentPot, betSize) {
-    if (equityIfCalled < 0 || equityIfCalled > 1) {
-      throw new Error(`equityIfCalled must be between 0 and 1, got ${equityIfCalled}`);
-    }
-    if (foldEquity < 0 || foldEquity > 1) {
-      throw new Error(`foldEquity must be between 0 and 1, got ${foldEquity}`);
-    }
-    const evIfFold = currentPot;
-    const evIfCall = equityIfCalled * (currentPot + betSize) - (1 - equityIfCalled) * betSize;
-    const ev = foldEquity * evIfFold + (1 - foldEquity) * evIfCall;
-    return { ev };
-  }
-  function calculateSPR(effectiveStack, currentPot) {
-    if (currentPot <= 0)
-      throw new Error(`currentPot must be positive to compute SPR, got ${currentPot}`);
-    return effectiveStack / currentPot;
-  }
-
-  // ../../packages/poker-engine/dist/outs.js
-  function calculateOuts(holeCards, board) {
-    if (holeCards.length !== 2) {
-      throw new Error(`calculateOuts requires exactly 2 hole cards, got ${holeCards.length}`);
-    }
-    if (board.length !== 3 && board.length !== 4) {
-      throw new Error(`calculateOuts requires a 3-card (flop) or 4-card (turn) board, got ${board.length}`);
-    }
-    const known = [...holeCards, ...board];
-    const knownIds = new Set(known.map((c) => `${c.rank}${c.suit}`));
-    const unseenCards = fullDeck().filter((c) => !knownIds.has(`${c.rank}${c.suit}`));
-    const currentCategory = evaluateBest(known).category;
-    const outs = [];
-    for (const candidate of unseenCards) {
-      const nextBoard = [...board, candidate];
-      const improvedCategory = evaluateBest([...holeCards, ...nextBoard]).category;
-      if (improvedCategory > currentCategory) {
-        outs.push(candidate);
-      }
-    }
-    return { outs, count: outs.length };
-  }
-
-  // ../../packages/poker-engine/dist/boardTexture.js
-  function classifySuitTexture(board) {
-    const suitCounts = /* @__PURE__ */ new Map();
-    for (const c of board) {
-      suitCounts.set(c.suit, (suitCounts.get(c.suit) ?? 0) + 1);
-    }
-    const counts = [...suitCounts.values()].sort((a, b) => b - a);
-    if (counts[0] >= board.length)
-      return "monotone";
-    if (counts[0] >= 2)
-      return "two_tone";
-    return "rainbow";
-  }
-  function classifyPairTexture(board) {
-    const rankCounts = /* @__PURE__ */ new Map();
-    for (const c of board) {
-      rankCounts.set(c.rank, (rankCounts.get(c.rank) ?? 0) + 1);
-    }
-    const maxCount = Math.max(...rankCounts.values());
-    if (maxCount >= 3)
-      return "trips_plus";
-    if (maxCount === 2)
-      return "paired";
-    return "unpaired";
-  }
-  function classifyConnectivity(board) {
-    const ranks = [...new Set(board.map((c) => c.rank))].sort((a, b) => a - b);
-    let closePairs = 0;
-    for (let i = 0; i < ranks.length; i++) {
-      for (let j = i + 1; j < ranks.length; j++) {
-        if (ranks[j] - ranks[i] <= 4)
-          closePairs++;
-      }
-    }
-    if (closePairs === 0)
-      return "disconnected";
-    if (closePairs <= 2)
-      return "somewhat_connected";
-    return "highly_connected";
-  }
-  function classifyOverall(suitTexture, pairTexture, connectivity) {
-    let wetnessScore = 0;
-    if (suitTexture === "monotone")
-      wetnessScore += 2;
-    else if (suitTexture === "two_tone")
-      wetnessScore += 1;
-    if (connectivity === "highly_connected")
-      wetnessScore += 2;
-    else if (connectivity === "somewhat_connected")
-      wetnessScore += 1;
-    if (pairTexture !== "unpaired")
-      wetnessScore -= 1;
-    if (wetnessScore >= 3)
-      return "wet";
-    if (wetnessScore >= 1)
-      return "semi_wet";
-    return "dry";
-  }
-  function classifyBoardTexture(board) {
-    if (board.length < 3 || board.length > 5) {
-      throw new Error(`classifyBoardTexture requires a 3-5 card board, got ${board.length}`);
-    }
-    const suitTexture = classifySuitTexture(board);
-    const pairTexture = classifyPairTexture(board);
-    const connectivity = classifyConnectivity(board);
-    const overall = classifyOverall(suitTexture, pairTexture, connectivity);
-    return { suitTexture, pairTexture, connectivity, overall };
-  }
-
   // ../../node_modules/zod/v3/external.js
   var external_exports = {};
   __export(external_exports, {
@@ -4997,137 +4047,73 @@
   };
   var NEVER = INVALID;
 
-  // ../../packages/ai-core/dist/decisionPacket.js
-  var CardSchema = external_exports.object({
-    rank: external_exports.union([
-      external_exports.literal(2),
-      external_exports.literal(3),
-      external_exports.literal(4),
-      external_exports.literal(5),
-      external_exports.literal(6),
-      external_exports.literal(7),
-      external_exports.literal(8),
-      external_exports.literal(9),
-      external_exports.literal(10),
-      external_exports.literal(11),
-      external_exports.literal(12),
-      external_exports.literal(13),
-      external_exports.literal(14)
-    ]),
-    suit: external_exports.enum(["s", "h", "d", "c"])
-  });
-  var PositionSchema = external_exports.enum(["UTG", "HJ", "CO", "BTN", "SB", "BB"]);
-  var StreetSchema = external_exports.enum(["preflop", "flop", "turn", "river"]);
-  var FacingActionSchema = external_exports.enum(["none", "bet", "raise", "all_in"]);
-  var EquitySourceSchema = external_exports.enum(["estimated_range", "random_hands", "unknown"]);
-  var CandidateActionSchema = external_exports.enum(["FOLD", "CHECK", "CALL", "BET", "RAISE", "ALL_IN"]);
-  function deriveCandidateActions(facingActionType) {
-    const facingBet = facingActionType === "bet" || facingActionType === "raise" || facingActionType === "all_in";
-    return facingBet ? ["FOLD", "CALL", "RAISE", "ALL_IN"] : ["CHECK", "BET", "ALL_IN"];
+  // ../../packages/shared/dist/card.js
+  var SUITS = ["s", "h", "d", "c"];
+  var RANKS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
+  var RANK_TO_CHAR = {
+    2: "2",
+    3: "3",
+    4: "4",
+    5: "5",
+    6: "6",
+    7: "7",
+    8: "8",
+    9: "9",
+    10: "T",
+    11: "J",
+    12: "Q",
+    13: "K",
+    14: "A"
+  };
+  function formatCard(card) {
+    return `${RANK_TO_CHAR[card.rank]}${card.suit}`;
   }
-  var DecisionPacketSchema = external_exports.object({
-    hero: external_exports.object({
-      holeCards: external_exports.tuple([CardSchema, CardSchema]),
-      position: PositionSchema,
-      stackBB: external_exports.number().positive()
-    }),
-    table: external_exports.object({
-      potBB: external_exports.number().nonnegative(),
-      // 0 is valid: the very first action of a hand, before blinds have registered in the main pot display
-      board: external_exports.array(CardSchema).max(5),
-      street: StreetSchema,
-      numOpponentsRemaining: external_exports.number().int().min(1)
-    }),
-    facingAction: external_exports.object({
-      type: FacingActionSchema,
-      amountBB: external_exports.number().nonnegative().optional()
-    }),
-    /** Derived via deriveCandidateActions() -- see its doc comment above. */
-    candidateActions: external_exports.array(CandidateActionSchema).min(1),
-    engineCalculations: external_exports.object({
-      equity: external_exports.number().min(0).max(1).optional(),
-      /** Should be present whenever equity is -- see EquitySourceSchema doc comment above. Not schema-enforced as a pair, by convention only. */
-      equitySource: EquitySourceSchema.optional(),
-      potOddsBreakevenPercent: external_exports.number().min(0).max(100).optional(),
-      callEV: external_exports.number().optional(),
-      spr: external_exports.number().positive().optional(),
-      outs: external_exports.number().int().nonnegative().optional(),
-      boardTexture: external_exports.object({
-        suitTexture: external_exports.enum(["monotone", "two_tone", "rainbow"]),
-        pairTexture: external_exports.enum(["paired", "trips_plus", "unpaired"]),
-        connectivity: external_exports.enum(["disconnected", "somewhat_connected", "highly_connected"]),
-        overall: external_exports.enum(["dry", "semi_wet", "wet"])
-      }).optional()
-    }),
-    opponentContext: external_exports.object({
-      estimatedRangeDescription: external_exports.string().optional(),
-      rangeVsHeroEquity: external_exports.number().min(0).max(1).optional()
-    }).optional(),
-    /** Explicit confidence flag per Rule 5: never let the AI reason
-     *  confidently over uncertain data. */
-    dataConfidence: external_exports.enum(["high", "medium", "low"]).default("high")
-  });
+  function formatCards(cards) {
+    return cards.map(formatCard).join(" ");
+  }
 
-  // ../../packages/ai-core/dist/recommendation.js
-  var RecommendationSchema = external_exports.object({
-    action: external_exports.enum(["FOLD", "CHECK", "CALL", "BET", "RAISE", "ALL_IN"]),
-    sizingBB: external_exports.number().positive().optional(),
-    confidence: external_exports.number().min(0).max(1),
-    reasoning: external_exports.string().min(1),
-    alternative: external_exports.object({
-      action: external_exports.enum(["FOLD", "CHECK", "CALL", "BET", "RAISE", "ALL_IN"]),
-      reasoning: external_exports.string().min(1)
-    }).optional()
-  });
-
-  // ../../packages/ai-core/dist/auditRecord.js
-  var AuditRecordSchema = external_exports.object({
-    timestamp: external_exports.string().datetime(),
-    sessionId: external_exports.string(),
-    handId: external_exports.string(),
-    decisionPacket: DecisionPacketSchema,
-    provider: external_exports.string(),
-    model: external_exports.string(),
-    promptVersion: external_exports.string(),
-    rawResponse: external_exports.string().optional(),
-    parsedRecommendation: RecommendationSchema.optional(),
-    latencyMs: external_exports.number().nonnegative(),
-    error: external_exports.string().optional()
-  });
-
-  // ../../packages/ai-core/dist/modelRegistry.js
-  var ModelConfigSchema = external_exports.object({
-    provider: external_exports.enum(["groq", "gemini", "nvidia"]),
-    modelId: external_exports.string().min(1),
-    supportsVision: external_exports.boolean(),
-    supportsStructuredOutput: external_exports.boolean(),
-    costTier: external_exports.enum(["free", "paid"]),
-    speedTier: external_exports.enum(["fast", "moderate", "slow"]),
-    /** Latency we've actually measured ourselves, not a vendor claim.
-     *  Optional until we've run a real test against this exact model. */
-    measuredLatencyMs: external_exports.number().positive().optional(),
-    /** When we last confirmed (via a real API call) that this model is
-     *  actually callable -- per the lesson learned twice now that
-     *  documentation and reality can drift apart (Groq's Enterprise-only
-     *  model move, needing to verify Gemini's model name against official
-     *  docs rather than guessing). null means never verified. */
-    lastVerifiedAt: external_exports.string().datetime().nullable()
-  });
-
-  // ../../packages/ai-core/dist/consistencyCheck.js
-  var SEP = "[\\s\\-\\u2010-\\u2013]";
-  var CATEGORY_PATTERNS = [
-    { name: "High Card", pattern: `high${SEP}card` },
-    { name: "Pair", pattern: "pairs?" },
-    { name: "Two Pair", pattern: `two${SEP}pairs?` },
-    { name: "Three of a Kind", pattern: `three${SEP}of${SEP}a${SEP}kind` },
-    // Negative lookahead so "straight flush" isn't ALSO read as a "straight" claim.
-    { name: "Straight", pattern: `straight(?!${SEP}flush)` },
-    { name: "Flush", pattern: "flush" },
-    { name: "Full House", pattern: `full${SEP}house` },
-    { name: "Four of a Kind", pattern: `four${SEP}of${SEP}a${SEP}kind` },
-    { name: "Straight Flush", pattern: `straight${SEP}flush` }
-  ];
+  // ../../packages/shared/dist/deck.js
+  function fullDeck() {
+    const cards = [];
+    for (const suit of SUITS) {
+      for (const rank of RANKS) {
+        cards.push({ rank, suit });
+      }
+    }
+    return cards;
+  }
+  function shuffle(items, rng = Math.random) {
+    for (let i = items.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      const tmp = items[i];
+      items[i] = items[j];
+      items[j] = tmp;
+    }
+    return items;
+  }
+  var Deck = class {
+    cards;
+    constructor(rng = Math.random, exclude = []) {
+      const excludeIds = new Set(exclude.map((c) => `${c.rank}${c.suit}`));
+      this.cards = shuffle(fullDeck().filter((c) => !excludeIds.has(`${c.rank}${c.suit}`)), rng);
+    }
+    /** Number of cards remaining. */
+    get remaining() {
+      return this.cards.length;
+    }
+    draw() {
+      const card = this.cards.pop();
+      if (!card)
+        throw new Error("Cannot draw from an empty deck");
+      return card;
+    }
+    drawMany(n) {
+      const drawn = [];
+      for (let i = 0; i < n; i++)
+        drawn.push(this.draw());
+      return drawn;
+    }
+  };
 
   // ../../packages/range-engine/dist/handNotation.js
   var RANK_TO_CHAR2 = {
@@ -5234,6 +4220,304 @@
       }
     }
     return result;
+  }
+
+  // ../../packages/poker-engine/dist/types.js
+  var HandCategory;
+  (function(HandCategory2) {
+    HandCategory2[HandCategory2["HighCard"] = 0] = "HighCard";
+    HandCategory2[HandCategory2["Pair"] = 1] = "Pair";
+    HandCategory2[HandCategory2["TwoPair"] = 2] = "TwoPair";
+    HandCategory2[HandCategory2["ThreeOfAKind"] = 3] = "ThreeOfAKind";
+    HandCategory2[HandCategory2["Straight"] = 4] = "Straight";
+    HandCategory2[HandCategory2["Flush"] = 5] = "Flush";
+    HandCategory2[HandCategory2["FullHouse"] = 6] = "FullHouse";
+    HandCategory2[HandCategory2["FourOfAKind"] = 7] = "FourOfAKind";
+    HandCategory2[HandCategory2["StraightFlush"] = 8] = "StraightFlush";
+  })(HandCategory || (HandCategory = {}));
+
+  // ../../packages/poker-engine/dist/combinatorics.js
+  function combinations(items, k) {
+    const results = [];
+    const combo = [];
+    function backtrack(start) {
+      if (combo.length === k) {
+        results.push([...combo]);
+        return;
+      }
+      for (let i = start; i < items.length; i++) {
+        combo.push(items[i]);
+        backtrack(i + 1);
+        combo.pop();
+      }
+    }
+    backtrack(0);
+    return results;
+  }
+
+  // ../../packages/poker-engine/dist/evaluator.js
+  function detectStraightHigh(distinctRanksDesc) {
+    if (distinctRanksDesc.length !== 5)
+      return null;
+    const set = new Set(distinctRanksDesc);
+    if ([14, 5, 4, 3, 2].every((r) => set.has(r)))
+      return 5;
+    const [a, b, c, d, e] = distinctRanksDesc;
+    if (a - b === 1 && b - c === 1 && c - d === 1 && d - e === 1)
+      return a;
+    return null;
+  }
+  function packValue(category, tiebreakers) {
+    let value = category;
+    for (let i = 0; i < 5; i++) {
+      value = value * 16 + (tiebreakers[i] ?? 0);
+    }
+    return value;
+  }
+  function evaluate5(cards) {
+    if (cards.length !== 5) {
+      throw new Error(`evaluate5 requires exactly 5 cards, got ${cards.length}`);
+    }
+    const suits = cards.map((c) => c.suit);
+    const isFlush = suits.every((s) => s === suits[0]);
+    const rankCounts = /* @__PURE__ */ new Map();
+    for (const c of cards) {
+      rankCounts.set(c.rank, (rankCounts.get(c.rank) ?? 0) + 1);
+    }
+    const distinctRanksDesc = [...rankCounts.keys()].sort((a, b) => b - a);
+    const straightHigh = detectStraightHigh(distinctRanksDesc);
+    const groups = [...rankCounts.entries()].map(([rank, count]) => ({ rank, count })).sort((a, b) => b.count !== a.count ? b.count - a.count : b.rank - a.rank);
+    const allRanksDesc = cards.map((c) => c.rank).sort((a, b) => b - a);
+    let category;
+    let tiebreakers;
+    if (isFlush && straightHigh !== null) {
+      category = HandCategory.StraightFlush;
+      tiebreakers = [straightHigh];
+    } else if (groups[0].count === 4) {
+      category = HandCategory.FourOfAKind;
+      const kicker = allRanksDesc.find((r) => r !== groups[0].rank);
+      tiebreakers = [groups[0].rank, kicker];
+    } else if (groups[0].count === 3 && groups[1]?.count === 2) {
+      category = HandCategory.FullHouse;
+      tiebreakers = [groups[0].rank, groups[1].rank];
+    } else if (isFlush) {
+      category = HandCategory.Flush;
+      tiebreakers = allRanksDesc;
+    } else if (straightHigh !== null) {
+      category = HandCategory.Straight;
+      tiebreakers = [straightHigh];
+    } else if (groups[0].count === 3) {
+      category = HandCategory.ThreeOfAKind;
+      const kickers = allRanksDesc.filter((r) => r !== groups[0].rank);
+      tiebreakers = [groups[0].rank, ...kickers];
+    } else if (groups[0].count === 2 && groups[1]?.count === 2) {
+      category = HandCategory.TwoPair;
+      const highPair = groups[0].rank;
+      const lowPair = groups[1].rank;
+      const kicker = allRanksDesc.find((r) => r !== highPair && r !== lowPair);
+      tiebreakers = [highPair, lowPair, kicker];
+    } else if (groups[0].count === 2) {
+      category = HandCategory.Pair;
+      const pairRank = groups[0].rank;
+      const kickers = allRanksDesc.filter((r) => r !== pairRank);
+      tiebreakers = [pairRank, ...kickers];
+    } else {
+      category = HandCategory.HighCard;
+      tiebreakers = allRanksDesc;
+    }
+    return {
+      category,
+      tiebreakers,
+      value: packValue(category, tiebreakers),
+      cards: [...cards]
+    };
+  }
+  function evaluateBest(cards) {
+    if (cards.length < 5) {
+      throw new Error(`evaluateBest requires at least 5 cards, got ${cards.length}`);
+    }
+    if (cards.length === 5) {
+      return evaluate5(cards);
+    }
+    const candidates = combinations(cards, 5);
+    let best = null;
+    for (const combo of candidates) {
+      const evaluated = evaluate5(combo);
+      if (!best || evaluated.value > best.value) {
+        best = evaluated;
+      }
+    }
+    return best;
+  }
+
+  // ../../packages/poker-engine/dist/equity.js
+  var DEFAULT_ITERATIONS = 1e4;
+  function calculateEquity(heroCards2, board, numOpponents, options = {}) {
+    if (heroCards2.length !== 2) {
+      throw new Error(`calculateEquity requires exactly 2 hero cards, got ${heroCards2.length}`);
+    }
+    if (board.length > 5) {
+      throw new Error(`Board cannot have more than 5 cards, got ${board.length}`);
+    }
+    if (numOpponents < 1) {
+      throw new Error(`calculateEquity requires at least 1 opponent, got ${numOpponents}`);
+    }
+    const iterations = options.iterations ?? DEFAULT_ITERATIONS;
+    const rng = options.rng ?? Math.random;
+    const cardsToComplete = 5 - board.length;
+    let winShareSum = 0;
+    let wins = 0;
+    let ties = 0;
+    let losses = 0;
+    const knownCards = [...heroCards2, ...board];
+    for (let i = 0; i < iterations; i++) {
+      const deck = new Deck(rng, knownCards);
+      const opponentHoleCards = [];
+      for (let o = 0; o < numOpponents; o++) {
+        opponentHoleCards.push(deck.drawMany(2));
+      }
+      const runoutBoard = [...board, ...deck.drawMany(cardsToComplete)];
+      const heroValue = evaluateBest([...heroCards2, ...runoutBoard]).value;
+      const opponentValues = opponentHoleCards.map((hole) => evaluateBest([...hole, ...runoutBoard]).value);
+      const maxValue = Math.max(heroValue, ...opponentValues);
+      if (heroValue < maxValue) {
+        losses++;
+      } else {
+        const winnersCount = 1 + opponentValues.filter((v) => v === maxValue).length;
+        winShareSum += 1 / winnersCount;
+        if (winnersCount === 1) {
+          wins++;
+        } else {
+          ties++;
+        }
+      }
+    }
+    return {
+      equity: winShareSum / iterations,
+      wins,
+      ties,
+      losses,
+      iterations
+    };
+  }
+
+  // ../../packages/poker-engine/dist/ev.js
+  function calculatePotOdds(currentPot, amountToCall) {
+    if (currentPot < 0)
+      throw new Error(`currentPot cannot be negative, got ${currentPot}`);
+    if (amountToCall <= 0) {
+      throw new Error(`amountToCall must be positive, got ${amountToCall} (use 0 only for a check, which has no pot odds concept)`);
+    }
+    const breakevenEquity = amountToCall / (currentPot + amountToCall);
+    return {
+      breakevenEquity,
+      breakevenEquityPercent: breakevenEquity * 100
+    };
+  }
+  function calculateCallEV(equity, currentPot, amountToCall) {
+    if (equity < 0 || equity > 1)
+      throw new Error(`equity must be between 0 and 1, got ${equity}`);
+    if (amountToCall <= 0)
+      throw new Error(`amountToCall must be positive, got ${amountToCall}`);
+    const ev = equity * currentPot - (1 - equity) * amountToCall;
+    return { ev };
+  }
+  function calculateSPR(effectiveStack, currentPot) {
+    if (currentPot <= 0)
+      throw new Error(`currentPot must be positive to compute SPR, got ${currentPot}`);
+    return effectiveStack / currentPot;
+  }
+
+  // ../../packages/poker-engine/dist/outs.js
+  function calculateOuts(holeCards, board) {
+    if (holeCards.length !== 2) {
+      throw new Error(`calculateOuts requires exactly 2 hole cards, got ${holeCards.length}`);
+    }
+    if (board.length !== 3 && board.length !== 4) {
+      throw new Error(`calculateOuts requires a 3-card (flop) or 4-card (turn) board, got ${board.length}`);
+    }
+    const known = [...holeCards, ...board];
+    const knownIds = new Set(known.map((c) => `${c.rank}${c.suit}`));
+    const unseenCards = fullDeck().filter((c) => !knownIds.has(`${c.rank}${c.suit}`));
+    const currentCategory = evaluateBest(known).category;
+    const outs = [];
+    for (const candidate of unseenCards) {
+      const nextBoard = [...board, candidate];
+      const improvedCategory = evaluateBest([...holeCards, ...nextBoard]).category;
+      if (improvedCategory > currentCategory) {
+        outs.push(candidate);
+      }
+    }
+    return { outs, count: outs.length };
+  }
+
+  // ../../packages/poker-engine/dist/boardTexture.js
+  function classifySuitTexture(board) {
+    const suitCounts = /* @__PURE__ */ new Map();
+    for (const c of board) {
+      suitCounts.set(c.suit, (suitCounts.get(c.suit) ?? 0) + 1);
+    }
+    const counts = [...suitCounts.values()].sort((a, b) => b - a);
+    if (counts[0] >= board.length)
+      return "monotone";
+    if (counts[0] >= 2)
+      return "two_tone";
+    return "rainbow";
+  }
+  function classifyPairTexture(board) {
+    const rankCounts = /* @__PURE__ */ new Map();
+    for (const c of board) {
+      rankCounts.set(c.rank, (rankCounts.get(c.rank) ?? 0) + 1);
+    }
+    const maxCount = Math.max(...rankCounts.values());
+    if (maxCount >= 3)
+      return "trips_plus";
+    if (maxCount === 2)
+      return "paired";
+    return "unpaired";
+  }
+  function classifyConnectivity(board) {
+    const ranks = [...new Set(board.map((c) => c.rank))].sort((a, b) => a - b);
+    let closePairs = 0;
+    for (let i = 0; i < ranks.length; i++) {
+      for (let j = i + 1; j < ranks.length; j++) {
+        if (ranks[j] - ranks[i] <= 4)
+          closePairs++;
+      }
+    }
+    if (closePairs === 0)
+      return "disconnected";
+    if (closePairs <= 2)
+      return "somewhat_connected";
+    return "highly_connected";
+  }
+  function classifyOverall(suitTexture, pairTexture, connectivity) {
+    let wetnessScore = 0;
+    if (suitTexture === "monotone")
+      wetnessScore += 2;
+    else if (suitTexture === "two_tone")
+      wetnessScore += 1;
+    if (connectivity === "highly_connected")
+      wetnessScore += 2;
+    else if (connectivity === "somewhat_connected")
+      wetnessScore += 1;
+    if (pairTexture !== "unpaired")
+      wetnessScore -= 1;
+    if (wetnessScore >= 3)
+      return "wet";
+    if (wetnessScore >= 1)
+      return "semi_wet";
+    return "dry";
+  }
+  function classifyBoardTexture(board) {
+    if (board.length < 3 || board.length > 5) {
+      throw new Error(`classifyBoardTexture requires a 3-5 card board, got ${board.length}`);
+    }
+    const suitTexture = classifySuitTexture(board);
+    const pairTexture = classifyPairTexture(board);
+    const connectivity = classifyConnectivity(board);
+    const overall = classifyOverall(suitTexture, pairTexture, connectivity);
+    return { suitTexture, pairTexture, connectivity, overall };
   }
 
   // ../../packages/range-engine/dist/rangeEquity.js
@@ -5561,36 +4845,15 @@
       "JTo"
     ]
   };
-  function getOpeningRange(position) {
-    if (position === "BB")
+  function getOpeningRange(position2) {
+    if (position2 === "BB")
       return rangeFromList([]);
-    return rangeFromList(OPENING_RANGE_HANDS[position]);
+    return rangeFromList(OPENING_RANGE_HANDS[position2]);
   }
-
-  // ../../packages/range-engine/dist/pushFold.js
-  var DEFAULT_FOLD_EQUITY = 0.5;
-  function evaluateShove(heroCards2, effectiveStackBB, potBB, options = {}) {
-    if (effectiveStackBB <= 0) {
-      throw new Error(`effectiveStackBB must be positive, got ${effectiveStackBB}`);
-    }
-    if (potBB <= 0) {
-      throw new Error(`potBB must be positive, got ${potBB}`);
-    }
-    const foldEquity = options.foldEquity ?? DEFAULT_FOLD_EQUITY;
-    if (foldEquity < 0 || foldEquity > 1) {
-      throw new Error(`foldEquity must be between 0 and 1, got ${foldEquity}`);
-    }
-    const equityResult = calculateEquity(heroCards2, [], 1, {
-      ...options.iterations !== void 0 ? { iterations: options.iterations } : {},
-      ...options.rng !== void 0 ? { rng: options.rng } : {}
-    });
-    const { ev } = calculateBetEV(equityResult.equity, foldEquity, potBB, effectiveStackBB);
-    return {
-      ev,
-      equityIfCalled: equityResult.equity,
-      foldEquityUsed: foldEquity,
-      isProfitable: ev > 0
-    };
+  function getPreflopOpeningReference(input) {
+    if (!input.unopened || input.position === null || input.position === "BB" || input.playersDealtIn !== 6 || input.effectiveStackBB === null || !Number.isFinite(input.effectiveStackBB) || input.effectiveStackBB < 100)
+      return null;
+    return getOpeningRange(input.position);
   }
 
   // ../../packages/range-engine/dist/chenScore.js
@@ -5670,14 +4933,921 @@
   }
   function estimateOpponentRange(actions, baseline = defaultBaselineRange()) {
     let range = baseline;
-    for (const action of actions) {
-      if (action === "raise" || action === "bet") {
+    for (const action2 of actions) {
+      if (action2 === "raise" || action2 === "bet") {
         range = narrowForThreeBet(range);
-      } else if (action === "call") {
+      } else if (action2 === "call") {
         range = narrowForCall(range);
       }
     }
     return range;
+  }
+
+  // ../../packages/ai-core/dist/preflopContext.js
+  var position = external_exports.enum(["UTG", "HJ", "CO", "BTN", "SB", "BB"]);
+  var chips = external_exports.number().finite().nonnegative();
+  var wager = external_exports.enum(["bet", "raise", "call"]);
+  var player = external_exports.object({
+    seat: external_exports.number().int().positive(),
+    position: position.nullable(),
+    remainingStackBB: chips.nullable(),
+    contributionBB: chips.nullable(),
+    folded: external_exports.boolean(),
+    allIn: external_exports.boolean()
+  });
+  var action = external_exports.object({
+    seat: external_exports.number().int().positive(),
+    action: external_exports.enum(["post_blind", "check", "call", "bet", "raise", "fold", "all-in"]),
+    totalContributionBB: chips.nullable(),
+    observation: external_exports.number().int().nonnegative(),
+    wagerAction: wager.nullable()
+  });
+  var PreflopInputSchema = external_exports.object({
+    heroSeat: external_exports.number().int().positive(),
+    players: external_exports.array(player).min(2),
+    /** Seats dealt into this hand, not just opponents still active. Null if unverified. */
+    playersDealtIn: external_exports.number().int().min(2).max(10).nullable(),
+    potBB: chips.nullable(),
+    amountToCallBB: chips.nullable(),
+    contributionMeaning: external_exports.enum(["street_total", "increment", "unknown"]),
+    historyCoverage: external_exports.enum(["complete", "partial"]),
+    actions: external_exports.array(action),
+    historyNotes: external_exports.array(external_exports.string()),
+    tournamentContext: external_exports.enum(["chip_ev_only", "unknown"])
+  });
+  var situation = external_exports.enum(["unopened", "limped_pot", "facing_open", "facing_open_and_callers", "facing_3bet", "facing_4bet_or_more", "facing_raise_unknown_level", "unknown"]);
+  var PreflopContextSchema = PreflopInputSchema.extend({
+    situation,
+    heroPosition: position.nullable(),
+    heroStackBB: chips.nullable(),
+    activeOpponents: external_exports.number().int().nonnegative(),
+    blindDefending: external_exports.boolean().nullable(),
+    raiseToBB: chips.nullable(),
+    lastAggressorSeat: external_exports.number().int().positive().nullable(),
+    effectiveStackBB: chips.nullable(),
+    effectiveStacks: external_exports.array(external_exports.object({ seat: external_exports.number().int().positive(), effectiveStackBB: chips.nullable() })),
+    shortStack: external_exports.boolean().nullable(),
+    pushFold: external_exports.enum(["not_applicable", "not_established", "requires_calling_model"]),
+    openingReference: external_exports.object({ applicable: external_exports.boolean(), hands: external_exports.array(external_exports.string()) }),
+    decisionSupport: external_exports.enum(["ai_judgment", "uncertain"]),
+    reasons: external_exports.array(external_exports.string())
+  });
+  function buildPreflopContext(value) {
+    const input = PreflopInputSchema.parse(value);
+    const heroes = input.players.filter((p) => p.seat === input.heroSeat);
+    if (heroes.length !== 1 || new Set(input.players.map((p) => p.seat)).size !== input.players.length)
+      throw new Error("Preflop seats must be unique and include hero");
+    const hero = heroes[0];
+    const opponents = input.players.filter((p) => !p.folded && p.seat !== input.heroSeat);
+    const reasons = [...input.historyNotes];
+    const totalsKnown = input.contributionMeaning === "street_total" && input.players.filter((p) => !p.folded).every((p) => p.contributionBB !== null);
+    if (!totalsKnown)
+      reasons.push("Wager values are not verified street totals; a displayed 15BB cannot be assumed to mean raise-to 15BB.");
+    if (input.historyCoverage === "partial")
+      reasons.push("History is partial (including potentially missing hero actions); do not infer open/3-bet level from size alone.");
+    const events = [...input.actions].sort((a, b) => a.observation - b.observation);
+    const voluntary = events.filter((a) => a.action !== "post_blind");
+    const orderKnown = new Set(voluntary.map((a) => a.observation)).size === voluntary.length;
+    if (!orderKnown)
+      reasons.push("Several actions share an observation; their order is unknown.");
+    const eventSeatsKnown = events.every((a) => input.players.some((p) => p.seat === a.seat));
+    if (!eventSeatsKnown)
+      reasons.push("History includes an unidentified seat.");
+    const unknownAllIn = events.some((a) => a.action === "all-in" && a.wagerAction === null);
+    if (unknownAllIn)
+      reasons.push("An all-in label has no known underlying wager action.");
+    const raised = events.filter((a) => a.action === "raise" || a.action === "bet" || a.action === "all-in" && (a.wagerAction === "raise" || a.wagerAction === "bet"));
+    const lastRaise = raised.at(-1);
+    const highest = totalsKnown ? Math.max(1, ...input.players.filter((p) => !p.folded).map((p) => p.contributionBB)) : null;
+    const raiseToBB = highest !== null && highest > 1 ? highest : null;
+    const expectedCall = totalsKnown ? Math.max(0, Math.max(0, ...opponents.map((p) => p.contributionBB)) - hero.contributionBB) : null;
+    const callConsistent = input.amountToCallBB !== null && expectedCall !== null && Math.abs(expectedCall - input.amountToCallBB) < 1e-8;
+    if (!callConsistent)
+      reasons.push("Call amount is unknown or disagrees with observed street totals.");
+    const historyConsistent = raised.every((a, index) => a.totalContributionBB !== null && a.totalContributionBB > (index === 0 ? 1 : raised[index - 1].totalContributionBB ?? Infinity)) && (raised.length === 0 ? highest === 1 : lastRaise?.totalContributionBB === highest);
+    if (!historyConsistent)
+      reasons.push("Observed wager totals do not establish a consistent full raise sequence.");
+    let previousTotal = 1;
+    let minimumRaise = 1;
+    const fullRaises = raised.every((a) => {
+      if (a.totalContributionBB === null)
+        return false;
+      const increment = a.totalContributionBB - previousTotal;
+      previousTotal = a.totalContributionBB;
+      if (increment < minimumRaise)
+        return false;
+      minimumRaise = increment;
+      return true;
+    });
+    if (!fullRaises)
+      reasons.push("A short/incomplete raise may not reopen betting; full raise level is unresolved.");
+    const complete = fullRaises && input.historyCoverage === "complete" && orderKnown && eventSeatsKnown && !unknownAllIn && totalsKnown && callConsistent && historyConsistent;
+    let classified = raiseToBB !== null && (input.amountToCallBB ?? 0) > 0 ? "facing_raise_unknown_level" : "unknown";
+    if (complete) {
+      if (raised.length === 0) {
+        classified = voluntary.some((a) => a.action === "call" || a.wagerAction === "call") ? "limped_pot" : "unopened";
+      } else if (lastRaise?.seat !== input.heroSeat && (input.amountToCallBB ?? 0) > 0) {
+        if (raised.length === 1) {
+          classified = voluntary.some((a) => a.observation > lastRaise.observation && (a.action === "call" || a.wagerAction === "call")) ? "facing_open_and_callers" : "facing_open";
+        } else
+          classified = raised.length === 2 ? "facing_3bet" : "facing_4bet_or_more";
+      }
+    }
+    const heroTotal = totalsKnown && hero.remainingStackBB !== null ? hero.remainingStackBB + hero.contributionBB : null;
+    const effectiveStacks = opponents.map((opponent) => ({
+      seat: opponent.seat,
+      effectiveStackBB: heroTotal !== null && opponent.remainingStackBB !== null && opponent.contributionBB !== null ? Math.min(heroTotal, opponent.remainingStackBB + opponent.contributionBB) : null
+    }));
+    const effectiveStackBB = opponents.length === 1 ? effectiveStacks[0].effectiveStackBB : null;
+    const allStacksKnown = effectiveStacks.length > 0 && effectiveStacks.every((p) => p.effectiveStackBB !== null);
+    if (!allStacksKnown)
+      reasons.push("Effective stack is unknown for at least one opponent; All In text is not numeric zero.");
+    if (opponents.length > 1)
+      reasons.push("Effective stacks are pairwise; multiway calling/side-pot strategy is not modeled.");
+    if (hero.position === null || opponents.some((p) => p.position === null))
+      reasons.push("One or more active positions are unknown.");
+    if (input.potBB === null)
+      reasons.push("Decision pot is unverified.");
+    if (input.tournamentContext === "unknown")
+      reasons.push("Antes, payouts, ICM, bounties, and tournament risk adjustments are unknown.");
+    const minimumEffective = allStacksKnown ? Math.min(...effectiveStacks.map((p) => p.effectiveStackBB)) : null;
+    const reference = getPreflopOpeningReference({ position: hero.position, effectiveStackBB: minimumEffective, playersDealtIn: input.playersDealtIn ?? 0, unopened: classified === "unopened" });
+    const shortStack = heroTotal === null ? null : heroTotal <= 20;
+    const pushFold = !complete || heroTotal === null ? "not_established" : classified === "unopened" && opponents.length === 1 && hero.position === "SB" && opponents[0]?.position === "BB" && effectiveStackBB !== null && effectiveStackBB <= 10 ? "requires_calling_model" : "not_applicable";
+    if (pushFold === "requires_calling_model")
+      reasons.push("Possible short-stack blind-vs-blind shove study only; a caller range, explicit fold-equity assumption, and correct commitment model are still required.");
+    if (reference === null)
+      reasons.push("No applicable strategic response model: 100BB+ six-max RFI charts are not defending, calling, 3-bet, 4-bet, or tournament short-stack charts.");
+    const decisionSupport = reference !== null && complete && input.potBB !== null && !hero.folded && !hero.allIn && hero.remainingStackBB !== null && hero.remainingStackBB > 0 && opponents.every((p) => p.position !== null && !p.allIn) && input.tournamentContext === "chip_ev_only" ? "ai_judgment" : "uncertain";
+    return PreflopContextSchema.parse({
+      ...input,
+      situation: classified,
+      heroPosition: hero.position,
+      heroStackBB: hero.remainingStackBB,
+      activeOpponents: opponents.length,
+      blindDefending: classified === "unopened" || classified === "limped_pot" ? false : raiseToBB === null || input.amountToCallBB === null || hero.position === null ? null : (hero.position === "SB" || hero.position === "BB") && input.amountToCallBB > 0,
+      raiseToBB,
+      lastAggressorSeat: complete ? lastRaise?.seat ?? null : null,
+      effectiveStackBB,
+      effectiveStacks,
+      shortStack,
+      pushFold,
+      openingReference: { applicable: reference !== null, hands: reference ? [...reference.keys()] : [] },
+      decisionSupport,
+      reasons
+    });
+  }
+  function preflopUncertainty(packet) {
+    if (packet.table.street !== "preflop")
+      return null;
+    if (!packet.preflop)
+      return ["Structured preflop context is missing."];
+    if (packet.dataConfidence === "low")
+      return ["Decision-critical table data is unreliable.", ...packet.preflop.reasons];
+    return packet.preflop.decisionSupport === "uncertain" ? ["Insufficient strategic model / uncertain.", ...packet.preflop.reasons] : null;
+  }
+
+  // ../../packages/ai-core/dist/decisionPacket.js
+  var CardSchema = external_exports.object({
+    rank: external_exports.union([
+      external_exports.literal(2),
+      external_exports.literal(3),
+      external_exports.literal(4),
+      external_exports.literal(5),
+      external_exports.literal(6),
+      external_exports.literal(7),
+      external_exports.literal(8),
+      external_exports.literal(9),
+      external_exports.literal(10),
+      external_exports.literal(11),
+      external_exports.literal(12),
+      external_exports.literal(13),
+      external_exports.literal(14)
+    ]),
+    suit: external_exports.enum(["s", "h", "d", "c"])
+  });
+  var PositionSchema = external_exports.enum(["UTG", "HJ", "CO", "BTN", "SB", "BB"]);
+  var StreetSchema = external_exports.enum(["preflop", "flop", "turn", "river"]);
+  var FacingActionSchema = external_exports.enum(["none", "bet", "raise", "all_in"]);
+  var EquitySourceSchema = external_exports.enum(["estimated_range", "random_hands", "unknown"]);
+  var CandidateActionSchema = external_exports.enum(["FOLD", "CHECK", "CALL", "BET", "RAISE", "ALL_IN"]);
+  function deriveCandidateActions(facingActionType) {
+    const facingBet = facingActionType === "bet" || facingActionType === "raise" || facingActionType === "all_in";
+    return facingBet ? ["FOLD", "CALL", "RAISE", "ALL_IN"] : ["CHECK", "BET", "ALL_IN"];
+  }
+  var DecisionPacketSchema = external_exports.object({
+    hero: external_exports.object({
+      holeCards: external_exports.tuple([CardSchema, CardSchema]),
+      position: PositionSchema,
+      stackBB: external_exports.number().positive()
+    }),
+    table: external_exports.object({
+      potBB: external_exports.number().nonnegative(),
+      // 0 is valid: the very first action of a hand, before blinds have registered in the main pot display
+      board: external_exports.array(CardSchema).max(5),
+      street: StreetSchema,
+      numOpponentsRemaining: external_exports.number().int().min(1)
+    }),
+    facingAction: external_exports.object({
+      type: FacingActionSchema,
+      amountBB: external_exports.number().nonnegative().optional()
+    }),
+    /** Derived via deriveCandidateActions() -- see its doc comment above. */
+    candidateActions: external_exports.array(CandidateActionSchema).min(1),
+    /** Optional for legacy packets; preflop requests without it yield uncertainty. */
+    preflop: PreflopContextSchema.optional(),
+    engineCalculations: external_exports.object({
+      equity: external_exports.number().min(0).max(1).optional(),
+      /** Should be present whenever equity is -- see EquitySourceSchema doc comment above. Not schema-enforced as a pair, by convention only. */
+      equitySource: EquitySourceSchema.optional(),
+      potOddsBreakevenPercent: external_exports.number().min(0).max(100).optional(),
+      callEV: external_exports.number().optional(),
+      spr: external_exports.number().positive().optional(),
+      outs: external_exports.number().int().nonnegative().optional(),
+      boardTexture: external_exports.object({
+        suitTexture: external_exports.enum(["monotone", "two_tone", "rainbow"]),
+        pairTexture: external_exports.enum(["paired", "trips_plus", "unpaired"]),
+        connectivity: external_exports.enum(["disconnected", "somewhat_connected", "highly_connected"]),
+        overall: external_exports.enum(["dry", "semi_wet", "wet"])
+      }).optional()
+    }),
+    opponentContext: external_exports.object({
+      estimatedRangeDescription: external_exports.string().optional(),
+      rangeVsHeroEquity: external_exports.number().min(0).max(1).optional()
+    }).optional(),
+    /** Explicit confidence flag per Rule 5: never let the AI reason
+     *  confidently over uncertain data. */
+    dataConfidence: external_exports.enum(["high", "medium", "low"]).default("high")
+  });
+
+  // ../../packages/ai-core/dist/recommendation.js
+  var RecommendationSchema = external_exports.object({
+    action: external_exports.enum(["FOLD", "CHECK", "CALL", "BET", "RAISE", "ALL_IN"]),
+    sizingBB: external_exports.number().positive().optional(),
+    confidence: external_exports.number().min(0).max(1),
+    reasoning: external_exports.string().min(1),
+    alternative: external_exports.object({
+      action: external_exports.enum(["FOLD", "CHECK", "CALL", "BET", "RAISE", "ALL_IN"]),
+      reasoning: external_exports.string().min(1)
+    }).optional()
+  });
+
+  // ../../packages/ai-core/dist/auditRecord.js
+  var AuditRecordSchema = external_exports.object({
+    timestamp: external_exports.string().datetime(),
+    sessionId: external_exports.string(),
+    handId: external_exports.string(),
+    decisionPacket: DecisionPacketSchema,
+    provider: external_exports.string(),
+    model: external_exports.string(),
+    promptVersion: external_exports.string(),
+    rawResponse: external_exports.string().optional(),
+    parsedRecommendation: RecommendationSchema.optional(),
+    latencyMs: external_exports.number().nonnegative(),
+    error: external_exports.string().optional()
+  });
+
+  // ../../packages/ai-core/dist/modelRegistry.js
+  var ModelConfigSchema = external_exports.object({
+    provider: external_exports.enum(["groq", "gemini", "nvidia"]),
+    modelId: external_exports.string().min(1),
+    supportsVision: external_exports.boolean(),
+    supportsStructuredOutput: external_exports.boolean(),
+    costTier: external_exports.enum(["free", "paid"]),
+    speedTier: external_exports.enum(["fast", "moderate", "slow"]),
+    /** Latency we've actually measured ourselves, not a vendor claim.
+     *  Optional until we've run a real test against this exact model. */
+    measuredLatencyMs: external_exports.number().positive().optional(),
+    /** When we last confirmed (via a real API call) that this model is
+     *  actually callable -- per the lesson learned twice now that
+     *  documentation and reality can drift apart (Groq's Enterprise-only
+     *  model move, needing to verify Gemini's model name against official
+     *  docs rather than guessing). null means never verified. */
+    lastVerifiedAt: external_exports.string().datetime().nullable()
+  });
+
+  // ../../packages/ai-core/dist/consistencyCheck.js
+  var SEP = "[\\s\\-\\u2010-\\u2013]";
+  var CATEGORY_PATTERNS = [
+    { name: "High Card", pattern: `high${SEP}card` },
+    { name: "Pair", pattern: "pairs?" },
+    { name: "Two Pair", pattern: `two${SEP}pairs?` },
+    { name: "Three of a Kind", pattern: `three${SEP}of${SEP}a${SEP}kind` },
+    // Negative lookahead so "straight flush" isn't ALSO read as a "straight" claim.
+    { name: "Straight", pattern: `straight(?!${SEP}flush)` },
+    { name: "Flush", pattern: "flush" },
+    { name: "Full House", pattern: `full${SEP}house` },
+    { name: "Four of a Kind", pattern: `four${SEP}of${SEP}a${SEP}kind` },
+    { name: "Straight Flush", pattern: `straight${SEP}flush` }
+  ];
+
+  // src/preflop.ts
+  function buildLivePreflopContext(assessment, actionHistory2) {
+    const { state, bigBlind, positions, decisionPot, amountToCall } = assessment;
+    if (bigBlind === null || !Number.isFinite(bigBlind) || bigBlind <= 0) return null;
+    const hero = state?.seats.find((s) => s.isYou);
+    try {
+      const preflop = state?.street === "preflop" && hero?.isOccupied && bigBlind !== null && state.seats.filter((s) => s.isOccupied).length >= 2 ? buildPreflopContext({
+        heroSeat: hero.seatNumber,
+        players: state.seats.filter((s) => s.isOccupied).map((s) => ({
+          seat: s.seatNumber,
+          position: positions.get(s.seatNumber) ?? null,
+          remainingStackBB: s.stack === null ? null : s.stack / bigBlind,
+          contributionBB: s.betReadError || s.currentBet === null ? null : s.currentBet / bigBlind,
+          folded: s.isFolded,
+          allIn: s.isAllIn ?? false
+        })),
+        playersDealtIn: null,
+        potBB: decisionPot === null ? null : decisionPot / bigBlind,
+        amountToCallBB: amountToCall === null ? null : amountToCall / bigBlind,
+        contributionMeaning: "unknown",
+        historyCoverage: "partial",
+        tournamentContext: "unknown",
+        historyNotes: actionHistory2.notes,
+        actions: [...actionHistory2.records.values()].flat().filter((a) => a.street === "preflop").map((a) => ({
+          seat: a.seat,
+          action: a.action,
+          totalContributionBB: a.amount === null ? null : a.amount / bigBlind,
+          observation: a.observation,
+          wagerAction: a.wagerAction
+        }))
+      }) : null;
+      return preflop;
+    } catch {
+      return null;
+    }
+  }
+
+  // ../../packages/browser-reader/dist/cardParsing.js
+  var CLASS_SUIT_MAP = {
+    "card-s": "s",
+    "card-h": "h",
+    "card-d": "d",
+    "card-c": "c"
+  };
+  var CLASS_RANK_MAP = {
+    "card-s-2": 2,
+    "card-s-3": 3,
+    "card-s-4": 4,
+    "card-s-5": 5,
+    "card-s-6": 6,
+    "card-s-7": 7,
+    "card-s-8": 8,
+    "card-s-9": 9,
+    "card-s-T": 10,
+    "card-s-J": 11,
+    "card-s-Q": 12,
+    "card-s-K": 13,
+    "card-s-A": 14
+  };
+  function parseHoleCardFromClassList(classList) {
+    if (!classList.includes("flipped")) {
+      return null;
+    }
+    let suit;
+    let rank;
+    for (const cls of classList) {
+      if (cls in CLASS_SUIT_MAP) {
+        if (suit !== void 0 && suit !== CLASS_SUIT_MAP[cls])
+          return null;
+        suit = CLASS_SUIT_MAP[cls];
+      }
+      if (cls in CLASS_RANK_MAP) {
+        if (rank !== void 0 && rank !== CLASS_RANK_MAP[cls])
+          return null;
+        rank = CLASS_RANK_MAP[cls];
+      }
+    }
+    if (suit === void 0 || rank === void 0) {
+      return null;
+    }
+    return { rank, suit };
+  }
+  var TEXT_SUIT_MAP = {
+    h: "h",
+    s: "s",
+    d: "d",
+    c: "c"
+  };
+  var TEXT_RANK_MAP = {
+    "2": 2,
+    "3": 3,
+    "4": 4,
+    "5": 5,
+    "6": 6,
+    "7": 7,
+    "8": 8,
+    "9": 9,
+    "10": 10,
+    J: 11,
+    Q: 12,
+    K: 13,
+    A: 14
+  };
+  function parseBoardCardFromText(valueText, suitText) {
+    const rank = TEXT_RANK_MAP[valueText.trim()];
+    const suit = TEXT_SUIT_MAP[suitText.trim().toLowerCase()];
+    if (rank === void 0) {
+      throw new Error(`Unrecognized board card value text: "${valueText}"`);
+    }
+    if (suit === void 0) {
+      throw new Error(`Unrecognized board card suit text: "${suitText}"`);
+    }
+    return { rank, suit };
+  }
+
+  // ../../packages/browser-reader/dist/tableInfoParsing.js
+  function parseChipsValueText(normalValueText) {
+    const text = normalValueText.trim();
+    const cleaned = text.replace(/,/g, "");
+    if (cleaned.length === 0) {
+      throw new Error(`Chips value text is empty (expected a number, got an empty string)`);
+    }
+    const value = Number(cleaned);
+    if (!/^(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$/.test(text) || !Number.isFinite(value) || value < 0) {
+      throw new Error(`Unrecognized chips value text: "${normalValueText}"`);
+    }
+    return value;
+  }
+  function parsePotSizeInfo(mainValueText, totalValueText) {
+    return {
+      mainValue: parseChipsValueText(mainValueText),
+      totalValue: totalValueText !== null ? parseChipsValueText(totalValueText) : null
+    };
+  }
+  var ALL_IN_STACK_TEXT = "all in";
+  function isAllInStackText(text) {
+    return text?.trim().replace(/\s+/g, " ").toLowerCase() === ALL_IN_STACK_TEXT;
+  }
+  function parseBlindValues(texts) {
+    const parse = (text) => {
+      if (text == null)
+        return null;
+      try {
+        const value = parseChipsValueText(text);
+        return value > 0 ? value : null;
+      } catch {
+        return null;
+      }
+    };
+    return { smallBlind: parse(texts[0]), bigBlind: parse(texts[1]) };
+  }
+  function parsePlayerNameAndStack(nameText, stackText) {
+    const name = nameText.trim();
+    if (name.length === 0) {
+      throw new Error("Player name text is empty");
+    }
+    if (isAllInStackText(stackText)) {
+      return { name, stack: null };
+    }
+    return {
+      name,
+      stack: parseChipsValueText(stackText)
+    };
+  }
+
+  // ../../packages/browser-reader/dist/gameState.js
+  function deriveStreet(boardCardCount) {
+    if (boardCardCount === 0)
+      return "preflop";
+    if (boardCardCount === 3)
+      return "flop";
+    if (boardCardCount === 4)
+      return "turn";
+    if (boardCardCount === 5)
+      return "river";
+    throw new Error(`Unexpected board card count: ${boardCardCount} (expected 0, 3, 4, or 5)`);
+  }
+  function parseBetValue(betValueText) {
+    if (betValueText === null)
+      return null;
+    const trimmed = betValueText.trim();
+    if (trimmed.length === 0)
+      return null;
+    try {
+      return parseChipsValueText(trimmed);
+    } catch {
+      return null;
+    }
+  }
+  function isCheckText(betValueText) {
+    return betValueText !== null && betValueText.trim().toLowerCase() === "check";
+  }
+  function assembleSeat(raw) {
+    if (!raw.isOccupied) {
+      return {
+        seatNumber: raw.seatNumber,
+        isOccupied: false,
+        isYou: false,
+        playerName: null,
+        stack: null,
+        isFolded: false,
+        isCurrentToAct: false,
+        isOffline: false,
+        holeCards: [],
+        currentBet: null,
+        isChecking: false
+      };
+    }
+    const isFolded = raw.statusClasses.includes("fold");
+    const isCurrentToAct = raw.statusClasses.includes("decision-current");
+    const isOffline = raw.statusClasses.includes("offline");
+    const playerName = raw.playerNameText?.trim() || null;
+    let stack = null;
+    if (playerName !== null && raw.stackText !== null) {
+      try {
+        stack = parsePlayerNameAndStack(playerName, raw.stackText).stack;
+      } catch {
+        stack = null;
+      }
+    }
+    const holeCards = raw.holeCardClassLists.map(parseHoleCardFromClassList).filter((c) => c !== null);
+    return {
+      seatNumber: raw.seatNumber,
+      isOccupied: true,
+      isYou: raw.isYou,
+      playerName,
+      stack,
+      isAllIn: isAllInStackText(raw.stackText),
+      betReadError: raw.betValueText !== null && parseBetValue(raw.betValueText) === null && !isCheckText(raw.betValueText),
+      isFolded,
+      isCurrentToAct,
+      isOffline,
+      holeCards,
+      currentBet: parseBetValue(raw.betValueText),
+      isChecking: isCheckText(raw.betValueText)
+    };
+  }
+  function assembleGameState(raw) {
+    if (raw.potMainValueText === null)
+      throw new Error("Main pot element is missing");
+    const board = raw.boardCards.map((c) => parseBoardCardFromText(c.valueText, c.suitText));
+    const potInfo = parsePotSizeInfo(raw.potMainValueText, raw.potTotalValueText);
+    const seats = raw.seats.map(assembleSeat);
+    return {
+      seats,
+      board,
+      potMainValue: potInfo.mainValue,
+      potTotalValue: potInfo.totalValue,
+      street: deriveStreet(board.length)
+    };
+  }
+  function calculateAmountToCall(state) {
+    const heroes = state.seats.filter((s) => s.isOccupied && s.isYou);
+    const hero = heroes[0];
+    if (heroes.length !== 1 || !hero || hero.isFolded)
+      return null;
+    const relevantSeats = state.seats.filter((s) => s.isOccupied && !s.isFolded);
+    if (relevantSeats.some((s) => s.betReadError || s.currentBet !== null && (!Number.isFinite(s.currentBet) || s.currentBet < 0)))
+      return null;
+    const heroBet = hero?.currentBet ?? 0;
+    const highestOpponentBet = state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded && s.currentBet !== null).reduce((max, s) => Math.max(max, s.currentBet), 0);
+    return Math.max(0, highestOpponentBet - heroBet);
+  }
+
+  // ../../packages/browser-reader/dist/dataConfidence.js
+  var EXPECTED_BOARD_COUNT = {
+    preflop: 0,
+    flop: 3,
+    turn: 4,
+    river: 5
+  };
+  function computeDataConfidence(state, context) {
+    const criticalReasons = [];
+    const uncertainReasons = [];
+    const hero = state.seats.find((s) => s.isYou);
+    if (state.seats.filter((s) => s.isOccupied && s.isYou).length > 1) {
+      criticalReasons.push("multiple hero seats found");
+    }
+    if (state.seats.filter((s) => s.isOccupied && s.isCurrentToAct).length !== 1) {
+      criticalReasons.push("current player to act is missing or ambiguous");
+    }
+    if (new Set(state.seats.map((s) => s.seatNumber)).size !== state.seats.length) {
+      criticalReasons.push("duplicate seat numbers");
+    }
+    if (!hero || !hero.isOccupied) {
+      criticalReasons.push("hero seat not found in state");
+    } else {
+      if (hero.holeCards.length !== 2) {
+        criticalReasons.push(`hero hole cards incomplete (${hero.holeCards.length}/2)`);
+      }
+      if (hero.stack === null || !Number.isFinite(hero.stack) || hero.stack < 0) {
+        criticalReasons.push("hero stack missing or invalid");
+      }
+      if (hero.isFolded) {
+        criticalReasons.push("hero has already folded -- no decision to make");
+      }
+      if (!hero.isCurrentToAct) {
+        criticalReasons.push("it is not hero's turn -- unsafe to base a decision on this state");
+      }
+      if (hero.isOffline) {
+        criticalReasons.push("hero is showing as offline");
+      }
+    }
+    const expectedBoardCount = EXPECTED_BOARD_COUNT[state.street];
+    const visibleCards = [...state.board, ...state.seats.filter((s) => s.isOccupied).flatMap((s) => s.holeCards)];
+    if (new Set(visibleCards.map((c) => `${c.rank}${c.suit}`)).size !== visibleCards.length) {
+      criticalReasons.push("duplicate visible cards -- the table read is inconsistent");
+    }
+    if (state.board.length !== expectedBoardCount) {
+      criticalReasons.push(`board card count (${state.board.length}) does not match street "${state.street}" (expected ${expectedBoardCount})`);
+    }
+    if (!Number.isFinite(state.potMainValue) || state.potMainValue < 0) {
+      criticalReasons.push("pot value missing or invalid");
+    }
+    if (state.potTotalValue !== null && (!Number.isFinite(state.potTotalValue) || state.potTotalValue < 0)) {
+      criticalReasons.push("add-on pot value is invalid");
+    }
+    if (!context.potSemanticsVerified) {
+      criticalReasons.push("main/add-on pot meaning needs live confirmation -- pot-based recommendations withheld");
+    }
+    if (context.amountToCall === null || !Number.isFinite(context.amountToCall) || context.amountToCall < 0) {
+      criticalReasons.push("amount-to-call is missing or invalid");
+    }
+    const activeOpponents = state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded);
+    if (state.seats.some((s) => s.isOccupied && !s.isFolded && (s.betReadError || s.currentBet !== null && (!Number.isFinite(s.currentBet) || s.currentBet < 0)))) {
+      criticalReasons.push("current street contribution is unreadable");
+    }
+    if (activeOpponents.some((s) => !s.isAllIn && (s.stack === null || !Number.isFinite(s.stack) || s.stack < 0))) {
+      criticalReasons.push("active opponent stack missing or invalid");
+    }
+    if (activeOpponents.length < 1) {
+      criticalReasons.push("no active opponents remain -- hand is already decided");
+    }
+    if (context.bigBlindWasDefaulted) {
+      criticalReasons.push("big blind could not be read from the table -- BB-based sizing is unreliable");
+    }
+    if (activeOpponents.some((s) => s.isOffline)) {
+      uncertainReasons.push("at least one active opponent is showing as offline -- their state may be stale");
+    }
+    if (!context.isPositionKnown) {
+      criticalReasons.push("hero's real table position is not yet known -- no fallback position will be sent");
+    }
+    if (criticalReasons.length > 0) {
+      return { level: "low", reasons: criticalReasons };
+    }
+    if (uncertainReasons.length > 0) {
+      return { level: "medium", reasons: uncertainReasons };
+    }
+    return { level: "high", reasons: [] };
+  }
+
+  // ../../packages/browser-reader/dist/actionHistory.js
+  function emptyActionHistory() {
+    return {
+      records: /* @__PURE__ */ new Map(),
+      observation: 0,
+      lastHeroCards: null,
+      lastHeroIdentity: null,
+      dealerSeatNumber: null,
+      streetContributions: /* @__PURE__ */ new Map(),
+      awaitingStreetBaseline: false,
+      notes: []
+    };
+  }
+  function identity(seat) {
+    return seat?.isOccupied && seat.playerName ? `${seat.seatNumber}:${seat.playerName}` : null;
+  }
+  function heroCards(state) {
+    const cards = state.seats.find((s) => s.isYou && s.isOccupied)?.holeCards;
+    return cards?.length === 2 ? cards.map((c) => `${c.rank}${c.suit}`).sort().join(",") : null;
+  }
+  function contribution(seat) {
+    if (seat.betReadError)
+      return null;
+    if (seat.currentBet === null)
+      return 0;
+    return Number.isFinite(seat.currentBet) && seat.currentBet >= 0 ? seat.currentBet : null;
+  }
+  function boundaryReason(history, previous, current, context) {
+    const streets = ["preflop", "flop", "turn", "river"];
+    if (streets.indexOf(current.street) < streets.indexOf(previous.street))
+      return "Board/street regressed; started a fresh history baseline.";
+    if (previous.board.some((card, i) => current.board[i]?.rank !== card.rank || current.board[i]?.suit !== card.suit)) {
+      return "Board was cleared or replaced; started a fresh history baseline.";
+    }
+    const currentIdentity = identity(current.seats.find((s) => s.isYou));
+    const priorIdentity = history.lastHeroIdentity ?? identity(previous.seats.find((s) => s.isYou));
+    const knownCards = history.lastHeroCards ?? heroCards(previous);
+    const cards = heroCards(current);
+    if (currentIdentity !== null && currentIdentity === priorIdentity && knownCards !== null && cards !== null && cards !== knownCards) {
+      return "A different complete hero hand was observed; started a fresh history baseline.";
+    }
+    if (current.street === "preflop" && context.dealerSeatNumber != null && history.dealerSeatNumber !== null && context.dealerSeatNumber !== history.dealerSeatNumber) {
+      return "Dealer changed preflop; started a fresh history baseline.";
+    }
+    if (current.seats.some((seat) => {
+      const before = previous.seats.find((s) => s.seatNumber === seat.seatNumber);
+      return identity(seat) !== null && identity(seat) === identity(before) && before?.isFolded && !seat.isFolded;
+    }))
+      return "A folded player became active again; hand continuity is uncertain, so history was reset.";
+    return null;
+  }
+  function updateActionHistory(history, previous, current, context = {}) {
+    const boundary = previous ? boundaryReason(history, previous, current, context) : "No preceding read; actions before this baseline are unknown.";
+    const reset = boundary !== null;
+    const next = reset ? emptyActionHistory() : {
+      ...history,
+      records: new Map(history.records),
+      streetContributions: new Map(history.streetContributions),
+      notes: [...history.notes]
+    };
+    next.observation = history.observation + 1;
+    const note = (message) => {
+      if (!next.notes.includes(message))
+        next.notes.push(message);
+    };
+    if (boundary)
+      note(boundary);
+    const heroIdentity = identity(current.seats.find((s) => s.isYou));
+    if (heroIdentity !== null && heroIdentity !== next.lastHeroIdentity) {
+      next.lastHeroIdentity = heroIdentity;
+      next.lastHeroCards = null;
+    }
+    next.lastHeroCards = heroCards(current) ?? next.lastHeroCards ?? (previous && !reset ? heroCards(previous) : null);
+    next.dealerSeatNumber = context.dealerSeatNumber ?? next.dealerSeatNumber;
+    for (const seatNumber of next.records.keys()) {
+      const before = previous?.seats.find((s) => s.seatNumber === seatNumber);
+      const now = current.seats.find((s) => s.seatNumber === seatNumber);
+      if (identity(now) === null || identity(now) !== identity(before)) {
+        next.records.delete(seatNumber);
+        next.streetContributions.delete(seatNumber);
+        note("A seat disappeared or changed identity; its previous actions were discarded.");
+      }
+    }
+    const sameStreet = previous !== null && previous.street === current.street;
+    const cleanStreet = current.seats.filter((s) => s.isOccupied && !s.isFolded).every((s) => contribution(s) === 0 && !s.isChecking);
+    if (!reset && (!sameStreet || history.awaitingStreetBaseline)) {
+      next.awaitingStreetBaseline = !cleanStreet;
+      next.streetContributions.clear();
+      if (next.awaitingStreetBaseline)
+        note("Street boundary has non-cleared action labels; waiting for a clean betting baseline.");
+    }
+    if (!sameStreet)
+      next.streetContributions.clear();
+    const baselineTotals = new Map(next.streetContributions);
+    if (!reset && sameStreet && !history.awaitingStreetBaseline && previous) {
+      for (const seat of previous.seats) {
+        const total = contribution(seat);
+        if (seat.isOccupied && total !== null)
+          baselineTotals.set(seat.seatNumber, Math.max(baselineTotals.get(seat.seatNumber) ?? 0, total));
+      }
+    }
+    for (const seat of current.seats) {
+      const before = previous?.seats.find((s) => s.seatNumber === seat.seatNumber);
+      if (identity(seat) === null || identity(seat) !== identity(before)) {
+        baselineTotals.delete(seat.seatNumber);
+        next.streetContributions.delete(seat.seatNumber);
+      }
+      const total = contribution(seat);
+      if (seat.isOccupied && total !== null)
+        next.streetContributions.set(seat.seatNumber, Math.max(baselineTotals.get(seat.seatNumber) ?? 0, total));
+    }
+    if (reset || !previous)
+      return next;
+    if (!sameStreet) {
+      note("Street changed; actions spanning the transition were not reconstructed.");
+      return next;
+    }
+    if (history.awaitingStreetBaseline)
+      return next;
+    const pairs = current.seats.flatMap((seat) => {
+      const before = previous.seats.find((s) => s.seatNumber === seat.seatNumber);
+      return before && identity(seat) !== null && identity(seat) === identity(before) ? [{ seat, before }] : [];
+    });
+    const increased = pairs.filter(({ seat, before }) => !seat.isFolded && !before.isFolded && contribution(seat) !== null && contribution(seat) > (baselineTotals.get(seat.seatNumber) ?? 0));
+    const activeBefore = previous.seats.filter((s) => s.isOccupied && !s.isFolded);
+    const unknownWager = activeBefore.some((s) => contribution(s) === null) || current.seats.some((s) => s.isOccupied && !s.isFolded && contribution(s) === null);
+    const rosterChanged = previous.seats.some((s) => identity(s) !== identity(current.seats.find((now) => now.seatNumber === s.seatNumber))) || current.seats.some((s) => identity(s) !== identity(previous.seats.find((before) => before.seatNumber === s.seatNumber)));
+    const previousHighest = Math.max(0, ...activeBefore.map((s) => baselineTotals.get(s.seatNumber) ?? contribution(s) ?? 0));
+    if (increased.length > 1)
+      note("Multiple wagers changed in one observation; bet/call/raise order is unknown and was omitted.");
+    if (unknownWager)
+      note("An active contribution was unreadable; numeric action classification was omitted.");
+    if (rosterChanged)
+      note("Seat identities changed during the observation; numeric action classification was omitted.");
+    for (const { seat, before } of pairs) {
+      if (seat.isYou || before.isFolded)
+        continue;
+      const records = next.records.get(seat.seatNumber) ?? [];
+      const total = contribution(seat);
+      const priorTotal = baselineTotals.get(seat.seatNumber) ?? 0;
+      let action2 = null;
+      let wagerAction = null;
+      const grew = total !== null && total > priorTotal;
+      const possiblePosting = current.street === "preflop" && (!before.isCurrentToAct || previousHighest === 0 || priorTotal === 0 && context.bigBlind != null && total !== null && total <= context.bigBlind);
+      if (possiblePosting && (grew || !before.isAllIn && seat.isAllIn)) {
+        note("Preflop posting or unobserved turn: wager/all-in was not treated as a voluntary action.");
+      }
+      if (grew && !unknownWager && !rosterChanged && increased.length === 1 && !possiblePosting) {
+        if (previousHighest === 0)
+          wagerAction = "bet";
+        else if (total > previousHighest)
+          wagerAction = "raise";
+        else if (total === previousHighest || seat.isAllIn)
+          wagerAction = "call";
+        else
+          note("A partial contribution without an all-in label was omitted.");
+      }
+      if (!before.isFolded && seat.isFolded)
+        action2 = "fold";
+      else if (!before.isAllIn && seat.isAllIn && !possiblePosting && !records.some((r) => r.action === "all-in"))
+        action2 = "all-in";
+      else if (seat.isChecking && !before.isChecking && !seat.isAllIn && !before.isAllIn && !unknownWager && previousHighest <= priorTotal && !records.some((r) => r.street === current.street && r.action === "check"))
+        action2 = "check";
+      else if (!seat.isAllIn && !before.isAllIn)
+        action2 = wagerAction;
+      if (action2) {
+        next.records.set(seat.seatNumber, [...records, {
+          street: current.street,
+          action: action2,
+          seat: seat.seatNumber,
+          observation: next.observation,
+          amount: action2 === "check" || action2 === "fold" || seat.currentBet === null ? null : total,
+          wagerAction: action2 === "all-in" ? wagerAction : null
+        }]);
+      }
+    }
+    return next;
+  }
+
+  // ../../packages/browser-reader/dist/position.js
+  function assignPositions(seats, dealerSeatNumber) {
+    const occupied = seats.filter((s) => s.isOccupied).sort((a, b) => a.seatNumber - b.seatNumber);
+    const positions = /* @__PURE__ */ new Map();
+    if (occupied.length === 0)
+      return positions;
+    const dealerIndex = occupied.findIndex((s) => s.seatNumber === dealerSeatNumber);
+    if (dealerIndex === -1) {
+      return positions;
+    }
+    const clockwise = [...occupied.slice(dealerIndex), ...occupied.slice(0, dealerIndex)];
+    const n = clockwise.length;
+    clockwise.forEach((seat, i) => {
+      let position2;
+      if (i === 0) {
+        position2 = "BTN";
+      } else if (n === 2) {
+        position2 = "BB";
+      } else if (i === 1) {
+        position2 = "SB";
+      } else if (i === 2) {
+        position2 = "BB";
+      } else if (i === n - 1) {
+        position2 = "CO";
+      } else if (i === n - 2 && n >= 6) {
+        position2 = "HJ";
+      } else {
+        position2 = "UTG";
+      }
+      positions.set(seat.seatNumber, position2);
+    });
+    return positions;
+  }
+
+  // ../../packages/browser-reader/dist/liveState.js
+  function assessLiveState(raw, context) {
+    const blinds = parseBlindValues(context.blindTexts);
+    const readErrors = [...context.readErrors];
+    if (blinds.smallBlind === null)
+      readErrors.push("small blind could not be read");
+    if (blinds.bigBlind === null)
+      readErrors.push("big blind could not be read -- BB conversions disabled");
+    if (blinds.smallBlind !== null && blinds.bigBlind !== null && blinds.smallBlind > blinds.bigBlind) {
+      readErrors.push("small blind exceeds big blind -- verify selector order");
+    }
+    let state;
+    try {
+      state = assembleGameState(raw);
+    } catch (error) {
+      return {
+        state: null,
+        ...blinds,
+        positions: /* @__PURE__ */ new Map(),
+        amountToCall: null,
+        activeOpponents: null,
+        decisionPot: null,
+        confidence: { level: "low", reasons: [...readErrors, error instanceof Error ? error.message : String(error)] }
+      };
+    }
+    const positions = context.dealerSeatNumber === null ? /* @__PURE__ */ new Map() : assignPositions(state.seats, context.dealerSeatNumber);
+    const hero = state.seats.find((s) => s.isYou);
+    const amountToCall = calculateAmountToCall(state);
+    const confidence = computeDataConfidence(state, {
+      amountToCall,
+      bigBlindWasDefaulted: blinds.bigBlind === null,
+      isPositionKnown: hero !== void 0 && positions.has(hero.seatNumber),
+      potSemanticsVerified: false
+    });
+    return {
+      state,
+      ...blinds,
+      positions,
+      amountToCall,
+      decisionPot: null,
+      activeOpponents: state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded).length,
+      confidence: readErrors.length > 0 ? { level: "low", reasons: [...readErrors, ...confidence.reasons] } : confidence
+    };
   }
 
   // src/tableRead.ts
@@ -5782,7 +5952,7 @@
   // src/diagnostics.ts
   var DIAGNOSTICS_KEY = "poker-ai:diagnostics";
   var lastSnapshot = null;
-  function logLiveDiagnostics(read, assessment, history) {
+  function logLiveDiagnostics(read, assessment, history, preflop = null) {
     let enabled = false;
     try {
       enabled = localStorage.getItem(DIAGNOSTICS_KEY) === "1";
@@ -5794,6 +5964,7 @@
     }
     const seats = assessment.state?.seats ?? [];
     const snapshot = {
+      preflop,
       raw: read.raw,
       evidence: read.evidence,
       context: read.context,
@@ -6006,22 +6177,6 @@
       dataConfidence: confidence.level
     };
   }
-  var SHORT_STACK_BB_THRESHOLD = 20;
-  function checkPreflopPushFold(state, bigBlind, decisionPot) {
-    const hero = state.seats.find((s) => s.isYou);
-    if (!hero || hero.holeCards.length !== 2 || !hero.isCurrentToAct || state.street !== "preflop") return false;
-    if (hero.stack === null || !Number.isFinite(bigBlind) || bigBlind <= 0) return false;
-    const stackBB = hero.stack / bigBlind;
-    if (stackBB <= 0 || stackBB > SHORT_STACK_BB_THRESHOLD) return false;
-    const potBB = decisionPot / bigBlind;
-    if (potBB <= 0) return false;
-    const shove = evaluateShove(hero.holeCards, stackBB, potBB, { iterations: 2e3 });
-    const preflopLine = `PREFLOP (${stackBB.toFixed(1)}BB effective): ${shove.isProfitable ? "SHOVE profitable" : "SHOVE not profitable"} (EV: ${shove.ev.toFixed(2)}BB, equity if called: ${(shove.equityIfCalled * 100).toFixed(1)}%, assumed fold equity: ${(shove.foldEquityUsed * 100).toFixed(0)}%)`;
-    console.log(`[Poker AI Reader] ${preflopLine}`);
-    overlayState.preflopLine = preflopLine;
-    renderOverlay();
-    return true;
-  }
   async function requestRecommendation(packet, stateDescription, requestKey) {
     try {
       const response = await fetch(RELAY_SERVER_URL, {
@@ -6036,7 +6191,11 @@
         );
         return;
       }
-      if (data.ok) {
+      if (data.ok && data.result === null && data.blocked) {
+        overlayState.aiResult = null;
+        overlayState.aiStatus = "blocked";
+        overlayState.aiWarnings = data.uncertainty ?? [data.blockedReason];
+      } else if (data.ok) {
         console.log(`[Poker AI Reader] AI recommendation (for: ${stateDescription}):`, data.result);
         overlayState.aiResult = {
           action: data.result.action,
@@ -6087,7 +6246,8 @@
         previousGameState = state;
       }
     }
-    logLiveDiagnostics(read, assessment, actionHistory);
+    const preflop = buildLivePreflopContext(assessment, actionHistory);
+    logLiveDiagnostics(read, assessment, actionHistory, preflop);
     if (stateJson !== lastStateJson) {
       lastStateJson = stateJson;
       lastRecommendationRequestKey = null;
@@ -6104,10 +6264,45 @@
       if (!state) return;
       const hero = state.seats.find((s) => s.isYou);
       const heroPosition = hero ? positions.get(hero.seatNumber) : void 0;
+      if (preflop) {
+        overlayState.preflopLine = "Preflop: " + preflop.situation + (preflop.decisionSupport === "uncertain" ? " - insufficient strategic model / uncertain" : "");
+        overlayState.aiWarnings = [...confidence.reasons, ...preflop.reasons];
+        renderOverlay();
+      }
       if (confidence.level === "low" || !hero || hero.stack === null || bigBlind === null || amountToCall === null || decisionPot === null || heroPosition === void 0) return;
       overlayState.aiStatus = "idle";
-      const shortStackPushFoldFired = checkPreflopPushFold(state, bigBlind, decisionPot);
-      if (hero && hero.holeCards.length === 2 && !shortStackPushFoldFired) {
+      if (state.street === "preflop") {
+        if (!preflop) {
+          overlayState.aiStatus = "blocked";
+          overlayState.aiWarnings = ["Structured preflop context is unavailable."];
+          renderOverlay();
+          return;
+        }
+        const facing = amountToCall > 0 ? "raise" : "none";
+        const packet = {
+          hero: { holeCards: hero.holeCards, position: heroPosition, stackBB: hero.stack / bigBlind },
+          table: { potBB: decisionPot / bigBlind, board: [], street: "preflop", numOpponentsRemaining: preflop.activeOpponents },
+          facingAction: { type: facing, ...amountToCall > 0 ? { amountBB: amountToCall / bigBlind } : {} },
+          candidateActions: deriveCandidateActions(facing),
+          engineCalculations: {},
+          dataConfidence: confidence.level,
+          preflop
+        };
+        const uncertainty = preflopUncertainty(packet);
+        overlayState.preflopLine = "Preflop: " + preflop.situation;
+        if (uncertainty) {
+          overlayState.aiStatus = "blocked";
+          overlayState.aiWarnings = uncertainty;
+        } else if (hero.isCurrentToAct && hero.holeCards.length === 2) {
+          const requestKey = requestSequence + ":" + stateJson;
+          lastRecommendationRequestKey = requestKey;
+          overlayState.aiStatus = "waiting";
+          requestRecommendation(packet, "structured preflop", requestKey);
+        }
+        renderOverlay();
+        return;
+      }
+      if (hero && hero.holeCards.length === 2) {
         const numOpponents = state.seats.filter(
           (s) => s.isOccupied && !s.isYou && !s.isFolded
         ).length;

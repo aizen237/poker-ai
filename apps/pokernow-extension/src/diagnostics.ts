@@ -1,3 +1,4 @@
+import type { PreflopContext } from "@poker-ai/ai-core";
 import type { ActionHistory, LiveStateAssessment } from "@poker-ai/browser-reader";
 import { formatCards } from "@poker-ai/shared";
 import type { LiveTableRead } from "./tableRead.js";
@@ -6,12 +7,13 @@ const DIAGNOSTICS_KEY = "poker-ai:diagnostics";
 let lastSnapshot: string | null = null;
 
 /** Opt in from the PokerNow tab console; re-read the toggle on every poll. */
-export function logLiveDiagnostics(read: LiveTableRead, assessment: LiveStateAssessment, history: ActionHistory): void {
+export function logLiveDiagnostics(read: LiveTableRead, assessment: LiveStateAssessment, history: ActionHistory, preflop: PreflopContext | null = null): void {
   let enabled = false;
   try { enabled = localStorage.getItem(DIAGNOSTICS_KEY) === "1"; } catch { /* Storage disabled: diagnostics stay off. */ }
   if (!enabled) { lastSnapshot = null; return; }
   const seats = assessment.state?.seats ?? [];
   const snapshot = {
+    preflop,
     raw: read.raw, evidence: read.evidence, context: read.context,
     actionHistory: { records: Object.fromEntries(history.records), observation: history.observation, notes: history.notes },
     parsed: {

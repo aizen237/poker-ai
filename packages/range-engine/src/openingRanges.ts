@@ -99,3 +99,15 @@ export function getOpeningRange(position: Position): Range {
 }
 
 export const ALL_POSITIONS: Position[] = ["UTG", "HJ", "CO", "BTN", "SB", "BB"];
+
+/** Scope guard for these references. Null means no model, not an empty response range. */
+export function getPreflopOpeningReference(input: {
+  position: Position | null;
+  effectiveStackBB: number | null;
+  playersDealtIn: number;
+  unopened: boolean;
+}): Range | null {
+  if (!input.unopened || input.position === null || input.position === "BB" || input.playersDealtIn !== 6 ||
+      input.effectiveStackBB === null || !Number.isFinite(input.effectiveStackBB) || input.effectiveStackBB < 100) return null;
+  return getOpeningRange(input.position);
+}

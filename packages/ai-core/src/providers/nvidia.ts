@@ -1,3 +1,4 @@
+import { preflopPromptLines } from "../preflopContext.js";
 import { formatCards } from "@poker-ai/shared";
 import { evaluateBest, HAND_CATEGORY_NAMES } from "@poker-ai/poker-engine";
 import { buildAuditRecord } from "../auditRecord.js";
@@ -27,6 +28,7 @@ function buildPrompt(packet: DecisionPacket): string {
   lines.push(`Facing: ${packet.facingAction.type}${packet.facingAction.amountBB ? ` of ${packet.facingAction.amountBB}BB` : ""}.`);
   lines.push(`Candidate actions (the only ones on the table right now): ${packet.candidateActions.join(", ")}.`);
 
+  lines.push(...preflopPromptLines(packet));
   const calc = packet.engineCalculations;
   if (calc.equity !== undefined) {
     lines.push(`Hero's equity: ${(calc.equity * 100).toFixed(1)}%.`);
@@ -109,7 +111,7 @@ export function createNvidiaProvider(providerOptions: NvidiaProviderOptions): AI
         decisionPacket: packet,
         provider: "nvidia",
         model,
-        promptVersion: PROMPT_VERSION,
+        promptVersion: packet.table.street === "preflop" ? "v5-preflop-context" : PROMPT_VERSION,
         latencyMs: Date.now() - start,
         rawResponse: rawContent,
         parsedRecommendation: recommendation,
@@ -122,7 +124,7 @@ export function createNvidiaProvider(providerOptions: NvidiaProviderOptions): AI
         decisionPacket: packet,
         provider: "nvidia",
         model,
-        promptVersion: PROMPT_VERSION,
+        promptVersion: packet.table.street === "preflop" ? "v5-preflop-context" : PROMPT_VERSION,
         latencyMs: Date.now() - start,
         ...(rawContent !== undefined ? { rawResponse: rawContent } : {}),
         error: error instanceof Error ? error.message : String(error),
