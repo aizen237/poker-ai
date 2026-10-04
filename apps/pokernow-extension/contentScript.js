@@ -4047,6 +4047,213 @@
   };
   var NEVER = INVALID;
 
+  // ../../packages/opponent-db/dist/observations.js
+  var PlayerIdentitySchema = external_exports.object({
+    kind: external_exports.enum(["player_id", "display_name"]),
+    scope: external_exports.string().min(1).max(500),
+    value: external_exports.string().min(1).max(150)
+  });
+  var ProfileLookupSchema = external_exports.object({ identity: PlayerIdentitySchema, displayName: external_exports.string().min(1).max(150) });
+  var metricNames = ["vpip", "pfr", "threeBet", "foldToThreeBet", "cBet", "foldToCBet", "wtsd", "wsd"];
+  var nullableFlag = external_exports.boolean().nullable();
+  var HandObservationSchema = external_exports.object({
+    handId: external_exports.string().min(1).max(150),
+    identity: PlayerIdentitySchema,
+    displayName: external_exports.string().min(1).max(150),
+    coverage: external_exports.enum(["partial", "complete"]),
+    metrics: external_exports.object({ vpip: nullableFlag, pfr: nullableFlag, threeBet: nullableFlag, foldToThreeBet: nullableFlag, cBet: nullableFlag, foldToCBet: nullableFlag, wtsd: nullableFlag, wsd: nullableFlag }),
+    aggression: external_exports.object({ betsAndRaises: external_exports.number().int().nonnegative().max(1e3), calls: external_exports.number().int().nonnegative().max(1e3) }).nullable(),
+    actions: external_exports.array(external_exports.object({ seat: external_exports.number().int().positive(), street: external_exports.enum(["preflop", "flop", "turn", "river"]), action: external_exports.enum(["post_blind", "check", "call", "bet", "raise", "fold", "all-in"]), observation: external_exports.number().int().nonnegative(), wagerAction: external_exports.enum(["call", "bet", "raise"]).nullable().optional() })).max(1e3),
+    observedActions: external_exports.number().int().nonnegative().max(1e3),
+    notes: external_exports.array(external_exports.string().max(500)).max(100)
+  }).superRefine((value, ctx) => {
+    if (value.coverage === "partial" && (Object.values(value.metrics).some((v) => v !== null) || value.aggression !== null))
+      ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: "Partial histories cannot supply unbiased rate denominators" });
+  });
+  function identityKey(identity2) {
+    const valid = PlayerIdentitySchema.parse(identity2);
+    return JSON.stringify([valid.kind, valid.scope, valid.value]);
+  }
+  function summarizeHand(e) {
+    const metrics = { vpip: null, pfr: null, threeBet: null, foldToThreeBet: null, cBet: null, foldToCBet: null, wtsd: null, wsd: null };
+    const events = e.actions.filter((a) => a.action !== "post_blind");
+    const streetOrder = ["preflop", "flop", "turn", "river"];
+    const ordered = events.every((a, i) => i === 0 || a.observation > events[i - 1].observation && streetOrder.indexOf(a.street) >= streetOrder.indexOf(events[i - 1].street));
+    const complete = e.coverage === "complete" && e.dealtInKnown && ordered && events.every((a) => a.action !== "all-in");
+    const own = events.filter((a) => a.seat === e.seat);
+    const verb = (a) => a.action === "all-in" ? a.wagerAction : a.action;
+    let aggression = null;
+    if (complete) {
+      const pre = events.filter((a) => a.street === "preflop");
+      metrics.vpip = pre.some((a) => a.seat === e.seat && ["call", "raise", "bet"].includes(verb(a) ?? ""));
+      metrics.pfr = pre.some((a) => a.seat === e.seat && ["raise", "bet"].includes(verb(a) ?? ""));
+      let raises = 0, firstRaiser = null, lastRaiser = null;
+      for (const a of pre) {
+        const v = verb(a);
+        if (a.seat === e.seat && raises === 1 && lastRaiser !== e.seat)
+          metrics.threeBet = v === "raise" || v === "bet";
+        if (a.seat === e.seat && raises === 2 && firstRaiser === e.seat && lastRaiser !== e.seat)
+          metrics.foldToThreeBet = v === "fold";
+        if (v === "raise" || v === "bet") {
+          raises++;
+          firstRaiser ??= a.seat;
+          lastRaiser = a.seat;
+        }
+      }
+      let flopAggression = false, cBetFacing = false;
+      for (const a of events.filter((a2) => a2.street === "flop")) {
+        const v = verb(a);
+        if (a.seat === e.seat && lastRaiser === e.seat && !flopAggression && ["check", "bet"].includes(v ?? ""))
+          metrics.cBet = v === "bet";
+        if (a.seat === e.seat && cBetFacing && lastRaiser !== e.seat && ["fold", "call", "raise"].includes(v ?? ""))
+          metrics.foldToCBet = v === "fold";
+        if (v === "bet" || v === "raise") {
+          cBetFacing = !flopAggression && v === "bet" && a.seat === lastRaiser;
+          flopAggression = true;
+        }
+      }
+      metrics.wtsd = e.sawFlop === true ? e.wentToShowdown : null;
+      metrics.wsd = e.wentToShowdown === true ? e.wonAtShowdown : null;
+      const post = own.filter((a) => a.street !== "preflop");
+      aggression = { betsAndRaises: post.filter((a) => ["bet", "raise"].includes(verb(a) ?? "")).length, calls: post.filter((a) => verb(a) === "call").length };
+    }
+    return HandObservationSchema.parse({
+      handId: e.handId,
+      identity: e.identity,
+      displayName: e.displayName,
+      coverage: complete ? "complete" : "partial",
+      metrics,
+      aggression,
+      observedActions: own.length,
+      actions: own,
+      notes: [...e.notes ?? [], ...!complete ? ["Partial observation window; rate denominators and missed actions remain unknown."] : []]
+    });
+  }
+
+  // ../../packages/opponent-db/dist/types.js
+  var CONFIDENCE_THRESHOLDS = {
+    moderate: 100,
+    strong: 1e3
+  };
+  function getConfidenceLevel(handsObserved) {
+    if (handsObserved >= CONFIDENCE_THRESHOLDS.strong)
+      return "strong";
+    if (handsObserved >= CONFIDENCE_THRESHOLDS.moderate)
+      return "moderate";
+    return "low";
+  }
+
+  // ../../packages/opponent-db/dist/estimates.js
+  var STAT_PRIORS = { vpip: 0.25, pfr: 0.18, threeBet: 0.07, foldToThreeBet: 0.5, cBet: 0.55, foldToCBet: 0.45, wtsd: 0.28, wsd: 0.5, aggression: 0.6 };
+  var PRIOR_SAMPLES = 40;
+  var RateEstimateSchema = external_exports.object({ estimate: external_exports.number().min(0).max(1), priorMean: external_exports.number().min(0).max(1), priorSamples: external_exports.number().positive(), successes: external_exports.number().int().nonnegative(), samples: external_exports.number().int().nonnegative(), playerWeight: external_exports.number().min(0).max(1), confidence: external_exports.enum(["low", "moderate", "strong"]) });
+  function shrinkRate(successes, samples, priorMean) {
+    if (!Number.isSafeInteger(samples) || !Number.isSafeInteger(successes) || samples < 0 || successes < 0 || successes > samples || !Number.isFinite(priorMean) || priorMean <= 0 || priorMean >= 1)
+      throw new Error("Invalid binomial evidence");
+    return { estimate: (successes + priorMean * PRIOR_SAMPLES) / (samples + PRIOR_SAMPLES), priorMean, priorSamples: PRIOR_SAMPLES, successes, samples, playerWeight: samples / (samples + PRIOR_SAMPLES), confidence: getConfidenceLevel(samples) };
+  }
+  var statsSchema = external_exports.object({ vpip: RateEstimateSchema, pfr: RateEstimateSchema, threeBet: RateEstimateSchema, foldToThreeBet: RateEstimateSchema, cBet: RateEstimateSchema, foldToCBet: RateEstimateSchema, wtsd: RateEstimateSchema, wsd: RateEstimateSchema, aggression: RateEstimateSchema });
+  var OpponentProfileSchema = external_exports.object({ identity: PlayerIdentitySchema, displayName: external_exports.string(), handsObserved: external_exports.number().int().nonnegative(), eligibleHands: external_exports.number().int().nonnegative(), confidence: external_exports.enum(["low", "moderate", "strong"]), stats: statsSchema, aggressionFactor: external_exports.number().finite().nonnegative(), notes: external_exports.array(external_exports.string()) });
+  function estimateOpponentProfile(identity2, displayName, observations) {
+    const hands = [...new Map(observations.filter((h) => identityKey(h.identity) === identityKey(identity2)).map((h) => [h.handId, h])).values()];
+    const eligible = hands.filter((h) => h.coverage === "complete");
+    const stats = Object.fromEntries(metricNames.map((name) => {
+      const values = eligible.map((h) => h.metrics[name]).filter((v) => v !== null);
+      return [name, shrinkRate(values.filter(Boolean).length, values.length, STAT_PRIORS[name])];
+    }));
+    const a = eligible.reduce((sum, h) => sum + (h.aggression?.betsAndRaises ?? 0), 0), c = eligible.reduce((sum, h) => sum + (h.aggression?.calls ?? 0), 0);
+    const aggression = shrinkRate(a, a + c, STAT_PRIORS.aggression);
+    return { identity: identity2, displayName, handsObserved: hands.length, eligibleHands: eligible.length, confidence: getConfidenceLevel(Math.min(stats.vpip.samples, stats.pfr.samples)), stats: { ...stats, aggression }, aggressionFactor: aggression.estimate / (1 - aggression.estimate), notes: [
+      "Rates use (successes + priorMean * 40) / (eligible opportunities + 40). Priors are explicit modeling assumptions, not calibrated population measurements.",
+      "handsObserved counts recorded observation windows; only eligible opportunities affect rates. Missing actions never count as false.",
+      ...identity2.kind === "display_name" ? ["Identity is scoped table/display name; duplicate names and name reuse can collide, and renames split history."] : []
+    ] };
+  }
+
+  // src/opponentStats.ts
+  function createLiveOpponentClient(relay) {
+    let handId = crypto.randomUUID(), lastSync = 0, busy = false;
+    let storage = "pending";
+    let players = [];
+    const pending = /* @__PURE__ */ new Map(), cache = /* @__PURE__ */ new Map();
+    let ambiguous = /* @__PURE__ */ new Set();
+    const identity2 = (name) => ({ kind: "display_name", scope: location.origin + location.pathname, value: name });
+    async function post(route, body) {
+      const response = await fetch(relay + route, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(5e3) });
+      if (!response.ok) throw new Error("Opponent storage request failed");
+      return response.json();
+    }
+    async function sync() {
+      if (busy || Date.now() - lastSync < 1e4) return;
+      busy = true;
+      lastSync = Date.now();
+      try {
+        const batch = [...pending.entries()].slice(0, 50);
+        if (batch.length) {
+          const saved = await post("/opponents/observations", { observations: batch.map(([, value]) => value) });
+          if (!saved.available) throw new Error("Opponent storage unavailable");
+          for (const [key, value] of batch) if (pending.get(key) === value) pending.delete(key);
+        }
+        const result = await post("/opponents/profiles", { players });
+        if (!result.available) throw new Error("Opponent storage unavailable");
+        for (const raw of result.profiles) {
+          const profile = OpponentProfileSchema.parse(raw);
+          cache.set(identityKey(profile.identity), profile);
+        }
+        storage = "available";
+      } catch {
+        storage = "unavailable";
+      } finally {
+        busy = false;
+      }
+    }
+    return {
+      observe(state, history) {
+        try {
+          if (!state) {
+            handId = crypto.randomUUID();
+            return;
+          }
+          if (history.handBoundary) handId = crypto.randomUUID();
+          const opponents = state.seats.filter((s) => s.isOccupied && !s.isYou && s.playerName);
+          const counts = /* @__PURE__ */ new Map();
+          for (const seat of state.seats.filter((s) => s.isOccupied && s.playerName)) counts.set(seat.playerName, 1 + (counts.get(seat.playerName) ?? 0));
+          ambiguous = new Set([...counts].filter(([, n]) => n > 1).map(([name]) => name));
+          players = opponents.filter((s) => !ambiguous.has(s.playerName)).map((s) => ({ identity: identity2(s.playerName), displayName: s.playerName }));
+          for (const seat of opponents) {
+            if (ambiguous.has(seat.playerName)) continue;
+            const observation = summarizeHand({
+              handId,
+              identity: identity2(seat.playerName),
+              displayName: seat.playerName,
+              seat: seat.seatNumber,
+              coverage: "partial",
+              actions: history.records.get(seat.seatNumber) ?? [],
+              dealtInKnown: false,
+              sawFlop: null,
+              wentToShowdown: null,
+              wonAtShowdown: null,
+              notes: history.notes
+            });
+            pending.set(identityKey(observation.identity) + handId, observation);
+          }
+          while (pending.size > 200) pending.delete(pending.keys().next().value);
+          if (cache.size > 200) cache.delete(cache.keys().next().value);
+          void sync();
+        } catch {
+          storage = "unavailable";
+        }
+      },
+      profile(name) {
+        if (!name || name.length > 150 || identity2(name).scope.length > 500 || ambiguous.has(name)) return null;
+        return { playerProfile: storage === "available" ? cache.get(identityKey(identity2(name))) ?? estimateOpponentProfile(identity2(name), name, []) : estimateOpponentProfile(identity2(name), name, []), statsStorage: storage };
+      },
+      tick() {
+        void sync();
+      }
+    };
+  }
+
   // ../../packages/shared/dist/card.js
   var SUITS = ["s", "h", "d", "c"];
   var RANKS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
@@ -4164,6 +4371,22 @@
     }
     throw new Error(`Invalid hand type "${input}": expected 2 or 3 characters`);
   }
+  function allHandTypes() {
+    const types = [];
+    for (let i = 0; i < RANKS.length; i++) {
+      for (let j = i; j < RANKS.length; j++) {
+        const highRank = RANKS[j];
+        const lowRank = RANKS[i];
+        if (highRank === lowRank) {
+          types.push({ highRank, lowRank, suited: false });
+        } else {
+          types.push({ highRank, lowRank, suited: true });
+          types.push({ highRank, lowRank, suited: false });
+        }
+      }
+    }
+    return types;
+  }
   function expandHandType(hand) {
     const combos = [];
     if (hand.highRank === hand.lowRank) {
@@ -4207,10 +4430,26 @@
     }
     return range;
   }
+  function rangeComboCount(range) {
+    let total = 0;
+    for (const [handStr, weight] of range) {
+      if (!Number.isFinite(weight) || weight < 0 || weight > 1)
+        throw new Error("Invalid range weight");
+      if (weight === 0)
+        continue;
+      const combos = expandHandType(parseHandType(handStr)).length;
+      total += combos * weight;
+    }
+    return total;
+  }
   function expandRange(range, excludeCards = []) {
     const excludeIds = new Set(excludeCards.map((c) => `${c.rank}${c.suit}`));
     const result = [];
     for (const [handStr, weight] of range) {
+      if (!Number.isFinite(weight) || weight < 0 || weight > 1)
+        throw new Error("Invalid range weight");
+      if (weight === 0)
+        continue;
       const combos = expandHandType(parseHandType(handStr));
       for (const combo of combos) {
         const overlaps = combo.some((c) => excludeIds.has(`${c.rank}${c.suit}`));
@@ -4278,8 +4517,8 @@
     if (cards.length !== 5) {
       throw new Error(`evaluate5 requires exactly 5 cards, got ${cards.length}`);
     }
-    const suits = cards.map((c) => c.suit);
-    const isFlush = suits.every((s) => s === suits[0]);
+    const suits2 = cards.map((c) => c.suit);
+    const isFlush = suits2.every((s) => s === suits2[0]);
     const rankCounts = /* @__PURE__ */ new Map();
     for (const c of cards) {
       rankCounts.set(c.rank, (rankCounts.get(c.rank) ?? 0) + 1);
@@ -4897,50 +5136,256 @@
   function rankRangeByStrength(range) {
     return [...range.keys()].sort((a, b) => chenScore(parseHandType(b)) - chenScore(parseHandType(a)));
   }
-  function narrowForThreeBet(range, options = {}) {
-    const topFraction = options.topFraction ?? 0.25;
-    if (topFraction <= 0 || topFraction > 1) {
-      throw new Error(`topFraction must be between 0 (exclusive) and 1, got ${topFraction}`);
-    }
+  function tendencyMultiplier(rate) {
+    if (!rate || rate.samples <= 0 || ![rate.estimate, rate.priorMean, rate.playerWeight].every((v) => Number.isFinite(v) && v >= 0 && v <= 1))
+      return 1;
+    return 1 + Math.max(-0.15, Math.min(0.15, (rate.estimate - rate.priorMean) * rate.playerWeight));
+  }
+  function retainStrengthMass(range, fraction) {
     const ranked = rankRangeByStrength(range);
-    const keepCount = Math.max(1, Math.ceil(ranked.length * topFraction));
-    const kept = new Set(ranked.slice(0, keepCount));
-    const narrowed = /* @__PURE__ */ new Map();
+    const target = rangeComboCount(range) * fraction;
+    const result = /* @__PURE__ */ new Map();
+    let mass = 0;
+    let boundary = Infinity;
+    for (const hand of ranked) {
+      const score = chenScore(parseHandType(hand));
+      if (mass >= target && score < boundary)
+        break;
+      const weight = range.get(hand);
+      result.set(hand, weight);
+      mass += rangeComboCount(/* @__PURE__ */ new Map([[hand, weight]]));
+      boundary = score;
+    }
+    return result;
+  }
+  function estimateOpponentRange(input) {
+    const known = input.knownCards ?? [];
+    if (new Set(known.map((c) => c.rank + c.suit)).size !== known.length)
+      throw new Error("Duplicate known cards");
+    let range = input.baseline ? new Map(input.baseline.range) : rangeFromList(allHandTypes().map(formatHandType));
     for (const [hand, weight] of range) {
-      if (kept.has(hand))
-        narrowed.set(hand, weight);
+      parseHandType(hand);
+      if (!Number.isFinite(weight) || weight < 0 || weight > 1)
+        throw new Error("Range weights must be finite and between 0 and 1");
+      if (weight === 0)
+        range.delete(hand);
     }
-    return narrowed;
-  }
-  function narrowForCall(range, options = {}) {
-    const [lowerPct, upperPct] = options.band ?? [0.4, 0.75];
-    if (lowerPct < 0 || upperPct > 1 || lowerPct >= upperPct) {
-      throw new Error(`Invalid band [${lowerPct}, ${upperPct}]: must satisfy 0 <= lower < upper <= 1`);
-    }
-    const ranked = rankRangeByStrength(range);
-    const lowerIdx = Math.floor(ranked.length * lowerPct);
-    const upperIdx = Math.ceil(ranked.length * upperPct);
-    const kept = new Set(ranked.slice(lowerIdx, upperIdx));
-    const narrowed = /* @__PURE__ */ new Map();
-    for (const [hand, weight] of range) {
-      if (kept.has(hand))
-        narrowed.set(hand, weight);
-    }
-    return narrowed;
-  }
-  function defaultBaselineRange() {
-    return getOpeningRange("BTN");
-  }
-  function estimateOpponentRange(actions, baseline = defaultBaselineRange()) {
-    let range = baseline;
-    for (const action2 of actions) {
-      if (action2 === "raise" || action2 === "bet") {
-        range = narrowForThreeBet(range);
-      } else if (action2 === "call") {
-        range = narrowForCall(range);
+    let modeled = input.baseline !== void 0;
+    let confidence = input.baseline?.confidence ?? "medium";
+    const assumptions = ["Chen strength ordering and retained fractions are illustrative heuristics, not calibrated frequencies or solved ranges."];
+    const fallbacks = [];
+    const entryMultiplier = tendencyMultiplier(input.tendencies?.vpip);
+    const aggressionMultiplier = tendencyMultiplier(input.tendencies?.pfr);
+    const path = [];
+    const warn = (message) => {
+      confidence = "low";
+      assumptions.push(message);
+    };
+    if (input.historyCoverage === "partial")
+      warn("Partial history may omit hero actions, raises, and intervening calls; unknown raise levels are not inferred.");
+    if (input.position === null)
+      warn("Opponent position is unknown.");
+    if (entryMultiplier !== 1 || aggressionMultiplier !== 1)
+      warn("Range width uses opportunity-aware shrunk VPIP/PFR with a second reliability discount and bounded adjustment. Fold-to-3bet is not substituted for shove fold equity.");
+    const available = (candidate) => expandRange(candidate, known).some((c) => c.weight > 0);
+    let previousStreet = -1;
+    let previousObservation = -1;
+    for (const event of input.actions) {
+      const streetIndex = ["preflop", "flop", "turn", "river"].indexOf(event.street);
+      const unordered = streetIndex < previousStreet || event.observation !== void 0 && event.observation < previousObservation || event.observation !== void 0 && input.actions.filter((a) => a.observation === event.observation).length > 1;
+      previousStreet = Math.max(previousStreet, streetIndex);
+      previousObservation = Math.max(previousObservation, event.observation ?? -1);
+      const verb = event.action === "all-in" ? event.wagerAction : event.action;
+      let label = event.street + " " + (verb ?? "all-in (wager unknown)");
+      if (event.action === "all-in" && verb)
+        label += " all-in";
+      let candidate = range;
+      let establishesModel = false;
+      if (unordered) {
+        warn("Unordered or regressing action retained the previous range.");
+      } else if (event.street !== "preflop") {
+        if (verb === "bet" || verb === "raise" || verb === "call")
+          warn(label + ": board-aware continuation model unavailable; retained prior range.");
+      } else if (verb === "raise" || verb === "bet") {
+        const level = event.priorRaises;
+        if (input.historyCoverage !== "complete" || level === null || !Number.isInteger(level) || level < 0 || event.facing === "unknown") {
+          label = "preflop aggression (raise level unknown)";
+          warn("Preflop aggression lacks verified prior action; no 3-bet cut applied.");
+        } else if (level === 0 && event.facing === "none") {
+          label = event.unopened === true ? (input.position ?? "unknown position") + " open" : "preflop raise (unopened pot unverified)";
+          const reference = input.chipEvOnly && event.unopened === true ? getPreflopOpeningReference({ position: input.position, effectiveStackBB: input.effectiveStackBB, playersDealtIn: input.playersDealtIn ?? 0, unopened: true }) : null;
+          if (reference) {
+            candidate = new Map([...range].filter(([hand]) => reference.has(hand)));
+            if (aggressionMultiplier > 1) {
+              const extras = new Map([...range].filter(([hand]) => !reference.has(hand)));
+              const extraMass = rangeComboCount(candidate) * (aggressionMultiplier - 1), mass = rangeComboCount(extras);
+              if (mass > 0) {
+                const selected = retainStrengthMass(extras, Math.min(1, extraMass / mass));
+                const scale = Math.min(1, extraMass / rangeComboCount(selected));
+                for (const [hand, weight] of selected)
+                  candidate.set(hand, weight * scale);
+              }
+            } else if (aggressionMultiplier < 1)
+              candidate = retainStrengthMass(candidate, aggressionMultiplier);
+            if (aggressionMultiplier !== 1)
+              warn("Opening prior adjusted conservatively by shrunk PFR; maximum target mass change 15%, not a player-skill label.");
+            establishesModel = true;
+            assumptions.push("Opening reference is a 100BB+ six-max chip-EV RFI prior; it is carried forward only from this observed open.");
+          } else
+            warn("Opening reference out of scope (position, depth, table size or tournament conditions); retained prior.");
+        } else if (level >= 1 && event.facing === "raise") {
+          label = event.street + (level === 1 ? " 3-bet" : " later re-raise");
+          if (input.effectiveStackBB === null || !Number.isFinite(input.effectiveStackBB) || input.effectiveStackBB < 100 || input.playersDealtIn !== 6 || !input.chipEvOnly) {
+            warn(label + ": short-stack/tournament/unknown context not modeled; retained prior.");
+          } else {
+            const fraction = level > 1 ? 0.12 : event.facingPosition === "UTG" ? 0.18 : 0.25;
+            candidate = retainStrengthMass(range, fraction * aggressionMultiplier);
+            establishesModel = true;
+            warn(label + ": assumed top " + fraction * 100 + "% weighted strength mass; bluffs and sizing are unmodeled.");
+          }
+        } else
+          warn("Inconsistent preflop facing action and raise count; retained prior.");
+      } else if (verb === "call") {
+        if (input.historyCoverage !== "complete" || event.facing !== "raise" || event.priorRaises === null || !Number.isInteger(event.priorRaises) || event.priorRaises < 1 || input.effectiveStackBB === null || !Number.isFinite(input.effectiveStackBB) || input.effectiveStackBB < 100 || input.playersDealtIn !== 6 || !input.chipEvOnly) {
+          warn("Call context is unresolved or outside deep-stack scope; retained prior.");
+        } else {
+          candidate = retainStrengthMass(range, (event.priorRaises === 1 ? 0.65 : 0.5) * entryMultiplier);
+          const premiums = retainStrengthMass(range, 0.1);
+          candidate = new Map([...candidate].map(([hand, weight]) => [hand, weight * (premiums.has(hand) ? 0.5 : 1)]));
+          establishesModel = true;
+          warn("Flat-call heuristic retains a stronger continuing subset with reduced premium weights; traps remain possible.");
+        }
+      } else if (event.action === "all-in")
+        warn("All-in status alone supplies no additional range evidence.");
+      path.push(label);
+      if (candidate !== range && !available(candidate)) {
+        fallbacks.push(label + ": heuristic removed all legal combos; retained previous weighted range.");
+        confidence = "low";
+      } else {
+        range = candidate;
+        modeled ||= establishesModel;
       }
     }
-    return range;
+    const combos = expandRange(range, known);
+    const status = combos.length === 0 ? "unavailable" : modeled ? "modeled" : "prior_only";
+    if (status !== "modeled")
+      warn(status === "unavailable" ? "Supplied prior has no legal combos; equity is unavailable, not replaced by random hands." : "No supported conditioning evidence; broad legal-card prior only, not an estimated opponent strategy.");
+    return {
+      range,
+      combos,
+      status,
+      confidence,
+      basis: (modeled ? "Estimated from " : "Unconditioned prior; observed ") + (path.join(" -> ") || "no actions") + (input.baseline ? "; prior: " + input.baseline.basis : ""),
+      assumptions: [...new Set(assumptions)],
+      fallbacks
+    };
+  }
+
+  // ../../packages/range-engine/dist/multiwayEquity.js
+  var suits = ["s", "h", "d", "c"];
+  function cardId(card) {
+    if (!Number.isInteger(card.rank) || card.rank < 2 || card.rank > 14 || !suits.includes(card.suit))
+      throw new Error("Invalid card");
+    return suits.indexOf(card.suit) * 13 + card.rank - 2;
+  }
+  function masked(combo) {
+    let low = 0, high = 0;
+    for (const card of combo.cards) {
+      const id = cardId(card);
+      if (id < 32)
+        low |= 1 << id;
+      else
+        high |= 1 << id - 32;
+    }
+    return { ...combo, low, high };
+  }
+  function pick(combos, total, rng) {
+    let roll = rng() * total;
+    for (const combo of combos) {
+      if (roll < combo.weight)
+        return combo;
+      roll -= combo.weight;
+    }
+    return combos[combos.length - 1];
+  }
+  function calculateEquityVsRanges(heroCards2, opponentRanges, board, options = {}) {
+    if (heroCards2.length !== 2)
+      throw new Error("Exactly two hero cards required");
+    if (![0, 3, 4, 5].includes(board.length))
+      throw new Error("Board must contain 0, 3, 4, or 5 cards");
+    if (opponentRanges.length < 1 || opponentRanges.length > 9)
+      throw new Error("Requires 1 to 9 opponent ranges");
+    const known = [...heroCards2, ...board];
+    if (new Set(known.map(cardId)).size !== known.length)
+      throw new Error("Duplicate known cards");
+    const iterations = options.iterations ?? 1e4;
+    const maxAttempts = options.maxSamplingAttempts ?? Math.max(1e3, iterations * 100);
+    if (!Number.isSafeInteger(iterations) || iterations <= 0)
+      throw new Error("iterations must be a positive safe integer");
+    if (!Number.isSafeInteger(maxAttempts) || maxAttempts < iterations)
+      throw new Error("maxSamplingAttempts must be an integer >= iterations");
+    const random = options.rng ?? Math.random;
+    const rng = () => {
+      const value = random();
+      if (!Number.isFinite(value) || value < 0 || value >= 1)
+        throw new Error("RNG must return a finite value in [0, 1)");
+      return value;
+    };
+    const ranges = opponentRanges.map((range, i) => {
+      const combos = expandRange(range, known).map(masked);
+      const mass = combos.reduce((sum, combo) => sum + combo.weight, 0);
+      if (combos.length === 0 || mass <= 0)
+        throw new Error("Opponent " + (i + 1) + " range has no legal combos after known-card removal");
+      return { combos, mass };
+    });
+    let completed = 0, attempts = 0, share = 0;
+    attemptsLoop: while (completed < iterations && attempts < maxAttempts) {
+      attempts++;
+      const hands = [];
+      let usedLow = 0, usedHigh = 0;
+      for (const range of ranges) {
+        const legal = hands.length === 0 ? range.combos : range.combos.filter((combo2) => (combo2.low & usedLow) === 0 && (combo2.high & usedHigh) === 0);
+        const mass = hands.length === 0 ? range.mass : legal.reduce((sum, combo2) => sum + combo2.weight, 0);
+        if (mass <= 0)
+          continue attemptsLoop;
+        if (mass < range.mass && rng() >= mass / range.mass)
+          continue attemptsLoop;
+        const combo = pick(legal, mass, rng);
+        hands.push(combo);
+        usedLow |= combo.low;
+        usedHigh |= combo.high;
+      }
+      const deck = new Deck(rng, [...known, ...hands.flatMap((hand) => hand.cards)]);
+      const runout = [...board, ...deck.drawMany(5 - board.length)];
+      const heroValue = evaluateBest([...heroCards2, ...runout]).value;
+      const values = hands.map((hand) => evaluateBest([...hand.cards, ...runout]).value);
+      const best = Math.max(heroValue, ...values);
+      if (heroValue === best)
+        share += 1 / (1 + values.filter((value) => value === best).length);
+      completed++;
+    }
+    if (completed !== iterations)
+      throw new Error("Range sampling limit reached: " + completed + "/" + iterations + " valid deals in " + attempts + " attempts; ranges may be mutually incompatible or too collision-heavy");
+    return { equity: share / completed, iterations: completed, attempts, rejectedSamples: attempts - completed };
+  }
+
+  // ../../packages/range-engine/dist/estimatedEquity.js
+  function calculateEquityForEstimates(hero, estimates, board, options = {}) {
+    if (estimates.length === 0)
+      throw new Error("At least one opponent estimate required");
+    const missing = estimates.map((e, i) => e.status !== "modeled" ? "opponent " + (i + 1) + " (" + e.status + ")" : null).filter(Boolean);
+    if (missing.length > 0) {
+      const reason = "Ranges cannot be constructed for " + missing.join(", ");
+      if (estimates.length === 1)
+        return { equity: void 0, source: void 0, reason };
+      return { equity: calculateEquity(hero, board, estimates.length, options).equity, source: "random_hands", reason: reason + "; all opponents sampled as random hands, not estimated ranges." };
+    }
+    try {
+      const equity = estimates.length === 1 ? calculateEquityVsRange(hero, estimates[0].range, board, options).equity : calculateEquityVsRanges(hero, estimates.map((e) => e.range), board, options).equity;
+      return { equity, source: estimates.length === 1 ? "estimated_range" : "estimated_multiway_ranges", reason: null };
+    } catch (error) {
+      return { equity: void 0, source: void 0, reason: "Range equity unavailable: " + (error instanceof Error ? error.message : String(error)) };
+    }
   }
 
   // ../../packages/ai-core/dist/preflopContext.js
@@ -5129,7 +5574,7 @@
   var PositionSchema = external_exports.enum(["UTG", "HJ", "CO", "BTN", "SB", "BB"]);
   var StreetSchema = external_exports.enum(["preflop", "flop", "turn", "river"]);
   var FacingActionSchema = external_exports.enum(["none", "bet", "raise", "all_in"]);
-  var EquitySourceSchema = external_exports.enum(["estimated_range", "random_hands", "unknown"]);
+  var EquitySourceSchema = external_exports.enum(["estimated_range", "estimated_multiway_ranges", "random_hands", "unknown"]);
   var CandidateActionSchema = external_exports.enum(["FOLD", "CHECK", "CALL", "BET", "RAISE", "ALL_IN"]);
   function deriveCandidateActions(facingActionType) {
     const facingBet = facingActionType === "bet" || facingActionType === "raise" || facingActionType === "all_in";
@@ -5173,6 +5618,19 @@
     }),
     opponentContext: external_exports.object({
       estimatedRangeDescription: external_exports.string().optional(),
+      rangeConfidence: external_exports.enum(["medium", "low"]).optional(),
+      rangeStatus: external_exports.enum(["modeled", "prior_only", "unavailable"]).optional(),
+      rangeAssumptions: external_exports.array(external_exports.string()).optional(),
+      rangeFallbacks: external_exports.array(external_exports.string()).optional(),
+      opponents: external_exports.array(external_exports.object({
+        seat: external_exports.number().int().positive(),
+        position: PositionSchema.nullable(),
+        playerProfile: OpponentProfileSchema.optional(),
+        statsStorage: external_exports.enum(["available", "unavailable", "pending"]).optional(),
+        rangeBasis: external_exports.string(),
+        rangeConfidence: external_exports.enum(["medium", "low"]),
+        rangeStatus: external_exports.enum(["modeled", "prior_only", "unavailable"])
+      })).optional(),
       rangeVsHeroEquity: external_exports.number().min(0).max(1).optional()
     }).optional(),
     /** Explicit confidence flag per Rule 5: never let the AI reason
@@ -5652,6 +6110,7 @@
       streetContributions: new Map(history.streetContributions),
       notes: [...history.notes]
     };
+    next.handBoundary = reset;
     next.observation = history.observation + 1;
     const note = (message) => {
       if (!next.notes.includes(message))
@@ -6034,6 +6493,7 @@
     equityLine: null,
     potOddsLine: null,
     preflopLine: null,
+    opponentStatsLine: null,
     aiStatus: "idle",
     aiResult: null,
     aiWarnings: []
@@ -6083,6 +6543,7 @@
     parts.push(`<div>Street: <b>${escapeHtml(s.street)}</b></div>`);
     if (s.equityLine) parts.push(`<div>${escapeHtml(s.equityLine)}</div>`);
     if (s.potOddsLine) parts.push(`<div>${escapeHtml(s.potOddsLine)}</div>`);
+    if (s.opponentStatsLine) parts.push(`<div>${escapeHtml(s.opponentStatsLine)}</div>`);
     if (s.preflopLine) {
       parts.push(
         `<div style="margin-top:6px; padding-top:6px; border-top:1px solid #444;">${escapeHtml(s.preflopLine)}</div>`
@@ -6116,7 +6577,7 @@
       decisionPot,
       confidence,
       heroPosition,
-      opponentActionsDescription
+      opponentRangeContext
     } = input;
     const hero = state.seats.find((s) => s.isYou);
     const numOpponentsRemaining = state.seats.filter(
@@ -6133,7 +6594,7 @@
     let callEV;
     if (amountToCall > 0 && decisionPot > 0) {
       potOddsBreakevenPercent = calculatePotOdds(decisionPot, amountToCall).breakevenEquityPercent;
-      callEV = calculateCallEV(equity, decisionPot, amountToCall).ev;
+      if (equity !== void 0) callEV = calculateCallEV(equity, decisionPot, amountToCall).ev;
     }
     let spr;
     if (hero.stack !== null && decisionPot > 0) {
@@ -6173,7 +6634,7 @@
         outs,
         boardTexture
       },
-      opponentContext: opponentActionsDescription ? { estimatedRangeDescription: opponentActionsDescription } : void 0,
+      opponentContext: opponentRangeContext,
       dataConfidence: confidence.level
     };
   }
@@ -6204,7 +6665,8 @@
         };
         overlayState.aiWarnings = [
           ...data.blocked ? [`Blocked: ${data.blockedReason}${data.originalReason ? ` -- ${data.originalReason}` : ""}`] : [],
-          ...data.consistencyWarnings ?? []
+          ...data.consistencyWarnings ?? [],
+          ...packet.opponentContext?.rangeConfidence === "low" ? ["Opponent range confidence: low", ...packet.opponentContext.rangeAssumptions ?? [], ...packet.opponentContext.rangeFallbacks ?? []] : []
         ];
         overlayState.aiStatus = data.blocked ? "blocked" : "received";
       } else {
@@ -6224,6 +6686,7 @@
       }
     }
   }
+  var opponentStats = createLiveOpponentClient("http://localhost:8787");
   var requestSequence = 0;
   var lastStateJson = null;
   var lastRecommendationRequestKey = null;
@@ -6238,14 +6701,17 @@
       if (!state || read.context.readErrors.length > 0) {
         previousGameState = null;
         actionHistory = emptyActionHistory();
+        opponentStats.observe(null, actionHistory);
       } else {
         actionHistory = updateActionHistory(actionHistory, previousGameState, state, {
           bigBlind: assessment.bigBlind,
           dealerSeatNumber: read.context.dealerSeatNumber
         });
         previousGameState = state;
+        opponentStats.observe(state, actionHistory);
       }
     }
+    opponentStats.tick();
     const preflop = buildLivePreflopContext(assessment, actionHistory);
     logLiveDiagnostics(read, assessment, actionHistory, preflop);
     if (stateJson !== lastStateJson) {
@@ -6254,6 +6720,10 @@
       requestSequence++;
       const { state, confidence, bigBlind, amountToCall, positions, decisionPot } = assessment;
       overlayState.street = state?.street ?? "unreadable";
+      overlayState.opponentStatsLine = state ? state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded).map((s) => {
+        const evidence = opponentStats.profile(s.playerName);
+        return s.playerName + ": " + (evidence ? evidence.playerProfile.handsObserved + " observed windows / " + evidence.playerProfile.eligibleHands + " eligible hands (" + evidence.statsStorage + ")" : "identity ambiguous");
+      }).join("; ") : null;
       overlayState.aiResult = null;
       overlayState.equityLine = null;
       overlayState.potOddsLine = null;
@@ -6286,7 +6756,8 @@
           candidateActions: deriveCandidateActions(facing),
           engineCalculations: {},
           dataConfidence: confidence.level,
-          preflop
+          preflop,
+          opponentContext: { opponents: state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded).map((s) => ({ seat: s.seatNumber, position: positions.get(s.seatNumber) ?? null, rangeBasis: "Preflop context remains uncertain", rangeConfidence: "low", rangeStatus: "prior_only", ...opponentStats.profile(s.playerName) ?? {} })) }
         };
         const uncertainty = preflopUncertainty(packet);
         overlayState.preflopLine = "Preflop: " + preflop.situation;
@@ -6307,41 +6778,53 @@
           (s) => s.isOccupied && !s.isYou && !s.isFolded
         ).length;
         if (numOpponents >= 1) {
-          let equityResult;
-          let equitySource;
-          let opponentActionsDescription;
-          if (numOpponents === 1) {
-            const opponent = state.seats.find((s) => s.isOccupied && !s.isYou && !s.isFolded);
-            const opponentRecords = actionHistory.records.get(opponent.seatNumber) ?? [];
-            const opponentActions = opponentRecords.map((r) => r.action);
-            opponentActionsDescription = opponentActions.length > 0 ? `Observed opponent actions (partial polling history): ${opponentRecords.map((r) => `${r.street} ${r.action}${r.wagerAction ? ` (${r.wagerAction})` : ""}${r.amount !== null ? ` to ${r.amount} chips this street` : ""} [observation ${r.observation}]`).join(", ")}.` : "No opponent actions were observed; this does not establish that none occurred.";
-            if (actionHistory.notes.length > 0) opponentActionsDescription += ` Reconstruction notes: ${actionHistory.notes.join(" ")}`;
-            const opponentPosition = positions.get(opponent.seatNumber);
-            const estimatedRange = opponentPosition ? estimateOpponentRange(opponentActions, getOpeningRange(opponentPosition)) : estimateOpponentRange(opponentActions);
-            try {
-              equityResult = calculateEquityVsRange(hero.holeCards, estimatedRange, state.board, {
-                iterations: 3e3
-              });
-              equitySource = "estimated_range";
-              console.log(
-                `[Poker AI Reader] Hero equity vs estimated range (actions so far: ${opponentActions.length > 0 ? opponentActions.join(", ") : "none yet"}): ${(equityResult.equity * 100).toFixed(1)}%`
-              );
-            } catch (error) {
-              console.warn("[Poker AI Reader] Range-based equity failed, falling back to random hands:", error);
-              equityResult = calculateEquity(hero.holeCards, state.board, numOpponents, { iterations: 3e3 });
-              equitySource = "random_hands";
-              console.log(
-                `[Poker AI Reader] Hero equity vs ${numOpponents} opponent(s) (random hands, fallback): ${(equityResult.equity * 100).toFixed(1)}%`
-              );
-            }
-          } else {
-            equityResult = calculateEquity(hero.holeCards, state.board, numOpponents, { iterations: 3e3 });
-            equitySource = "random_hands";
-            console.log(
-              `[Poker AI Reader] Hero equity vs ${numOpponents} opponent(s) (random hands -- multiway, no range model yet): ${(equityResult.equity * 100).toFixed(1)}%`
-            );
-          }
-          overlayState.equityLine = `Equity: ${(equityResult.equity * 100).toFixed(1)}% (${equitySource === "estimated_range" ? "vs estimated range" : "vs random hands"})`;
+          const opponents = state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded);
+          const estimates = opponents.map((opponent) => {
+            const records = actionHistory.records.get(opponent.seatNumber) ?? [];
+            return estimateOpponentRange({
+              position: positions.get(opponent.seatNumber) ?? null,
+              // Missing hero actions prevent counting observed raises as a complete sequence.
+              actions: records.map((r) => ({
+                street: r.street,
+                action: r.action,
+                priorRaises: null,
+                facing: "unknown",
+                wagerAction: r.wagerAction,
+                observation: r.observation
+              })),
+              historyCoverage: "partial",
+              effectiveStackBB: null,
+              playersDealtIn: null,
+              chipEvOnly: false,
+              knownCards: [...hero.holeCards, ...state.board],
+              tendencies: opponentStats.profile(opponent.playerName)?.playerProfile.stats
+            });
+          });
+          const selection = calculateEquityForEstimates(hero.holeCards, estimates, state.board, { iterations: 3e3 });
+          const equityResult = selection.equity === void 0 ? void 0 : { equity: selection.equity };
+          const equitySource = selection.source;
+          const opponentRangeContext = {
+            estimatedRangeDescription: estimates.map((estimate, i) => "Seat " + opponents[i].seatNumber + ": " + estimate.basis).join("; "),
+            rangeConfidence: selection.reason || estimates.some((e) => e.confidence === "low") ? "low" : "medium",
+            rangeStatus: selection.equity === void 0 ? "unavailable" : estimates.every((e) => e.status === "modeled") ? "modeled" : "prior_only",
+            rangeAssumptions: [
+              ...actionHistory.notes,
+              ...estimates.flatMap((e, i) => e.assumptions.map((reason) => "Seat " + opponents[i].seatNumber + ": " + reason)),
+              ...opponents.length > 1 ? ["Multiway equity is showdown share of one common pot; side pots and future betting are not modeled."] : []
+            ],
+            rangeFallbacks: [...estimates.flatMap((e, i) => e.fallbacks.map((reason) => "Seat " + opponents[i].seatNumber + ": " + reason)), ...selection.reason ? [selection.reason] : []],
+            opponents: estimates.map((estimate, i) => ({
+              seat: opponents[i].seatNumber,
+              position: positions.get(opponents[i].seatNumber) ?? null,
+              rangeBasis: estimate.basis,
+              rangeConfidence: estimate.confidence,
+              rangeStatus: estimate.status,
+              ...opponentStats.profile(opponents[i].playerName) ?? {}
+            }))
+          };
+          overlayState.aiWarnings = [opponentRangeContext.estimatedRangeDescription, ...opponentRangeContext.rangeAssumptions, ...opponentRangeContext.rangeFallbacks];
+          const equityLabel = equitySource === "estimated_multiway_ranges" ? "vs distinct opponent ranges; heuristic" : equitySource === "estimated_range" ? "vs estimated range; heuristic" : "vs random hands; ranges unavailable";
+          overlayState.equityLine = equityResult ? "Equity: " + (equityResult.equity * 100).toFixed(1) + "% (" + equityLabel + ")" : "Equity unavailable: opponent range is uncertain";
           if (amountToCall > 0 && decisionPot > 0) {
             const potOdds = calculatePotOdds(decisionPot, amountToCall);
             console.log(
@@ -6359,18 +6842,18 @@
               lastRecommendationRequestKey = requestKey;
               overlayState.aiStatus = "waiting";
               overlayState.aiResult = null;
-              overlayState.aiWarnings = [];
+              overlayState.aiWarnings = opponentRangeContext ? [opponentRangeContext.estimatedRangeDescription ?? "", ...opponentRangeContext.rangeAssumptions ?? [], ...opponentRangeContext.rangeFallbacks ?? []] : [];
               renderOverlay();
               const packet = buildDecisionPacket({
                 state,
                 amountToCall,
-                equity: equityResult.equity,
+                equity: equityResult?.equity,
                 equitySource,
                 bigBlind,
                 decisionPot,
                 confidence,
                 heroPosition,
-                opponentActionsDescription
+                opponentRangeContext
               });
               console.log(`[Poker AI Reader] Big blind detected: ${bigBlind}. Hero stackBB: ${packet.hero.stackBB.toFixed(2)}. Facing amountBB: ${packet.facingAction.amountBB?.toFixed(2) ?? "n/a"}`);
               console.log(

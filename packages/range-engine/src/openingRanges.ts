@@ -10,10 +10,8 @@ export type Position = "UTG" | "HJ" | "CO" | "BTN" | "SB" | "BB";
  * original spec: "the exact range model can start simple").
  *
  * IMPORTANT: these are DEEP STACK ranges. As effective stack depth
- * shrinks in an MTT (this project's actual use case), correct play
- * shifts toward push/fold, which these ranges do NOT model. A
- * stack-depth-aware range layer is a near-term follow-up, not covered
- * here.
+ * changes, these references do not establish a calling, defending, or push/fold
+ * model. Use getPreflopOpeningReference to check scope before applying them.
  *
  * BB has no entry: the big blind doesn't "open" -- it defends/responds
  * to another player's raise, which is a different range concept.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveCandidateActions, validateDecisionPacket } from "./decisionPacket.js";
+import { deriveCandidateActions, validateDecisionPacket, opponentRangePromptLines } from "./decisionPacket.js";
 
 function validPacket() {
   return {
@@ -246,4 +246,19 @@ describe("validateDecisionPacket — potBB", () => {
     packet.table.potBB = -1;
     expect(() => validateDecisionPacket(packet)).toThrow();
   });
+});
+describe("opponent range evidence", () => {
+ it("preserves basis, low model confidence and fallbacks separately from table confidence", () => {
+  const packet=validateDecisionPacket({...validPacket(),opponentContext:{
+   estimatedRangeDescription:"Estimated from CO open -> preflop call",rangeConfidence:"low",rangeStatus:"modeled",
+   rangeAssumptions:["Illustrative weighted-strength heuristic"],rangeFallbacks:["Retained previous weighted prior"]
+  }});
+  expect(packet.dataConfidence).toBe("high");expect(packet.opponentContext?.rangeConfidence).toBe("low");
+  const prompt=opponentRangePromptLines(packet).join(" ");
+  expect(prompt).toContain("CO open -> preflop call");expect(prompt).toContain("Retained previous weighted prior");expect(prompt).toContain("separate from table-read confidence");
+ });
+ it("permits an uncertain heads-up packet with no made-up equity or call EV",()=>{
+  const packet=validateDecisionPacket({...validPacket(),engineCalculations:{},opponentContext:{rangeStatus:"prior_only",rangeConfidence:"low",estimatedRangeDescription:"No verified preflop sequence"}});
+  expect(packet.engineCalculations.equity).toBeUndefined();expect(packet.engineCalculations.callEV).toBeUndefined();
+ });
 });

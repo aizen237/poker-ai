@@ -17,6 +17,8 @@ export interface ActionRecord {
 
 /** Observed actions plus minimal memory across transient missing labels/cards. */
 export interface ActionHistory {
+  /** Explicit reset signal; consumers must not infer resets by comparing note strings. */
+  handBoundary?: boolean;
   records: Map<number, ActionRecord[]>;
   observation: number;
   lastHeroCards: string | null;
@@ -94,6 +96,7 @@ export function updateActionHistory(
   const next: ActionHistory = reset ? emptyActionHistory() : {
     ...history, records: new Map(history.records), streetContributions: new Map(history.streetContributions), notes: [...history.notes],
   };
+  next.handBoundary = reset;
   next.observation = history.observation + 1;
   const note = (message: string) => { if (!next.notes.includes(message)) next.notes.push(message); };
   if (boundary) note(boundary);

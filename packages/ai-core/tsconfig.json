@@ -4,11 +4,24 @@
     "outDir": "./dist",
     "rootDir": "./src"
   },
-  "include": ["src"],
-  "exclude": ["src/**/*.test.ts"],
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "src/**/*.test.ts"
+  ],
   "references": [
-    { "path": "../shared" },
-    { "path": "../poker-engine" },
-    { "path": "../range-engine" }
+    {
+      "path": "../shared"
+    },
+    {
+      "path": "../poker-engine"
+    },
+    {
+      "path": "../range-engine"
+    },
+    {
+      "path": "../opponent-db"
+    }
   ]
 }

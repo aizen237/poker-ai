@@ -125,7 +125,11 @@ describe("provider preflop integration",()=>{
   await provider.getRecommendation(p);
   expect(mock.mock.calls[0]![1].body).toContain("Structured preflop context");
   delete p.preflop;p.table.street="flop";p.table.board=[{rank:2,suit:"c"},{rank:3,suit:"h"},{rank:8,suit:"d"}];
+  p.opponentContext = {estimatedRangeDescription:"Estimated from CO open -> preflop call",rangeConfidence:"low",rangeStatus:"modeled",rangeAssumptions:["Heuristic, not solved"],rangeFallbacks:["Retained prior after blockers"]};
   await provider.getRecommendation(p);
+  expect(mock.mock.calls[1]![1].body).toContain("CO open -> preflop call");
+  expect(mock.mock.calls[1]![1].body).toContain("Range model confidence: low");
+  expect(mock.mock.calls[1]![1].body).toContain("Retained prior after blockers");
   expect(mock.mock.calls[1]![1].body).not.toContain("Structured preflop context");
  });
 });

@@ -1,3 +1,4 @@
+import { createLiveOpponentClient } from "./opponentStats.js";
 import { buildLivePreflopContext } from "./preflop.js";
 import {
   assessLiveState,
@@ -10,14 +11,13 @@ import {
 } from "@poker-ai/browser-reader";
 import {
   calculateCallEV,
-  calculateEquity,
   calculateOuts,
   calculatePotOdds,
   calculateSPR,
   classifyBoardTexture,
 } from "@poker-ai/poker-engine";
 import { preflopUncertainty, deriveCandidateActions, type DecisionPacket } from "@poker-ai/ai-core";
-import { calculateEquityVsRange, estimateOpponentRange, getOpeningRange } from "@poker-ai/range-engine";
+import { calculateEquityForEstimates, estimateOpponentRange } from "@poker-ai/range-engine";
 import { readLiveTable } from "./tableRead.js";
 import { logLiveDiagnostics } from "./diagnostics.js";
 console.log("[Poker AI Reader] Content script loaded on:", window.location.href);
@@ -38,6 +38,7 @@ interface OverlayState {
   equityLine: string | null;
   potOddsLine: string | null;
   preflopLine: string | null;
+  opponentStatsLine: string | null;
   aiStatus: AIStatus;
   aiResult: { action: string; confidence: number; reasoning: string } | null;
   aiWarnings: string[];
@@ -48,6 +49,7 @@ const overlayState: OverlayState = {
   equityLine: null,
   potOddsLine: null,
   preflopLine: null,
+  opponentStatsLine: null,
   aiStatus: "idle",
   aiResult: null,
   aiWarnings: [],
@@ -104,6 +106,7 @@ function renderOverlay() {
   parts.push(`<div>Street: <b>${escapeHtml(s.street)}</b></div>`);
   if (s.equityLine) parts.push(`<div>${escapeHtml(s.equityLine)}</div>`);
   if (s.potOddsLine) parts.push(`<div>${escapeHtml(s.potOddsLine)}</div>`);
+  if (s.opponentStatsLine) parts.push(`<div>${escapeHtml(s.opponentStatsLine)}</div>`);
   if (s.preflopLine) {
     parts.push(
       `<div style="margin-top:6px; padding-top:6px; border-top:1px solid #444;">${escapeHtml(s.preflopLine)}</div>`,
@@ -136,15 +139,15 @@ const RELAY_SERVER_URL = "http://localhost:8787/recommendation"
 interface BuildDecisionPacketInput {
   state: GameState;
   amountToCall: number;
-  equity: number;
+  equity: number | undefined;
   equitySource: DecisionPacket["engineCalculations"]["equitySource"];
   bigBlind: number;
   decisionPot: number;
   confidence: ConfidenceResult;
   /** A detected position is required; no BTN fallback. */
   heroPosition: Position;
-  /** Heads-up only -- see the numOpponents branch below. */
-  opponentActionsDescription?: string | undefined;
+  /** Per-seat range evidence for all active opponents. */
+  opponentRangeContext?: DecisionPacket["opponentContext"];
 }
 
 /**
@@ -170,7 +173,7 @@ function buildDecisionPacket(input: BuildDecisionPacketInput): DecisionPacket {
     decisionPot,
     confidence,
     heroPosition,
-    opponentActionsDescription,
+    opponentRangeContext,
   } = input;
   const hero = state.seats.find((s) => s.isYou)!;
   const numOpponentsRemaining = state.seats.filter(
@@ -190,7 +193,7 @@ function buildDecisionPacket(input: BuildDecisionPacketInput): DecisionPacket {
   let callEV: number | undefined;
   if (amountToCall > 0 && decisionPot > 0) {
     potOddsBreakevenPercent = calculatePotOdds(decisionPot, amountToCall).breakevenEquityPercent;
-    callEV = calculateCallEV(equity, decisionPot, amountToCall).ev;
+    if (equity !== undefined) callEV = calculateCallEV(equity, decisionPot, amountToCall).ev;
   }
 
   let spr: number | undefined;
@@ -234,7 +237,7 @@ function buildDecisionPacket(input: BuildDecisionPacketInput): DecisionPacket {
       outs,
       boardTexture,
     },
-    opponentContext: opponentActionsDescription ? { estimatedRangeDescription: opponentActionsDescription } : undefined,
+    opponentContext: opponentRangeContext,
     dataConfidence: confidence.level,
   };
 }
@@ -281,6 +284,7 @@ async function requestRecommendation(packet: DecisionPacket, stateDescription: s
       overlayState.aiWarnings = [
         ...(data.blocked ? [`Blocked: ${data.blockedReason}${data.originalReason ? ` -- ${data.originalReason}` : ""}`] : []),
         ...(data.consistencyWarnings ?? []),
+        ...(packet.opponentContext?.rangeConfidence === "low" ? ["Opponent range confidence: low", ...(packet.opponentContext.rangeAssumptions ?? []), ...(packet.opponentContext.rangeFallbacks ?? [])] : []),
       ];
       overlayState.aiStatus = data.blocked ? "blocked" : "received";
     } else {
@@ -301,6 +305,7 @@ async function requestRecommendation(packet: DecisionPacket, stateDescription: s
   }
 }
 
+const opponentStats = createLiveOpponentClient("http://localhost:8787");
 let requestSequence = 0;
 let lastStateJson: string | null = null;
 let lastRecommendationRequestKey: string | null = null;
@@ -317,14 +322,17 @@ setInterval(() => {
     if (!state || read.context.readErrors.length > 0) {
       previousGameState = null;
       actionHistory = emptyActionHistory();
+      opponentStats.observe(null, actionHistory);
     } else {
       actionHistory = updateActionHistory(actionHistory, previousGameState, state, {
         bigBlind: assessment.bigBlind,
         dealerSeatNumber: read.context.dealerSeatNumber,
       });
       previousGameState = state;
+      opponentStats.observe(state, actionHistory);
     }
   }
+  opponentStats.tick();
   const preflop = buildLivePreflopContext(assessment, actionHistory);
   logLiveDiagnostics(read, assessment, actionHistory, preflop);
   if (stateJson !== lastStateJson) {
@@ -335,6 +343,7 @@ setInterval(() => {
     requestSequence++;
     const { state, confidence, bigBlind, amountToCall, positions, decisionPot } = assessment;
     overlayState.street = state?.street ?? "unreadable";
+    overlayState.opponentStatsLine = state ? state.seats.filter(s=>s.isOccupied&&!s.isYou&&!s.isFolded).map(s=>{const evidence=opponentStats.profile(s.playerName);return s.playerName+": "+(evidence?evidence.playerProfile.handsObserved+" observed windows / "+evidence.playerProfile.eligibleHands+" eligible hands ("+evidence.statsStorage+")":"identity ambiguous");}).join("; ") : null;
     overlayState.aiResult = null;
     overlayState.equityLine = null;
     overlayState.potOddsLine = null;
@@ -369,6 +378,7 @@ setInterval(() => {
         table: { potBB: decisionPot / bigBlind, board: [], street: "preflop", numOpponentsRemaining: preflop.activeOpponents },
         facingAction: { type: facing, ...(amountToCall > 0 ? { amountBB: amountToCall / bigBlind } : {}) },
         candidateActions: deriveCandidateActions(facing), engineCalculations: {}, dataConfidence: confidence.level, preflop,
+        opponentContext: { opponents: state.seats.filter(s=>s.isOccupied&&!s.isYou&&!s.isFolded).map(s=>({seat:s.seatNumber,position:positions.get(s.seatNumber)??null,rangeBasis:"Preflop context remains uncertain",rangeConfidence:"low",rangeStatus:"prior_only",...(opponentStats.profile(s.playerName)??{})})) },
       };
       const uncertainty = preflopUncertainty(packet);
       overlayState.preflopLine = "Preflop: " + preflop.situation;
@@ -390,57 +400,37 @@ setInterval(() => {
       ).length;
 
       if (numOpponents >= 1) {
-        let equityResult: { equity: number };
-        let equitySource: DecisionPacket["engineCalculations"]["equitySource"];
-        let opponentActionsDescription: string | undefined;
-
-        if (numOpponents === 1) {
-          const opponent = state.seats.find((s) => s.isOccupied && !s.isYou && !s.isFolded)!;
-          const opponentRecords = actionHistory.records.get(opponent.seatNumber) ?? [];
-          const opponentActions = opponentRecords.map((r) => r.action);
-          opponentActionsDescription =
-            opponentActions.length > 0
-              ? `Observed opponent actions (partial polling history): ${opponentRecords.map((r) =>
-                `${r.street} ${r.action}${r.wagerAction ? ` (${r.wagerAction})` : ""}${r.amount !== null ? ` to ${r.amount} chips this street` : ""} [observation ${r.observation}]`).join(", ")}.`
-              : "No opponent actions were observed; this does not establish that none occurred.";
-          if (actionHistory.notes.length > 0) opponentActionsDescription += ` Reconstruction notes: ${actionHistory.notes.join(" ")}`;
-          const opponentPosition = positions.get(opponent.seatNumber);
-          const estimatedRange = opponentPosition
-            ? estimateOpponentRange(opponentActions, getOpeningRange(opponentPosition))
-            : estimateOpponentRange(opponentActions);
-          try {
-            equityResult = calculateEquityVsRange(hero.holeCards, estimatedRange, state.board, {
-              iterations: 3000,
-            });
-            equitySource = "estimated_range";
-            console.log(
-              `[Poker AI Reader] Hero equity vs estimated range (actions so far: ${
-                opponentActions.length > 0 ? opponentActions.join(", ") : "none yet"
-              }): ${(equityResult.equity * 100).toFixed(1)}%`,
-            );
-          } catch (error) {
-            // Estimated range narrowed to nothing overlapping the known
-            // cards -- fall back to equity vs random rather than crash.
-            console.warn("[Poker AI Reader] Range-based equity failed, falling back to random hands:", error);
-            equityResult = calculateEquity(hero.holeCards, state.board, numOpponents, { iterations: 3000 });
-            equitySource = "random_hands";
-            console.log(
-              `[Poker AI Reader] Hero equity vs ${numOpponents} opponent(s) (random hands, fallback): ${(equityResult.equity * 100).toFixed(1)}%`,
-            );
-          }
-        } else {
-          // Multiway pots: the range engine doesn't yet support equity
-          // vs multiple distinct opponent ranges at once -- documented
-          // gap, falls back to equity vs random hands for now. No
-          // opponent-action description either, for the same reason.
-          equityResult = calculateEquity(hero.holeCards, state.board, numOpponents, { iterations: 3000 });
-          equitySource = "random_hands";
-          console.log(
-            `[Poker AI Reader] Hero equity vs ${numOpponents} opponent(s) (random hands -- multiway, no range model yet): ${(equityResult.equity * 100).toFixed(1)}%`,
-          );
-        }
-
-        overlayState.equityLine = `Equity: ${(equityResult.equity * 100).toFixed(1)}% (${equitySource === "estimated_range" ? "vs estimated range" : "vs random hands"})`;
+        const opponents = state.seats.filter(s => s.isOccupied && !s.isYou && !s.isFolded);
+        const estimates = opponents.map(opponent => {
+          const records = actionHistory.records.get(opponent.seatNumber) ?? [];
+          return estimateOpponentRange({
+            position: positions.get(opponent.seatNumber) ?? null,
+            // Missing hero actions prevent counting observed raises as a complete sequence.
+            actions: records.map(r => ({ street: r.street, action: r.action,
+              priorRaises: null, facing: "unknown" as const, wagerAction: r.wagerAction, observation: r.observation })),
+            historyCoverage: "partial", effectiveStackBB: null, playersDealtIn: null, chipEvOnly: false,
+            knownCards: [...hero.holeCards, ...state.board],
+            tendencies: opponentStats.profile(opponent.playerName)?.playerProfile.stats,
+          });
+        });
+        const selection = calculateEquityForEstimates(hero.holeCards, estimates, state.board, { iterations: 3000 });
+        const equityResult = selection.equity === undefined ? undefined : { equity: selection.equity };
+        const equitySource = selection.source;
+        const opponentRangeContext: DecisionPacket["opponentContext"] = {
+          estimatedRangeDescription: estimates.map((estimate, i) => "Seat " + opponents[i]!.seatNumber + ": " + estimate.basis).join("; "),
+          rangeConfidence: selection.reason || estimates.some(e => e.confidence === "low") ? "low" : "medium",
+          rangeStatus: selection.equity === undefined ? "unavailable" : estimates.every(e => e.status === "modeled") ? "modeled" : "prior_only",
+          rangeAssumptions: [...actionHistory.notes, ...estimates.flatMap((e,i) => e.assumptions.map(reason => "Seat " + opponents[i]!.seatNumber + ": " + reason)),
+            ...(opponents.length > 1 ? ["Multiway equity is showdown share of one common pot; side pots and future betting are not modeled."] : [])],
+          rangeFallbacks: [...estimates.flatMap((e,i) => e.fallbacks.map(reason => "Seat " + opponents[i]!.seatNumber + ": " + reason)), ...(selection.reason ? [selection.reason] : [])],
+          opponents: estimates.map((estimate,i) => ({ seat: opponents[i]!.seatNumber,
+            position: positions.get(opponents[i]!.seatNumber) ?? null,
+            rangeBasis: estimate.basis, rangeConfidence: estimate.confidence, rangeStatus: estimate.status, ...(opponentStats.profile(opponents[i]!.playerName) ?? {}) })),
+        };
+        overlayState.aiWarnings = [opponentRangeContext.estimatedRangeDescription!, ...opponentRangeContext.rangeAssumptions!, ...opponentRangeContext.rangeFallbacks!];
+        const equityLabel = equitySource === "estimated_multiway_ranges" ? "vs distinct opponent ranges; heuristic"
+          : equitySource === "estimated_range" ? "vs estimated range; heuristic" : "vs random hands; ranges unavailable";
+        overlayState.equityLine = equityResult ? "Equity: " + (equityResult.equity * 100).toFixed(1) + "% (" + equityLabel + ")" : "Equity unavailable: opponent range is uncertain";
 
         if (amountToCall > 0 && decisionPot > 0) {
           const potOdds = calculatePotOdds(decisionPot, amountToCall);
@@ -466,19 +456,19 @@ setInterval(() => {
             lastRecommendationRequestKey = requestKey;
             overlayState.aiStatus = "waiting";
             overlayState.aiResult = null;
-            overlayState.aiWarnings = [];
+            overlayState.aiWarnings = opponentRangeContext ? [opponentRangeContext.estimatedRangeDescription ?? "", ...(opponentRangeContext.rangeAssumptions ?? []), ...(opponentRangeContext.rangeFallbacks ?? [])] : [];
             renderOverlay();
 
             const packet = buildDecisionPacket({
               state,
               amountToCall,
-              equity: equityResult.equity,
+              equity: equityResult?.equity,
               equitySource,
               bigBlind,
               decisionPot,
               confidence,
               heroPosition,
-              opponentActionsDescription,
+              opponentRangeContext,
             });
             console.log(`[Poker AI Reader] Big blind detected: ${bigBlind}. Hero stackBB: ${packet.hero.stackBB.toFixed(2)}. Facing amountBB: ${packet.facingAction.amountBB?.toFixed(2) ?? "n/a"}`);
             console.log(

@@ -1,3 +1,4 @@
+import { OpponentProfileSchema } from "@poker-ai/opponent-db/browser";
 import { z } from "zod";
 import { buildPreflopContext, PreflopContextSchema } from "./preflopContext.js";
 
@@ -23,13 +24,13 @@ const FacingActionSchema = z.enum(["none", "bet", "raise", "all_in"]);
  * than assuming every equity figure means the same thing:
  * - "estimated_range": heads-up equity computed against the opponent's
  *   narrowed range from their action history this hand.
- * - "random_hands": Monte Carlo equity vs random hands -- the fallback
- *   used for multiway pots (no multi-opponent range model exists yet)
- *   and for heads-up when range estimation itself fails.
+ * - "estimated_multiway_ranges": joint equity vs distinct weighted ranges.
+ * - "random_hands": explicitly random opponents, including multiway fallback
+ *   when one or more opponent ranges cannot be constructed.
  * - "unknown": reserved for a future/unrecognized source rather than
  *   silently mislabeling it as one of the above.
  */
-const EquitySourceSchema = z.enum(["estimated_range", "random_hands", "unknown"]);
+const EquitySourceSchema = z.enum(["estimated_range", "estimated_multiway_ranges", "random_hands", "unknown"]);
 
 /**
  * The structured packet handed to an AI provider for a single decision.
@@ -104,6 +105,17 @@ export const DecisionPacketSchema = z.object({
   opponentContext: z
     .object({
       estimatedRangeDescription: z.string().optional(),
+      rangeConfidence: z.enum(["medium", "low"]).optional(),
+      rangeStatus: z.enum(["modeled", "prior_only", "unavailable"]).optional(),
+      rangeAssumptions: z.array(z.string()).optional(),
+      rangeFallbacks: z.array(z.string()).optional(),
+      opponents: z.array(z.object({
+        seat: z.number().int().positive(), position: PositionSchema.nullable(),
+        playerProfile: OpponentProfileSchema.optional(),
+        statsStorage: z.enum(["available","unavailable","pending"]).optional(),
+        rangeBasis: z.string(), rangeConfidence: z.enum(["medium", "low"]),
+        rangeStatus: z.enum(["modeled", "prior_only", "unavailable"]),
+      })).optional(),
       rangeVsHeroEquity: z.number().min(0).max(1).optional(),
     })
     .optional(),
@@ -127,4 +139,27 @@ export function validateDecisionPacket(input: unknown): DecisionPacket {
     packet.preflop = context;
   }
   return packet;
+}
+
+/** Shared wording keeps range uncertainty separate from confidence in DOM facts. */
+export function opponentRangePromptLines(packet: DecisionPacket): string[] {
+  const context = packet.opponentContext;
+  if (!context) return [];
+  return [
+    ...(context.estimatedRangeDescription ? ["Opponent range basis: " + context.estimatedRangeDescription] : []),
+    ...(context.rangeConfidence ? ["Range model confidence: " + context.rangeConfidence + "; status: " + context.rangeStatus + ". This is separate from table-read confidence."] : []),
+    ...(context.opponents ?? []).map(opponent => "Opponent seat " + opponent.seat + " (" + (opponent.position ?? "unknown position") + "): " + opponent.rangeBasis + "; status " + opponent.rangeStatus + "; confidence " + opponent.rangeConfidence),
+    ...(context.opponents ?? []).filter(opponent=>opponent.playerProfile).map(opponent=>"Opponent statistics for seat " + opponent.seat + ": " + JSON.stringify({storage:opponent.statsStorage,profile:{displayName:opponent.playerProfile!.displayName,handsObserved:opponent.playerProfile!.handsObserved,eligibleHands:opponent.playerProfile!.eligibleHands,confidence:opponent.playerProfile!.confidence,stats:opponent.playerProfile!.stats,aggressionFactor:opponent.playerProfile!.aggressionFactor,notes:opponent.playerProfile!.notes}}) + ". Use shrunk estimates and each stat's opportunity count, not raw percentages. Fold-to-3bet is conditional historical evidence, not shove fold equity; do not invent a caller model or label player skill."),
+    ...(context.rangeAssumptions ?? []).map(reason => "Range assumption: " + reason),
+    ...(context.rangeFallbacks ?? []).map(reason => "Range fallback: " + reason),
+    ...(context.rangeConfidence === "low" ? ["Do not treat heuristic range equity as a precise probability or invent equity when unavailable."] : []),
+  ];
+}
+
+/** One provenance label shared by every provider. */
+export function describeEquitySource(source: DecisionPacket["engineCalculations"]["equitySource"]): string {
+  if (source === "estimated_range") return "estimated against one opponent's weighted range (heads-up)";
+  if (source === "estimated_multiway_ranges") return "estimated jointly against distinct weighted opponent ranges with card removal and split pots; not side-pot EV";
+  if (source === "random_hands") return "computed against random hands, not modeled opponent ranges; consult range fallback reasons";
+  return "source not recorded -- treat with extra caution";
 }

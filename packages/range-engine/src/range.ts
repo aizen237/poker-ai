@@ -11,7 +11,7 @@ export function emptyRange(): Range {
 
 /** Adds or updates a hand type's weight in a range. Weight must be 0-1. */
 export function setHandWeight(range: Range, hand: HandType | string, weight: number): Range {
-  if (weight < 0 || weight > 1) {
+  if (!Number.isFinite(weight) || weight < 0 || weight > 1) {
     throw new Error(`Weight must be between 0 and 1, got ${weight}`);
   }
   const key = typeof hand === "string" ? formatHandType(parseHandType(hand)) : formatHandType(hand);
@@ -45,6 +45,8 @@ export function rangeFromList(hands: readonly string[]): Range {
 export function rangeComboCount(range: Range): number {
   let total = 0;
   for (const [handStr, weight] of range) {
+    if (!Number.isFinite(weight) || weight < 0 || weight > 1) throw new Error("Invalid range weight");
+    if (weight === 0) continue;
     const combos = expandHandType(parseHandType(handStr)).length;
     total += combos * weight;
   }
@@ -66,6 +68,8 @@ export function expandRange(range: Range, excludeCards: readonly Card[] = []): W
   const result: WeightedCombo[] = [];
 
   for (const [handStr, weight] of range) {
+    if (!Number.isFinite(weight) || weight < 0 || weight > 1) throw new Error("Invalid range weight");
+    if (weight === 0) continue;
     const combos = expandHandType(parseHandType(handStr));
     for (const combo of combos) {
       const overlaps = combo.some((c) => excludeIds.has(`${c.rank}${c.suit}`));

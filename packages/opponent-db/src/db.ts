@@ -1,3 +1,4 @@
+import { HandObservationSchema, identityKey, type HandObservation, type PlayerIdentity } from "./observations.js";
 import Database from "better-sqlite3";
 import type { PlayerHandActions } from "./types.js";
 
@@ -37,6 +38,16 @@ export function openDatabase(filePath: string) {
   db.pragma("journal_mode = WAL");
   db.exec(SCHEMA);
 
+  db.exec("CREATE TABLE IF NOT EXISTS live_observations (identity_key TEXT NOT NULL, hand_id TEXT NOT NULL, coverage TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(identity_key, hand_id))");
+  const insertObservation=db.prepare("INSERT INTO live_observations(identity_key,hand_id,coverage,payload) VALUES(?,?,?,?) ON CONFLICT(identity_key,hand_id) DO UPDATE SET coverage=excluded.coverage,payload=excluded.payload WHERE live_observations.coverage != 'complete' OR excluded.coverage = 'complete'");
+  const selectObservations=db.prepare("SELECT payload FROM live_observations WHERE identity_key=? ORDER BY rowid");
+  function recordObservation(input:HandObservation):void {
+    const observation=HandObservationSchema.parse(input);
+    insertObservation.run(identityKey(observation.identity),observation.handId,observation.coverage,JSON.stringify(observation));
+  }
+  function getObservations(identity:PlayerIdentity):HandObservation[] {
+    return (selectObservations.all(identityKey(identity)) as {payload:string}[]).map(row=>HandObservationSchema.parse(JSON.parse(row.payload)));
+  }
   const insertStmt = db.prepare(`
     INSERT INTO player_hand_actions (
       player_name, vpip, pfr, three_bet, faced_three_bet, folded_to_three_bet,
@@ -92,5 +103,5 @@ export function openDatabase(filePath: string) {
     db.close();
   }
 
-  return { recordHandActions, getPlayerHandActions, close };
+  return { recordHandActions, getPlayerHandActions, recordObservation, getObservations, close };
 }

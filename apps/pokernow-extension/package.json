@@ -12,7 +12,8 @@
     "@poker-ai/browser-reader": "*",
     "@poker-ai/poker-engine": "*",
     "@poker-ai/range-engine": "*",
-    "@poker-ai/shared": "*"
+    "@poker-ai/shared": "*",
+    "@poker-ai/opponent-db": "*"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",

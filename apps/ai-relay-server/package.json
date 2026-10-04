@@ -14,7 +14,8 @@
     "@poker-ai/browser-reader": "*",
     "express": "^5.1.0",
     "cors": "^2.8.5",
-    "dotenv": "^16.4.7"
+    "dotenv": "^16.4.7",
+    "@poker-ai/opponent-db": "*"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",

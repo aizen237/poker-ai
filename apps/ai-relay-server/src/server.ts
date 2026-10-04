@@ -1,3 +1,5 @@
+import { mkdir } from "node:fs/promises";
+import { createOpponentService, HandObservationSchema, ProfileLookupSchema } from "@poker-ai/opponent-db/browser";
 import { config } from "dotenv";
 import { fileURLToPath } from "url";
 import path from "path";
@@ -55,14 +57,40 @@ if (nvidiaKey) {
 }
 
 const router = createModelRouter(registeredProviders);
+const opponentService = createOpponentService(async () => {
+  const dbPath = process.env.OPPONENT_DB_PATH ?? path.resolve(__dirname, "../../../.data/opponents.sqlite");
+  if (dbPath !== ":memory:") await mkdir(path.dirname(dbPath), { recursive: true });
+  const { openDatabase } = await import("@poker-ai/opponent-db");
+  return openDatabase(dbPath);
+});
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
+app.post("/opponents/observations", async (req, res) => {
+  const parsed = HandObservationSchema.array().max(50).safeParse(req.body.observations);
+  if (!parsed.success) { res.status(400).json({ ok:false, error:"Invalid opponent observations" }); return; }
+  res.json({ ok:true, ...await opponentService.record(parsed.data) });
+});
+app.post("/opponents/profiles", async (req, res) => {
+  const parsed = ProfileLookupSchema.array().max(10).safeParse(req.body.players);
+  if (!parsed.success) { res.status(400).json({ ok:false, error:"Invalid opponent identities" }); return; }
+  const results = await Promise.all(parsed.data.map(player => opponentService.profile(player.identity, player.displayName)));
+  res.json({ ok:true, available:results.every(result=>result.available), profiles:results.map(result=>result.profile) });
+});
+
 app.post("/recommendation", async (req, res) => {
   try {
     const packet = validateDecisionPacket(req.body.decisionPacket);
+    // Refresh client-supplied profiles from local storage. Storage failures only supply priors.
+    for (const opponent of packet.opponentContext?.opponents ?? []) {
+      if (opponent.playerProfile) {
+        const result = await opponentService.profile(opponent.playerProfile.identity, opponent.playerProfile.displayName);
+        opponent.playerProfile = result.profile;
+        opponent.statsStorage = result.available ? "available" : "unavailable";
+      }
+    }
     const mode: RouterOptions["mode"] = req.body.mode ?? "fast";
 
     const uncertainty = preflopUncertainty(packet);

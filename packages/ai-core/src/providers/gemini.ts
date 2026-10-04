@@ -2,13 +2,13 @@ import { preflopPromptLines } from "../preflopContext.js";
 import { formatCards } from "@poker-ai/shared";
 import { evaluateBest, HAND_CATEGORY_NAMES } from "@poker-ai/poker-engine";
 import { buildAuditRecord } from "../auditRecord.js";
-import type { DecisionPacket } from "../decisionPacket.js";
+import { describeEquitySource, opponentRangePromptLines, type DecisionPacket } from "../decisionPacket.js";
 import { parseRecommendation, type Recommendation } from "../recommendation.js";
 import type { AIProvider, AIProviderMetadata, GetRecommendationOptions } from "../provider.js";
 
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
-const PROMPT_VERSION = "v4-decision-policy";
+const PROMPT_VERSION = "v8-opponent-evidence";
 
 /**
  * Identical prompt-building logic to the Groq provider -- deliberately
@@ -41,12 +41,7 @@ function buildPrompt(packet: DecisionPacket): string {
   const calc = packet.engineCalculations;
   if (calc.equity !== undefined) {
     lines.push(`Hero's equity: ${(calc.equity * 100).toFixed(1)}%.`);
-    const sourceDescription =
-      calc.equitySource === "estimated_range"
-        ? "estimated against the opponent's likely range, inferred from their actions this hand (heads-up only)"
-        : calc.equitySource === "random_hands"
-          ? "computed against random hands, not a modeled range (used for multiway pots, or as a heads-up fallback)"
-          : "source not recorded -- treat with extra caution";
+    const sourceDescription = describeEquitySource(calc.equitySource);
     lines.push(`Equity basis: ${sourceDescription}.`);
   }
   if (calc.potOddsBreakevenPercent !== undefined) lines.push(`Pot odds breakeven: ${calc.potOddsBreakevenPercent.toFixed(1)}%.`);
@@ -57,9 +52,7 @@ function buildPrompt(packet: DecisionPacket): string {
     lines.push(`Board texture: ${calc.boardTexture.overall} (${calc.boardTexture.suitTexture}, ${calc.boardTexture.pairTexture}, ${calc.boardTexture.connectivity}).`);
   }
 
-  if (packet.opponentContext?.estimatedRangeDescription) {
-    lines.push(`Opponent read: ${packet.opponentContext.estimatedRangeDescription}`);
-  }
+  lines.push(...opponentRangePromptLines(packet));
 
   if (packet.dataConfidence !== "high") {
     lines.push(`NOTE: data confidence is ${packet.dataConfidence} -- factor this uncertainty into your reasoning.`);
@@ -131,7 +124,7 @@ export function createGeminiProvider(providerOptions: GeminiProviderOptions): AI
           decisionPacket: packet,
           provider: "gemini",
           model,
-          promptVersion: packet.table.street === "preflop" ? "v5-preflop-context" : PROMPT_VERSION,
+          promptVersion: PROMPT_VERSION,
           latencyMs,
           rawResponse: rawContent,
           parsedRecommendation: recommendation,
@@ -148,7 +141,7 @@ export function createGeminiProvider(providerOptions: GeminiProviderOptions): AI
           decisionPacket: packet,
           provider: "gemini",
           model,
-          promptVersion: packet.table.street === "preflop" ? "v5-preflop-context" : PROMPT_VERSION,
+          promptVersion: PROMPT_VERSION,
           latencyMs,
           ...(rawContent !== undefined ? { rawResponse: rawContent } : {}),
           error: error instanceof Error ? error.message : String(error),

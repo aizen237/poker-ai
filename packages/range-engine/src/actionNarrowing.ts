@@ -1,7 +1,8 @@
 import { chenScore } from "./chenScore.js";
-import { parseHandType } from "./handNotation.js";
-import { getOpeningRange } from "./openingRanges.js";
-import type { Range } from "./range.js";
+import type { Card } from "@poker-ai/shared";
+import { allHandTypes, formatHandType, parseHandType } from "./handNotation.js";
+import { getPreflopOpeningReference, type Position } from "./openingRanges.js";
+import { expandRange, rangeComboCount, rangeFromList, type Range, type WeightedCombo } from "./range.js";
 
 export interface NarrowingOptions {
   /** Fraction of the range to keep, e.g. 0.25 = top 25%. */
@@ -10,18 +11,8 @@ export interface NarrowingOptions {
   band?: [number, number];
 }
 
-/**
- * Ranks every hand in a range by Chen score (descending) and returns
- * them in order, along with their combo-weighted position -- used as
- * the shared basis for all narrowing operations below.
- *
- * IMPORTANT: these percentile cutoffs (25% for a 3-bet, 40-75% for a
- * call) are documented, tunable DEFAULTS, not a solved or published
- * standard -- real opponents vary widely in exactly how tight a 3-bet
- * range is. Treat this as a reasonable starting model per the original
- * spec ("the exact range model can start simple"), refine later with
- * opponent-specific data from the opponent database (a later phase).
- */
+/** Chen orders starting-hand types only. Legacy slice helpers below use type
+ * counts; the contextual estimator uses weighted combo mass and scope guards. */
 function rankRangeByStrength(range: Range): string[] {
   return [...range.keys()].sort((a, b) => chenScore(parseHandType(b)) - chenScore(parseHandType(a)));
 }
@@ -29,7 +20,7 @@ function rankRangeByStrength(range: Range): string[] {
 /** Narrows a range to the top N% by Chen score -- models a 3-bet (aggression implies strength). */
 export function narrowForThreeBet(range: Range, options: NarrowingOptions = {}): Range {
   const topFraction = options.topFraction ?? 0.25;
-  if (topFraction <= 0 || topFraction > 1) {
+  if (!Number.isFinite(topFraction) || topFraction <= 0 || topFraction > 1) {
     throw new Error(`topFraction must be between 0 (exclusive) and 1, got ${topFraction}`);
   }
 
@@ -44,10 +35,10 @@ export function narrowForThreeBet(range: Range, options: NarrowingOptions = {}):
   return narrowed;
 }
 
-/** Narrows a range to a middle percentile band -- models a flat call (excludes both raises and folds). */
+/** Legacy hand-type band utility. The contextual estimator uses weighted continuation with premium traps instead. */
 export function narrowForCall(range: Range, options: NarrowingOptions = {}): Range {
   const [lowerPct, upperPct] = options.band ?? [0.4, 0.75];
-  if (lowerPct < 0 || upperPct > 1 || lowerPct >= upperPct) {
+  if (!Number.isFinite(lowerPct) || !Number.isFinite(upperPct) || lowerPct < 0 || upperPct > 1 || lowerPct >= upperPct) {
     throw new Error(`Invalid band [${lowerPct}, ${upperPct}]: must satisfy 0 <= lower < upper <= 1`);
   }
 
@@ -69,7 +60,7 @@ export function narrowForCall(range: Range, options: NarrowingOptions = {}): Ran
  * portion is assumed to have 4-bet/re-raised instead of calling.
  */
 export function narrowExcludingTop(range: Range, topFractionExcluded: number): Range {
-  if (topFractionExcluded < 0 || topFractionExcluded >= 1) {
+  if (!Number.isFinite(topFractionExcluded) || topFractionExcluded < 0 || topFractionExcluded >= 1) {
     throw new Error(`topFractionExcluded must be between 0 (inclusive) and 1 (exclusive), got ${topFractionExcluded}`);
   }
 
@@ -86,47 +77,169 @@ export function narrowExcludingTop(range: Range, topFractionExcluded: number): R
 
 export type OpponentAction = "check" | "call" | "bet" | "raise" | "fold" | "all-in";
 
-/**
- * Default baseline range to narrow from when no better prior exists.
- * Uses BTN's opening range (the widest single-position range) as a
- * deliberately wide fallback. The extension supplies a position-based
- * baseline when dealer-button detection identifies the opponent's position.
- */
-function defaultBaselineRange(): Range {
-  return getOpeningRange("BTN");
+
+export interface RangeAction {
+  street: "preflop" | "flop" | "turn" | "river";
+  action: OpponentAction;
+  /** Full raises before THIS event, including other players and hero. Null if unknown. */
+  priorRaises: number | null;
+  facing: "none" | "bet" | "raise" | "unknown";
+  facingPosition?: Position | null;
+  /** Explicitly excludes limpers/straddles; zero prior raises alone is insufficient. */
+  unopened?: boolean;
+  wagerAction?: "call" | "bet" | "raise" | null;
+  /** Equal observations cannot establish event order. */
+  observation?: number;
+}
+export interface SmoothedTendency { estimate:number; priorMean:number; playerWeight:number; samples:number }
+export interface PlayerTendencies { vpip:SmoothedTendency; pfr:SmoothedTendency }
+/** A second reliability discount and a 15% cap keep sparse profiles near baseline. */
+function tendencyMultiplier(rate:SmoothedTendency|undefined):number {
+  if(!rate || rate.samples<=0 || ![rate.estimate,rate.priorMean,rate.playerWeight].every(v=>Number.isFinite(v)&&v>=0&&v<=1))return 1;
+  return 1+Math.max(-0.15,Math.min(0.15,(rate.estimate-rate.priorMean)*rate.playerWeight));
+}
+export interface RangeEstimationInput {
+  tendencies?:PlayerTendencies|undefined;
+  position: Position | null;
+  actions: readonly RangeAction[];
+  historyCoverage: "complete" | "partial";
+  /** Depth and table size at the observed preflop decision, not current postflop stacks. */
+  effectiveStackBB: number | null;
+  playersDealtIn: number | null;
+  chipEvOnly: boolean;
+  knownCards?: readonly Card[];
+  baseline?: { range: Range; basis: string; confidence: "medium" | "low" };
+}
+export interface OpponentRangeEstimate {
+  range: Range;
+  /** Suit-specific blockers are removed here, not by deleting an entire hand type. */
+  combos: WeightedCombo[];
+  status: "modeled" | "prior_only" | "unavailable";
+  confidence: "medium" | "low";
+  basis: string;
+  assumptions: string[];
+  fallbacks: string[];
 }
 
-/**
- * Composes the narrowing functions above into a single range estimate
- * from an opponent's ordered action history for the hand so far. Each
- * action narrows the range produced by the PREVIOUS action (not the
- * original baseline) -- e.g. "raise, call" models "the range of hands
- * that would raise, then continue with a call facing more aggression,"
- * not two independent slices of the full baseline.
- *
- * "check", "fold", and "all-in" are accepted without narrowing. An
- * all-in label alone does not establish aggression: it may be a short
- * call or a delayed status label. No new opponent model is inferred.
- *
- * KNOWN SIMPLIFICATION: observed "bet" and "raise" actions both retain
- * the existing narrowForThreeBet treatment, the only aggression
- * narrowing tool available. A real opening-bet range is wider than a
- * genuine 3-bet range -- treat this as a reasonable starting model, not
- * a precise one, consistent with the rest of this module's documented
- * defaults.
- */
-export function estimateOpponentRange(
-  actions: readonly OpponentAction[],
-  baseline: Range = defaultBaselineRange(),
-): Range {
-  let range = baseline;
-  for (const action of actions) {
-    if (action === "raise" || action === "bet") {
-      range = narrowForThreeBet(range);
-    } else if (action === "call") {
-      range = narrowForCall(range);
-    }
-    // Check/fold/all-in labels alone intentionally have no effect.
+/** Approximate Chen ordering of weighted combo mass, not a solver or a chart. */
+function retainStrengthMass(range: Range, fraction: number): Range {
+  const ranked = rankRangeByStrength(range);
+  const target = rangeComboCount(range) * fraction;
+  const result: Range = new Map();
+  let mass = 0;
+  let boundary = Infinity;
+  for (const hand of ranked) {
+    const score = chenScore(parseHandType(hand));
+    if (mass >= target && score < boundary) break;
+    const weight = range.get(hand)!;
+    result.set(hand, weight);
+    mass += rangeComboCount(new Map([[hand, weight]]));
+    boundary = score;
   }
-  return range;
+  return result;
+}
+
+/** A conditional range for one opponent, replayed from the prior for this hand.
+ * Unsupported actions retain that prior with explicit low confidence. */
+export function estimateOpponentRange(input: RangeEstimationInput): OpponentRangeEstimate {
+  const known = input.knownCards ?? [];
+  if (new Set(known.map(c => c.rank + c.suit)).size !== known.length) throw new Error("Duplicate known cards");
+  let range: Range = input.baseline ? new Map(input.baseline.range) : rangeFromList(allHandTypes().map(formatHandType));
+  for (const [hand, weight] of range) {
+    parseHandType(hand);
+    if (!Number.isFinite(weight) || weight < 0 || weight > 1) throw new Error("Range weights must be finite and between 0 and 1");
+    if (weight === 0) range.delete(hand);
+  }
+  let modeled = input.baseline !== undefined;
+  let confidence: "medium" | "low" = input.baseline?.confidence ?? "medium";
+  const assumptions = ["Chen strength ordering and retained fractions are illustrative heuristics, not calibrated frequencies or solved ranges."];
+  const fallbacks: string[] = [];
+  const entryMultiplier=tendencyMultiplier(input.tendencies?.vpip);
+  const aggressionMultiplier=tendencyMultiplier(input.tendencies?.pfr);
+  const path: string[] = [];
+  const warn = (message: string) => { confidence = "low"; assumptions.push(message); };
+  if (input.historyCoverage === "partial") warn("Partial history may omit hero actions, raises, and intervening calls; unknown raise levels are not inferred.");
+  if (input.position === null) warn("Opponent position is unknown.");
+  if(entryMultiplier!==1||aggressionMultiplier!==1)warn("Range width uses opportunity-aware shrunk VPIP/PFR with a second reliability discount and bounded adjustment. Fold-to-3bet is not substituted for shove fold equity.");
+  const available = (candidate: Range) => expandRange(candidate, known).some(c => c.weight > 0);
+  let previousStreet = -1;
+  let previousObservation = -1;
+  for (const event of input.actions) {
+    const streetIndex = ["preflop", "flop", "turn", "river"].indexOf(event.street);
+    const unordered = streetIndex < previousStreet || (event.observation !== undefined && event.observation < previousObservation) || (event.observation !== undefined && input.actions.filter(a => a.observation === event.observation).length > 1);
+    previousStreet = Math.max(previousStreet, streetIndex);
+    previousObservation = Math.max(previousObservation, event.observation ?? -1);
+    const verb = event.action === "all-in" ? event.wagerAction : event.action;
+    let label: string = event.street + " " + (verb ?? "all-in (wager unknown)");
+    if (event.action === "all-in" && verb) label += " all-in";
+    let candidate = range;
+    let establishesModel = false;
+    if (unordered) {
+      warn("Unordered or regressing action retained the previous range.");
+    } else if (event.street !== "preflop") {
+      // Chen ranks starting hands, not strength/draws on a particular board.
+      // Bet and raise remain different evidence, but neither gets a preflop cut.
+      if (verb === "bet" || verb === "raise" || verb === "call") warn(label + ": board-aware continuation model unavailable; retained prior range.");
+    } else if (verb === "raise" || verb === "bet") {
+      const level = event.priorRaises;
+      if (input.historyCoverage !== "complete" || level === null || !Number.isInteger(level) || level < 0 || event.facing === "unknown") {
+        label = "preflop aggression (raise level unknown)";
+        warn("Preflop aggression lacks verified prior action; no 3-bet cut applied.");
+      } else if (level === 0 && event.facing === "none") {
+        label = event.unopened === true ? (input.position ?? "unknown position") + " open" : "preflop raise (unopened pot unverified)";
+        const reference = input.chipEvOnly && event.unopened === true ? getPreflopOpeningReference({position:input.position,effectiveStackBB:input.effectiveStackBB,playersDealtIn:input.playersDealtIn ?? 0,unopened:true}) : null;
+        if (reference) {
+          candidate = new Map([...range].filter(([hand]) => reference.has(hand)));
+          if(aggressionMultiplier>1){
+            const extras=new Map([...range].filter(([hand])=>!reference.has(hand)));
+            const extraMass=rangeComboCount(candidate)*(aggressionMultiplier-1),mass=rangeComboCount(extras);
+            if(mass>0){
+              const selected=retainStrengthMass(extras,Math.min(1,extraMass/mass));
+              const scale=Math.min(1,extraMass/rangeComboCount(selected));
+              for(const [hand,weight] of selected)candidate.set(hand,weight*scale);
+            }
+          }else if(aggressionMultiplier<1)candidate=retainStrengthMass(candidate,aggressionMultiplier);
+          if(aggressionMultiplier!==1)warn("Opening prior adjusted conservatively by shrunk PFR; maximum target mass change 15%, not a player-skill label.");
+          establishesModel = true;
+          assumptions.push("Opening reference is a 100BB+ six-max chip-EV RFI prior; it is carried forward only from this observed open.");
+        } else warn("Opening reference out of scope (position, depth, table size or tournament conditions); retained prior.");
+      } else if (level >= 1 && event.facing === "raise") {
+        label = event.street + (level === 1 ? " 3-bet" : " later re-raise");
+        if (input.effectiveStackBB === null || !Number.isFinite(input.effectiveStackBB) || input.effectiveStackBB < 100 || input.playersDealtIn !== 6 || !input.chipEvOnly) {
+          warn(label + ": short-stack/tournament/unknown context not modeled; retained prior.");
+        } else {
+          const fraction = level > 1 ? 0.12 : event.facingPosition === "UTG" ? 0.18 : 0.25;
+          candidate = retainStrengthMass(range, fraction * aggressionMultiplier);
+          establishesModel = true;
+          warn(label + ": assumed top " + fraction * 100 + "% weighted strength mass; bluffs and sizing are unmodeled.");
+        }
+      } else warn("Inconsistent preflop facing action and raise count; retained prior.");
+    } else if (verb === "call") {
+      if (input.historyCoverage !== "complete" || event.facing !== "raise" || event.priorRaises === null || !Number.isInteger(event.priorRaises) || event.priorRaises < 1 ||
+          input.effectiveStackBB === null || !Number.isFinite(input.effectiveStackBB) || input.effectiveStackBB < 100 || input.playersDealtIn !== 6 || !input.chipEvOnly) {
+        warn("Call context is unresolved or outside deep-stack scope; retained prior.");
+      } else {
+        candidate = retainStrengthMass(range, (event.priorRaises === 1 ? 0.65 : 0.5) * entryMultiplier);
+        // Keep some premium traps instead of asserting that AA can never flat.
+        const premiums = retainStrengthMass(range, 0.1);
+        candidate = new Map([...candidate].map(([hand, weight]) => [hand, weight * (premiums.has(hand) ? 0.5 : 1)]));
+        establishesModel = true;
+        warn("Flat-call heuristic retains a stronger continuing subset with reduced premium weights; traps remain possible.");
+      }
+    } else if (event.action === "all-in") warn("All-in status alone supplies no additional range evidence.");
+    path.push(label);
+    if (candidate !== range && !available(candidate)) {
+      fallbacks.push(label + ": heuristic removed all legal combos; retained previous weighted range.");
+      confidence = "low";
+    } else {
+      range = candidate;
+      modeled ||= establishesModel;
+    }
+  }
+  const combos = expandRange(range, known);
+  const status = combos.length === 0 ? "unavailable" : modeled ? "modeled" : "prior_only";
+  if (status !== "modeled") warn(status === "unavailable" ? "Supplied prior has no legal combos; equity is unavailable, not replaced by random hands." : "No supported conditioning evidence; broad legal-card prior only, not an estimated opponent strategy.");
+  return { range, combos, status, confidence,
+    basis: (modeled ? "Estimated from " : "Unconditioned prior; observed ") + (path.join(" -> ") || "no actions") + (input.baseline ? "; prior: " + input.baseline.basis : ""),
+    assumptions: [...new Set(assumptions)], fallbacks };
 }

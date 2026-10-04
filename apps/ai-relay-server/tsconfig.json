@@ -4,9 +4,18 @@
     "outDir": "./dist",
     "rootDir": "./src"
   },
-  "include": ["src"],
+  "include": [
+    "src"
+  ],
   "references": [
-    { "path": "../../packages/ai-core" },
-    { "path": "../../packages/browser-reader" }
+    {
+      "path": "../../packages/ai-core"
+    },
+    {
+      "path": "../../packages/browser-reader"
+    },
+    {
+      "path": "../../packages/opponent-db"
+    }
   ]
 }
