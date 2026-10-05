@@ -1,4 +1,4 @@
-import { Deck, type Card } from "@poker-ai/shared";
+import { Deck, validateSimulationInput, type Card } from "@poker-ai/shared";
 import { evaluateBest } from "@poker-ai/poker-engine";
 import { expandRange, type Range, type WeightedCombo } from "./range.js";
 
@@ -51,6 +51,7 @@ export function calculateEquityVsRange(
   const rng = options.rng ?? Math.random;
   const cardsToComplete = 5 - board.length;
   const knownCards = [...heroCards, ...board];
+  validateSimulationInput(knownCards, board.length, iterations);
 
   const opponentCombos = expandRange(opponentRange, knownCards);
   if (opponentCombos.length === 0) {
@@ -95,18 +96,23 @@ export function calculateRangeVsRangeEquity(
   const cardsToComplete = 5 - board.length;
 
   const heroCombosBase = expandRange(heroRange, board);
+  validateSimulationInput(board, board.length, iterations);
   if (heroCombosBase.length === 0) {
     throw new Error("Hero range has no valid combos remaining after excluding the board");
   }
 
+  const opponentCombos = expandRange(opponentRange, board);
+  if (opponentCombos.length === 0) throw new Error("Opponent range has no valid combos");
   let winShareSum = 0;
-
-  for (let i = 0; i < iterations; i++) {
+  let accepted = 0;
+  const maxAttempts = Math.max(1000, iterations * 100);
+  // Independent weighted draws conditioned on disjoint cards. Reject the whole
+  // pair, not just opponent cards; failed draws must not count as hero losses.
+  for (let attempt = 0; accepted < iterations && attempt < maxAttempts; attempt++) {
     const heroCombo = weightedSample(heroCombosBase, rng);
-    const opponentCombos = expandRange(opponentRange, [...board, ...heroCombo.cards]);
-    if (opponentCombos.length === 0) continue; // no valid opponent combo this draw; skip iteration
-
     const opponentCombo = weightedSample(opponentCombos, rng);
+    if (heroCombo.cards.some(a => opponentCombo.cards.some(b => a.rank === b.rank && a.suit === b.suit))) continue;
+    accepted++;
     const excludeThisIteration = [...board, ...heroCombo.cards, ...opponentCombo.cards];
     const deck = new Deck(rng, excludeThisIteration);
     const runoutBoard = [...board, ...deck.drawMany(cardsToComplete)];
@@ -118,5 +124,6 @@ export function calculateRangeVsRangeEquity(
     else if (heroValue === opponentValue) winShareSum += 0.5;
   }
 
-  return { equity: winShareSum / iterations, iterations };
+  if (accepted !== iterations) throw new Error("Unable to sample enough disjoint range pairs");
+  return { equity: winShareSum / accepted, iterations: accepted };
 }

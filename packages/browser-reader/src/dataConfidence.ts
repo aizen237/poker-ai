@@ -7,6 +7,8 @@ export interface ConfidenceContext {
   amountToCall: number | null;
   /** Explicit evidence is required before either displayed pot is used in a decision. */
   potSemanticsVerified: boolean;
+  /** Live reads explicitly mark the street-total/absent-marker interpretation unverified. */
+  contributionSemanticsVerified?: boolean;
   /**
    * Legacy field name: true when the big blind could not be read this
    * cycle. The live reader now returns null, never a numeric fallback.
@@ -72,6 +74,9 @@ export function computeDataConfidence(state: PokerGameState, context: Confidence
     if (hero.stack === null || !Number.isFinite(hero.stack) || hero.stack < 0) {
       criticalReasons.push("hero stack missing or invalid");
     }
+    if (hero.stack === 0 || hero.isAllIn) {
+      criticalReasons.push("hero has no remaining chips to act with");
+    }
     if (hero.isFolded) {
       criticalReasons.push("hero has already folded -- no decision to make");
     }
@@ -103,6 +108,9 @@ export function computeDataConfidence(state: PokerGameState, context: Confidence
   }
   if (!context.potSemanticsVerified) {
     criticalReasons.push("main/add-on pot meaning needs live confirmation -- pot-based recommendations withheld");
+  }
+  if (context.contributionSemanticsVerified === false) {
+    criticalReasons.push("current-bet totals and absent/check markers need live confirmation -- call interpretation is provisional");
   }
 
   if (context.amountToCall === null || !Number.isFinite(context.amountToCall) || context.amountToCall < 0) {

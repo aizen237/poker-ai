@@ -1,62 +1,109 @@
-import type { PreflopContext } from "@poker-ai/ai-core";
+import { evaluateDecisionPolicy, generatePolicyCandidates, type DecisionPacket, type PreflopContext } from "@poker-ai/ai-core";
 import type { ActionHistory, LiveStateAssessment } from "@poker-ai/browser-reader";
+import { assessLiveLegalityEvidence } from "@poker-ai/browser-reader";
 import { formatCards } from "@poker-ai/shared";
 import type { LiveTableRead } from "./tableRead.js";
 
 const DIAGNOSTICS_KEY = "poker-ai:diagnostics";
 let lastSnapshot: string | null = null;
 
-/** Opt in from the PokerNow tab console; re-read the toggle on every poll. */
-export function logLiveDiagnostics(read: LiveTableRead, assessment: LiveStateAssessment, history: ActionHistory, preflop: PreflopContext | null = null): void {
-  let enabled = false;
-  try { enabled = localStorage.getItem(DIAGNOSTICS_KEY) === "1"; } catch { /* Storage disabled: diagnostics stay off. */ }
-  if (!enabled) { lastSnapshot = null; return; }
+/** Pure snapshot assembly; raw-value fixtures do not claim to verify PokerNow DOM behavior. */
+export function buildLiveDiagnosticSnapshot(
+  read: LiveTableRead, assessment: LiveStateAssessment, history: ActionHistory,
+  preflop: PreflopContext | null = null, packet: DecisionPacket | null = null,
+  unclassifiedControls: unknown[] = [],
+) {
   const seats = assessment.state?.seats ?? [];
-  const snapshot = {
+  const seatRow = (seat: (typeof seats)[number]) => {
+    const raw = read.raw.seats.find(row => row.seatNumber === seat.seatNumber);
+    return { seat: seat.seatNumber, player: seat.playerName, position: assessment.positions.get(seat.seatNumber) ?? null,
+      stack: seat.stack, currentBet: seat.currentBet, stackText: raw?.stackText ?? null, currentBetText: raw?.betValueText ?? null,
+      isAllIn: seat.isAllIn ?? false, isFolded: seat.isFolded, isOffline: seat.isOffline,
+      isCurrentToAct: seat.isCurrentToAct, isChecking: seat.isChecking, betReadError: seat.betReadError ?? false };
+  };
+  const hero = seats.find(s => s.isOccupied && s.isYou);
+  const opponents = seats.filter(s => s.isOccupied && !s.isYou && !s.isFolded);
+  const occupied = seats.filter(s => s.isOccupied);
+  const policy = packet ? evaluateDecisionPolicy(packet) : null;
+  return {
+    version: 2,
+    parsedStateAvailable: assessment.state !== null,
+    units: { read: "chips", decisionPacket: "BB", candidateSizes: "additional BB; raiseToBB is total street BB" },
+    street: assessment.state?.street ?? null,
+    board: assessment.state ? formatCards(assessment.state.board) : null,
+    hero: hero ? seatRow(hero) : null,
+    activeOpponents: opponents.map(seatRow),
+    seats: occupied.map(seatRow),
+    monetary: {
+      rawMainPotText: read.raw.potMainValueText,
+      rawDisplayedTotalPotText: read.raw.potTotalValueText,
+      potContainerText: read.evidence.potContainerText,
+      ...assessment.pot,
+      calculatedAmountToCall: assessment.amountToCall,
+      amountToCallMeaning: "uncapped opposing contribution gap; totals and absent/check-as-zero are unverified",
+      highestActiveOpposingContribution: !assessment.state || opponents.some(s => s.betReadError) ? null : Math.max(0, ...opponents.map(s => s.currentBet ?? 0)),
+      knownNumericBetSubtotalIncludingFolded: assessment.state ? occupied.reduce((sum, s) => sum + (s.currentBet ?? 0), 0) : null,
+      betSubtotalHasUnknowns: !assessment.state || occupied.some(s => s.currentBet === null || s.betReadError),
+      // Folded money still belongs to the pot; it is excluded only from the call target.
+      foldedNumericBetSubtotal: assessment.state ? occupied.filter(s => s.isFolded).reduce((sum, s) => sum + (s.currentBet ?? 0), 0) : null,
+      smallBlind: assessment.smallBlind, bigBlind: assessment.bigBlind, rawBlindTexts: read.context.blindTexts,
+      allInCallCostIfGapIsCorrect: hero?.stack == null || assessment.amountToCall === null ? null : Math.min(hero.stack, assessment.amountToCall),
+    },
+    legality: { ...assessment.legality, proof: assessLiveLegalityEvidence(read.raw, assessment, history), raiseControl: read.raiseControl, unclassifiedControls,
+      controlsMeaning: "Selected raise-to is input evidence, not a legal minimum. Slider attributes and unclassified controls do not verify legality." },
+    decision: {
+      packetBuilt: packet !== null,
+      decisionPotActuallyUsedBB: packet?.table.potBB ?? null,
+      packetAmountToCallBB: packet?.facingAction.amountBB ?? null,
+      policyPotActuallyUsedBB: packet?.policyContext?.potVerified && policy && policy.actionEVs.some(row => row.action !== "FOLD" && row.evBB !== null) ? packet.table.potBB : null,
+      candidateActionSizes: packet ? generatePolicyCandidates(packet) : [],
+      candidateSizeStatus: packet?.policyContext ? "see policy reasons and verified bounds" : "withheld: no verified policy legality/pot inputs",
+      policy,
+      potEvidence: packet?.potEvidence ?? null,
+      engineCalculations: packet?.engineCalculations ?? null,
+    },
+    confidence: assessment.confidence,
     preflop,
     raw: read.raw, evidence: read.evidence, context: read.context,
     actionHistory: { records: Object.fromEntries(history.records), observation: history.observation, notes: history.notes },
-    parsed: {
-      ...assessment, positions: Object.fromEntries(assessment.positions),
-      boardCards: assessment.state ? formatCards(assessment.state.board) : null,
-      currentToActSeats: seats.filter((seat) => seat.isCurrentToAct).map((seat) => seat.seatNumber),
-    },
     assumptions: {
-      pot: "UNVERIFIED: main and add-on preserved separately; decisionPot is null; no pot odds or recommendations",
-      positions: "UNVERIFIED: ascending seat numbers wrap clockwise; folded occupied seats retain positions",
-      bets: "Absent/check indicators count as zero; confirm against the visible call button; call gap is not stack-capped",
-      street: "Derived from parsed board count; not independently read from PokerNow",
-      opponents: "Occupied and non-folded; includes all-in and offline players; sitting-out semantics need live confirmation",
+      pot: "Total = collected + street contributions was observed live; hero eligibility, returns and side pots still require proof before EV use.",
+      positions: "Ascending seat numbers assumed clockwise; verify against dealer and screen.",
+      bets: "Absent/check indicators retain the existing zero interpretation. Other action words are unknown. Confirm against controls.",
+      street: "Derived from board count; not independently read from PokerNow.",
+      opponents: "Occupied and non-folded, including offline/all-in; sitting-out semantics still unverified.",
     },
   };
+}
+
+/** Inspect standard visible controls only while debugging, without inventing PokerNow selectors. */
+function readUnclassifiedControls(): unknown[] {
+  return [...document.querySelectorAll('button, [role="button"], input[type="number"], input[type="range"]')]
+    .filter(el => { const rect = el.getBoundingClientRect(); return rect.width > 0 && rect.height > 0 && getComputedStyle(el).visibility !== "hidden"; })
+    .map(el => ({ tag: el.tagName, text: el.textContent?.trim() ?? "", ariaLabel: el.getAttribute("aria-label"),
+      disabled: el.hasAttribute("disabled"), ariaDisabled: el.getAttribute("aria-disabled"),
+      type: el.getAttribute("type"), value: el instanceof HTMLInputElement ? el.value : null,
+      min: el.getAttribute("min"), max: el.getAttribute("max"), step: el.getAttribute("step"),
+    }));
+}
+
+/** Existing opt-in toggle: 1 = changed snapshots, once = one snapshot then disable. */
+export function logLiveDiagnostics(
+  read: LiveTableRead, assessment: LiveStateAssessment, history: ActionHistory,
+  preflop: PreflopContext | null = null, packet: DecisionPacket | null = null,
+): void {
+  let mode: string | null = null;
+  try { mode = localStorage.getItem(DIAGNOSTICS_KEY); } catch { /* diagnostics stay off */ }
+  if (mode !== "1" && mode !== "once") { lastSnapshot = null; return; }
+  const snapshot = buildLiveDiagnosticSnapshot(read, assessment, history, preflop, packet, readUnclassifiedControls());
   const serialized = JSON.stringify(snapshot);
-  if (serialized === lastSnapshot) return;
+  if (mode !== "once" && serialized === lastSnapshot) return;
   lastSnapshot = serialized;
-  console.groupCollapsed(`[Poker AI State] ${new Date().toISOString()} | ${assessment.state?.street ?? "unreadable"} | confidence=${assessment.confidence.level}`);
-  // Serialize/parse so DevTools cannot display a later mutation of the snapshot.
-  console.log("Snapshot (raw selectors -> parsed fields -> confidence)", JSON.parse(serialized));
-  console.table([...history.records.values()].flat());
-  console.table(read.raw.seats.map((raw) => {
-    const seat = seats.find((s) => s.seatNumber === raw.seatNumber);
-    return {
-      seat: raw.seatNumber, player: seat?.playerName ?? raw.playerNameText,
-      occupied: raw.isOccupied, hero: raw.isYou,
-      position: assessment.positions.get(raw.seatNumber) ?? "unknown",
-      dealer: raw.seatNumber === read.context.dealerSeatNumber,
-      stackText: raw.stackText, stack: seat?.stack ?? null, allIn: seat?.isAllIn ?? false,
-      betText: raw.betValueText, currentBet: seat?.currentBet ?? null, betUnreadable: seat?.betReadError ?? null,
-      cards: seat ? formatCards(seat.holeCards) : "unreadable",
-      folded: seat?.isFolded ?? null, toAct: seat?.isCurrentToAct ?? null, offline: seat?.isOffline ?? null,
-    };
-  }));
-  console.log("Pot comparison", {
-    mainText: read.raw.potMainValueText, main: assessment.state?.potMainValue ?? null,
-    addOnText: read.raw.potTotalValueText, addOn: assessment.state?.potTotalValue ?? null,
-    knownCurrentBetSubtotal: assessment.state ? seats.filter((s) => s.isOccupied).reduce((sum, s) => sum + (s.currentBet ?? 0), 0) : null,
-    currentBetSumHasUnknowns: seats.some((s) => s.betReadError),
-    amountToCall: assessment.amountToCall, smallBlind: assessment.smallBlind, bigBlind: assessment.bigBlind,
-    activeOpponents: assessment.activeOpponents, decisionPot: assessment.decisionPot,
-  });
-  console.log("Copyable snapshot JSON", JSON.stringify({ capturedAt: new Date().toISOString(), ...snapshot }));
+  const captured = { capturedAt: new Date().toISOString(), ...JSON.parse(serialized) };
+  console.groupCollapsed("[Poker AI State] " + captured.capturedAt + " | " + snapshot.street + " | confidence=" + assessment.confidence.level);
+  console.log("Monetary/legality snapshot", captured);
+  console.table(snapshot.seats);
+  console.log("Copyable snapshot JSON", JSON.stringify(captured));
   console.groupEnd();
+  if (mode === "once") { try { localStorage.removeItem(DIAGNOSTICS_KEY); } catch { /* no effect on safety gates */ } }
 }

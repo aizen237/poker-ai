@@ -4322,6 +4322,18 @@
     }
   };
 
+  // ../../packages/shared/dist/simulationInput.js
+  function validateSimulationInput(known, boardCount, iterations) {
+    if (![0, 3, 4, 5].includes(boardCount))
+      throw new Error("Invalid board count");
+    if (!Number.isSafeInteger(iterations) || iterations < 1)
+      throw new Error("Iterations must be a positive integer");
+    if (known.some((c) => !Number.isInteger(c.rank) || c.rank < 2 || c.rank > 14 || !["s", "h", "d", "c"].includes(c.suit)))
+      throw new Error("Invalid card");
+    if (new Set(known.map((c) => `${c.rank}${c.suit}`)).size !== known.length)
+      throw new Error("Duplicate known cards");
+  }
+
   // ../../packages/range-engine/dist/handNotation.js
   var RANK_TO_CHAR2 = {
     2: "2",
@@ -4602,6 +4614,9 @@
       throw new Error(`calculateEquity requires at least 1 opponent, got ${numOpponents}`);
     }
     const iterations = options.iterations ?? DEFAULT_ITERATIONS;
+    validateSimulationInput([...heroCards2, ...board], board.length, iterations);
+    if (!Number.isInteger(numOpponents) || numOpponents > 9)
+      throw new Error("Invalid opponent count");
     const rng = options.rng ?? Math.random;
     const cardsToComplete = 5 - board.length;
     let winShareSum = 0;
@@ -4660,6 +4675,18 @@
       throw new Error(`amountToCall must be positive, got ${amountToCall}`);
     const ev = equity * currentPot - (1 - equity) * amountToCall;
     return { ev };
+  }
+  function calculateFoldEV() {
+    return { ev: 0 };
+  }
+  function calculateRaiseEV(equityIfCalled, foldEquity, currentPot, investment, opponentCall) {
+    if (![equityIfCalled, foldEquity].every((p) => Number.isFinite(p) && p >= 0 && p <= 1)) {
+      throw new Error("Equity and fold equity must be finite probabilities");
+    }
+    if (!Number.isFinite(currentPot) || currentPot < 0 || !Number.isFinite(investment) || investment <= 0 || !Number.isFinite(opponentCall) || opponentCall <= 0 || opponentCall > investment) {
+      throw new Error("Invalid pot, investment, or additional opponent call");
+    }
+    return { ev: foldEquity * currentPot + (1 - foldEquity) * (equityIfCalled * (currentPot + opponentCall) - (1 - equityIfCalled) * investment) };
   }
   function calculateSPR(effectiveStack, currentPot) {
     if (currentPot <= 0)
@@ -4785,6 +4812,7 @@
     const rng = options.rng ?? Math.random;
     const cardsToComplete = 5 - board.length;
     const knownCards = [...heroCards2, ...board];
+    validateSimulationInput(knownCards, board.length, iterations);
     const opponentCombos = expandRange(opponentRange, knownCards);
     if (opponentCombos.length === 0) {
       throw new Error("Opponent range has no valid combos remaining after excluding known cards");
@@ -5552,6 +5580,322 @@
     return packet.preflop.decisionSupport === "uncertain" ? ["Insufficient strategic model / uncertain.", ...packet.preflop.reasons] : null;
   }
 
+  // ../../packages/ai-core/dist/decisionPolicy.js
+  var chips2 = external_exports.number().finite().nonnegative();
+  var probability = external_exports.number().finite().min(0).max(1);
+  var PotEvidenceSchema = external_exports.object({
+    unit: external_exports.literal("chips"),
+    mainPot: chips2.nullable(),
+    displayedTotalPot: chips2.nullable(),
+    decisionPot: chips2.nullable(),
+    decisionPotSource: external_exports.string().min(1).nullable(),
+    isPotSemanticsVerified: external_exports.boolean(),
+    bigBlind: external_exports.number().finite().positive()
+  });
+  var PolicyEstimateSchema = external_exports.object({
+    estimate: probability,
+    low: probability,
+    high: probability,
+    source: external_exports.string().min(1),
+    confidence: external_exports.enum(["low", "medium"])
+  }).refine((p) => p.low <= p.estimate && p.estimate <= p.high, "Estimate must lie within its bounds");
+  var PolicyContextSchema = external_exports.object({
+    potVerified: external_exports.boolean(),
+    potSource: external_exports.string().min(1),
+    accounting: external_exports.enum(["single_pot_no_rake", "unknown"]),
+    /** Calling ends all betting (river closing action, or a matched heads-up all-in). */
+    terminalAfterCall: external_exports.boolean(),
+    /** Checking ends the hand, not merely hero's turn. */
+    checkEndsHand: external_exports.boolean(),
+    legal: external_exports.object({
+      verified: external_exports.boolean(),
+      source: external_exports.string().min(1),
+      heroStreetBetBB: chips2,
+      opponentStreetBetBB: chips2,
+      opponentStackBB: chips2,
+      chipUnitBB: external_exports.number().finite().positive(),
+      minBetBB: external_exports.number().finite().positive(),
+      /** Total street contribution required for a full raise, not the raise increment. */
+      minRaiseToBB: external_exports.number().finite().positive().nullable(),
+      aggressionReopened: external_exports.boolean()
+    }),
+    /** Against the current range for CALL, or the checking range for a terminal CHECK. */
+    equity: PolicyEstimateSchema.optional(),
+    responses: external_exports.array(external_exports.object({
+      /** Additional hero investment from this decision; one model PER candidate size. */
+      investmentBB: external_exports.number().finite().positive(),
+      equityIfCalled: PolicyEstimateSchema,
+      callerRangeBasis: external_exports.string().min(1),
+      foldEquity: PolicyEstimateSchema,
+      /** Explicit approximation; no re-raise branch is currently modeled. */
+      model: external_exports.literal("fold_or_call"),
+      assumption: external_exports.string().min(1)
+    })).max(32)
+  });
+  var EPS = 1e-8;
+  var near = (a, b) => Math.abs(a - b) < EPS;
+  function potEvidenceProblems(packet) {
+    const evidence = packet.potEvidence;
+    if (!evidence)
+      return [];
+    if (!evidence.isPotSemanticsVerified || evidence.decisionPot === null || !evidence.decisionPotSource) {
+      return ["Live decision-pot semantics/provenance are unverified."];
+    }
+    if (!near(evidence.decisionPot / evidence.bigBlind, packet.table.potBB)) {
+      return ["DecisionPacket potBB contradicts the verified chip pot / big blind."];
+    }
+    if (packet.policyContext && (!packet.policyContext.potVerified || packet.policyContext.potSource !== evidence.decisionPotSource)) {
+      return ["Policy pot provenance contradicts the live evidence."];
+    }
+    return [];
+  }
+  function policyContextProblems(packet, ctx) {
+    const legal = ctx.legal;
+    const call = Math.max(0, legal.opponentStreetBetBB - legal.heroStreetBetBB);
+    const onGrid = (value) => near(value / legal.chipUnitBB, Math.round(value / legal.chipUnitBB));
+    const problems = potEvidenceProblems(packet);
+    if (!legal.verified)
+      problems.push("Exact action legality has not been verified.");
+    if (legal.heroStreetBetBB > legal.opponentStreetBetBB || !near(call, packet.facingAction.amountBB ?? 0) || call > 0 !== (packet.facingAction.type !== "none")) {
+      problems.push("Street contributions contradict the facing action/call cost.");
+    }
+    if (call > packet.hero.stackBB)
+      problems.push("An unmatched all-in/short call needs separate pot accounting.");
+    if (packet.table.potBB + EPS < legal.heroStreetBetBB + legal.opponentStreetBetBB) {
+      problems.push("Verified pot cannot exclude the current street contributions.");
+    }
+    if (packet.facingAction.type === "all_in" && legal.opponentStackBB > 0) {
+      problems.push("An all-in opponent cannot also have chips behind.");
+    }
+    if (![
+      legal.heroStreetBetBB,
+      legal.opponentStreetBetBB,
+      legal.opponentStackBB,
+      packet.hero.stackBB,
+      legal.minBetBB,
+      ...legal.minRaiseToBB === null ? [] : [legal.minRaiseToBB]
+    ].every(onGrid)) {
+      problems.push("Chip amounts or legal bounds do not match the verified chip unit.");
+    }
+    if (call > 0 && legal.aggressionReopened && legal.opponentStackBB > 0 && (legal.minRaiseToBB === null || legal.minRaiseToBB <= legal.opponentStreetBetBB)) {
+      problems.push("Minimum raise-to is unknown or inconsistent.");
+    }
+    return problems;
+  }
+  function policyWagerProblems(packet, investmentBB) {
+    if (packet.table.street === "preflop")
+      return ["Exact preflop wager legality is outside this postflop sizing model."];
+    const ctx = packet.policyContext;
+    if (!ctx)
+      return ["Exact wager legality is unknown; verified controls/minimums are required."];
+    const problems = policyContextProblems(packet, ctx);
+    if (problems.length)
+      return problems;
+    const legal = ctx.legal;
+    const call = packet.facingAction.amountBB ?? 0;
+    if (!Number.isFinite(investmentBB) || investmentBB <= call || investmentBB > packet.hero.stackBB + EPS) {
+      return ["Wager must exceed the call cost and cannot exceed hero's available stack."];
+    }
+    if (!legal.aggressionReopened || legal.opponentStackBB === 0)
+      return ["Aggression is not open or no opponent can match a wager."];
+    if (!near(investmentBB / legal.chipUnitBB, Math.round(investmentBB / legal.chipUnitBB)))
+      return ["Wager is not on the verified chip unit."];
+    const total = legal.heroStreetBetBB + investmentBB;
+    const minimum = call > 0 ? legal.minRaiseToBB : legal.heroStreetBetBB + legal.minBetBB;
+    if (total + EPS < minimum && !near(investmentBB, packet.hero.stackBB))
+      return ["Wager is below the verified legal minimum."];
+    return [];
+  }
+  function generatePolicyCandidates(packet) {
+    const ctx = packet.policyContext;
+    if (packet.table.street === "preflop" || !ctx || !ctx.potVerified || ctx.accounting !== "single_pot_no_rake" || packet.table.numOpponentsRemaining !== 1 || policyContextProblems(packet, ctx).length || !ctx.legal.aggressionReopened)
+      return [];
+    const legal = ctx.legal;
+    const call = packet.facingAction.amountBB ?? 0;
+    if (legal.opponentStackBB === 0 || packet.hero.stackBB <= call)
+      return [];
+    const cap = Math.min(packet.hero.stackBB, call + legal.opponentStackBB);
+    const potAfterCall = packet.table.potBB + call;
+    const spr = potAfterCall > 0 ? (cap - call) / potAfterCall : Infinity;
+    const sizes = [0.25, 0.33, 0.5, 0.67, 0.75, 1].map((fraction) => ({
+      amount: call + fraction * potAfterCall,
+      basis: `${Math.round(fraction * 100)}% of ${call ? "pot after call, plus call cost" : "pot"}`
+    }));
+    sizes.push({ amount: cap, basis: `${near(cap, packet.hero.stackBB) ? "shove" : "effective stack cap"}; SPR ${Number.isFinite(spr) ? spr.toFixed(2) : "undefined"}` });
+    const candidates = /* @__PURE__ */ new Map();
+    for (const size of sizes) {
+      const investmentBB = Number((Math.floor((size.amount + EPS) / legal.chipUnitBB) * legal.chipUnitBB).toFixed(8));
+      if (investmentBB <= call || investmentBB > cap + EPS)
+        continue;
+      const raiseToBB = legal.heroStreetBetBB + investmentBB;
+      const shove = near(investmentBB, packet.hero.stackBB);
+      if (policyWagerProblems(packet, investmentBB).length)
+        continue;
+      const action2 = shove ? "ALL_IN" : call > 0 ? "RAISE" : "BET";
+      candidates.set(investmentBB, {
+        action: action2,
+        investmentBB,
+        raiseToBB,
+        opponentCallBB: investmentBB - call,
+        basis: size.basis
+      });
+    }
+    return [...candidates.values()].sort((a, b) => a.investmentBB - b.investmentBB);
+  }
+  function boundedEV(estimate, formula) {
+    return { evBB: formula(estimate.estimate), lowBB: formula(estimate.low), highBB: formula(estimate.high) };
+  }
+  function evaluateDecisionPolicy(packet) {
+    const result = {
+      version: "v1",
+      status: "unsupported",
+      chosenAction: null,
+      chosenSizeBB: null,
+      raiseToBB: null,
+      actionEVs: [],
+      assumptions: ["Chip EV only; sunk contributions are excluded from incremental cost."],
+      reasons: [],
+      confidence: "low",
+      equitySource: packet.engineCalculations.equitySource ?? "unknown",
+      foldEquitySource: "not supplied",
+      llmMayChoose: true
+    };
+    const stop = (reason) => {
+      result.reasons.push(reason);
+      return result;
+    };
+    const potProblems = potEvidenceProblems(packet);
+    if (potProblems.length) {
+      result.reasons.push(...potProblems);
+      result.llmMayChoose = false;
+      return result;
+    }
+    if (packet.dataConfidence !== "high") {
+      result.llmMayChoose = false;
+      return stop("High table-read confidence is required by this policy.");
+    }
+    if (packet.table.street === "preflop")
+      return stop("Preflop remains on the existing context/fallback path.");
+    if (packet.table.numOpponentsRemaining !== 1)
+      return stop("Multiway action EV and side pots are not modeled in V1.");
+    const expectedBoard = { flop: 3, turn: 4, river: 5 }[packet.table.street];
+    if (packet.table.board.length !== expectedBoard || new Set([...packet.hero.holeCards, ...packet.table.board].map((c) => `${c.rank}${c.suit}`)).size !== expectedBoard + 2) {
+      result.llmMayChoose = false;
+      return stop("Invalid board length or duplicate known cards.");
+    }
+    const ctx = packet.policyContext;
+    if (!ctx)
+      return stop("Policy evidence is absent: pot semantics, legality and uncertainty bounds are required.");
+    if (!ctx.potVerified || ctx.accounting !== "single_pot_no_rake") {
+      result.llmMayChoose = false;
+      return stop("Verified contestable pot, no side pots, and no unmodeled rake are required.");
+    }
+    result.assumptions.push(`Pot accounting: ${ctx.potSource}.`, `Legality: ${ctx.legal.source}.`, "No rake or side pots. Probability bounds are supplied sensitivity bounds, not calibrated confidence intervals.");
+    const problems = policyContextProblems(packet, ctx);
+    if (problems.length) {
+      result.reasons.push(...problems);
+      result.llmMayChoose = false;
+      return result;
+    }
+    const call = packet.facingAction.amountBB ?? 0;
+    const pot = packet.table.potBB;
+    const eq = ctx.equity;
+    if (call > 0)
+      result.actionEVs.push({
+        action: "FOLD",
+        investmentBB: 0,
+        evBB: calculateFoldEV().ev,
+        lowBB: 0,
+        highBB: 0,
+        confidence: "medium",
+        equitySource: "not needed",
+        foldEquitySource: "not needed",
+        assumptions: ["No additional chips invested."]
+      });
+    if (!eq || packet.engineCalculations.equity === void 0 || !near(eq.estimate, packet.engineCalculations.equity) || packet.engineCalculations.equitySource !== "estimated_range" || packet.opponentContext?.rangeStatus !== "modeled") {
+      return stop("A modeled heads-up range, matching equity estimate and explicit uncertainty bounds are required; random-hand equity is not a policy input.");
+    }
+    result.equitySource += `: ${eq.source}`;
+    if (call > 0 && !ctx.terminalAfterCall || call === 0 && (!ctx.checkEndsHand || packet.table.street !== "river")) {
+      return stop("Future betting/equity realization is unmodeled; a check is not automatically worth zero.");
+    }
+    if (call > 0 && packet.table.street !== "river" && ctx.legal.opponentStackBB > 0 && !near(call, packet.hero.stackBB)) {
+      result.llmMayChoose = false;
+      return stop("Calling cannot end betting before the river with chips behind on both sides.");
+    }
+    result.actionEVs.push({
+      action: call > 0 ? "CALL" : "CHECK",
+      investmentBB: call,
+      ...boundedEV(eq, (e) => call > 0 ? calculateCallEV(e, pot, call).ev : e * pot),
+      confidence: eq.confidence,
+      equitySource: eq.source,
+      foldEquitySource: "not needed",
+      assumptions: [call > 0 ? "Call ends betting; showdown equity is fully realized." : "Check ends the hand; EV(check) = equity times pot."]
+    });
+    const candidates = generatePolicyCandidates(packet);
+    if (ctx.legal.aggressionReopened && ctx.legal.opponentStackBB > 0 && packet.hero.stackBB > call && candidates.length === 0) {
+      return stop("No supported aggressive size fits the verified bounds; do not silently exclude aggression.");
+    }
+    for (const candidate of candidates) {
+      const matches = ctx.responses.filter((r) => near(r.investmentBB, candidate.investmentBB));
+      const response = matches.length === 1 ? matches[0] : void 0;
+      const row = {
+        action: candidate.action,
+        investmentBB: candidate.investmentBB,
+        raiseToBB: candidate.raiseToBB,
+        evBB: null,
+        lowBB: null,
+        highBB: null,
+        confidence: "low",
+        equitySource: "not supplied",
+        foldEquitySource: "not supplied",
+        assumptions: [candidate.basis]
+      };
+      result.actionEVs.push(row);
+      if (!response || packet.table.street !== "river") {
+        row.assumptions.push("A unique per-size calling range/fold estimate and a river response model are required.");
+        continue;
+      }
+      const formula = (e, f) => calculateRaiseEV(e, f, pot, candidate.investmentBB, candidate.opponentCallBB).ev;
+      const corners = [response.equityIfCalled.low, response.equityIfCalled.high].flatMap((e) => [response.foldEquity.low, response.foldEquity.high].map((f) => formula(e, f)));
+      Object.assign(row, {
+        evBB: formula(response.equityIfCalled.estimate, response.foldEquity.estimate),
+        lowBB: Math.min(...corners),
+        highBB: Math.max(...corners),
+        confidence: response.equityIfCalled.confidence === "medium" && response.foldEquity.confidence === "medium" ? "medium" : "low",
+        equitySource: `${response.callerRangeBasis}: ${response.equityIfCalled.source}`,
+        foldEquitySource: response.foldEquity.source
+      });
+      row.assumptions.push(response.assumption, "Opponent folds or calls; re-raises excluded by this explicit model.");
+    }
+    if (candidates.length)
+      result.assumptions.push("Conditional river fold-or-call model; only the listed legal sizing grid is compared, not all possible strategies.");
+    if (result.actionEVs.some((row) => row.evBB === null))
+      return stop("Some legal candidates lack a response model. No action is selected from an incomplete comparison.");
+    result.llmMayChoose = false;
+    result.status = "uncertain";
+    if (eq.confidence === "low" || packet.opponentContext?.rangeConfidence !== "medium" || result.actionEVs.some((row) => row.confidence === "low"))
+      return stop("Range or response estimates have low confidence; EV scores are diagnostic only.");
+    const ranked = [...result.actionEVs].sort((a, b) => b.evBB - a.evBB);
+    const best = ranked[0];
+    if (!ranked.slice(1).every((other) => best.lowBB > other.highBB + EPS)) {
+      return stop("EV sensitivity intervals overlap or tie; no robust preference is established.");
+    }
+    if (!packet.candidateActions.includes(best.action))
+      return stop("Selected action conflicts with the supplied candidate list.");
+    result.status = "selected";
+    result.confidence = "medium";
+    result.chosenAction = best.action;
+    result.chosenSizeBB = best.investmentBB > 0 ? best.investmentBB : null;
+    result.raiseToBB = best.raiseToBB ?? null;
+    if (best.action !== "FOLD")
+      result.equitySource = best.equitySource;
+    result.foldEquitySource = best.foldEquitySource;
+    result.assumptions.push(...best.assumptions);
+    result.reasons.push("Selected action's lower EV bound exceeds every other scored action's upper bound.");
+    return result;
+  }
+
   // ../../packages/ai-core/dist/decisionPacket.js
   var CardSchema = external_exports.object({
     rank: external_exports.union([
@@ -5584,10 +5928,10 @@
     hero: external_exports.object({
       holeCards: external_exports.tuple([CardSchema, CardSchema]),
       position: PositionSchema,
-      stackBB: external_exports.number().positive()
+      stackBB: external_exports.number().finite().positive()
     }),
     table: external_exports.object({
-      potBB: external_exports.number().nonnegative(),
+      potBB: external_exports.number().finite().nonnegative(),
       // 0 is valid: the very first action of a hand, before blinds have registered in the main pot display
       board: external_exports.array(CardSchema).max(5),
       street: StreetSchema,
@@ -5595,12 +5939,16 @@
     }),
     facingAction: external_exports.object({
       type: FacingActionSchema,
-      amountBB: external_exports.number().nonnegative().optional()
+      amountBB: external_exports.number().finite().nonnegative().optional()
     }),
     /** Derived via deriveCandidateActions() -- see its doc comment above. */
     candidateActions: external_exports.array(CandidateActionSchema).min(1),
     /** Optional for legacy packets; preflop requests without it yield uncertainty. */
     preflop: PreflopContextSchema.optional(),
+    /** Optional evidence for the conservative deterministic policy; never an LLM action. */
+    policyContext: PolicyContextSchema.optional(),
+    /** Preserved display values/provenance for live packets; not interchangeable pots. */
+    potEvidence: PotEvidenceSchema.optional(),
     engineCalculations: external_exports.object({
       equity: external_exports.number().min(0).max(1).optional(),
       /** Should be present whenever equity is -- see EquitySourceSchema doc comment above. Not schema-enforced as a pair, by convention only. */
@@ -5635,12 +5983,13 @@
     }).optional(),
     /** Explicit confidence flag per Rule 5: never let the AI reason
      *  confidently over uncertain data. */
-    dataConfidence: external_exports.enum(["high", "medium", "low"]).default("high")
+    dataConfidence: external_exports.enum(["high", "medium", "low"]).default("low")
   });
 
   // ../../packages/ai-core/dist/recommendation.js
   var RecommendationSchema = external_exports.object({
     action: external_exports.enum(["FOLD", "CHECK", "CALL", "BET", "RAISE", "ALL_IN"]),
+    /** Additional investment from this decision, in BB; not a total raise-to. */
     sizingBB: external_exports.number().positive().optional(),
     confidence: external_exports.number().min(0).max(1),
     reasoning: external_exports.string().min(1),
@@ -5765,12 +6114,12 @@
     let suit;
     let rank;
     for (const cls of classList) {
-      if (cls in CLASS_SUIT_MAP) {
+      if (Object.hasOwn(CLASS_SUIT_MAP, cls)) {
         if (suit !== void 0 && suit !== CLASS_SUIT_MAP[cls])
           return null;
         suit = CLASS_SUIT_MAP[cls];
       }
-      if (cls in CLASS_RANK_MAP) {
+      if (Object.hasOwn(CLASS_RANK_MAP, cls)) {
         if (rank !== void 0 && rank !== CLASS_RANK_MAP[cls])
           return null;
         rank = CLASS_RANK_MAP[cls];
@@ -5785,7 +6134,11 @@
     h: "h",
     s: "s",
     d: "d",
-    c: "c"
+    c: "c",
+    "\u2660": "s",
+    "\u2665": "h",
+    "\u2666": "d",
+    "\u2663": "c"
   };
   var TEXT_RANK_MAP = {
     "2": 2,
@@ -5797,14 +6150,17 @@
     "8": 8,
     "9": 9,
     "10": 10,
+    T: 10,
     J: 11,
     Q: 12,
     K: 13,
     A: 14
   };
   function parseBoardCardFromText(valueText, suitText) {
-    const rank = TEXT_RANK_MAP[valueText.trim()];
-    const suit = TEXT_SUIT_MAP[suitText.trim().toLowerCase()];
+    const rankKey = valueText.trim().toUpperCase();
+    const suitKey = normalizeSuitText(suitText);
+    const rank = Object.hasOwn(TEXT_RANK_MAP, rankKey) ? TEXT_RANK_MAP[rankKey] : void 0;
+    const suit = Object.hasOwn(TEXT_SUIT_MAP, suitKey) ? TEXT_SUIT_MAP[suitKey] : void 0;
     if (rank === void 0) {
       throw new Error(`Unrecognized board card value text: "${valueText}"`);
     }
@@ -5812,6 +6168,33 @@
       throw new Error(`Unrecognized board card suit text: "${suitText}"`);
     }
     return { rank, suit };
+  }
+  function normalizeSuitText(text) {
+    return text.trim().replace(/[\uFE0E\uFE0F]/g, "").toLowerCase();
+  }
+  function parseBoardCardFromEvidence(evidence) {
+    const ranks = /* @__PURE__ */ new Set();
+    const suits2 = /* @__PURE__ */ new Set();
+    for (const text of evidence.valueTexts) {
+      if (text.trim())
+        ranks.add(parseBoardCardFromText(text, "s").rank);
+    }
+    for (const text of evidence.suitTexts) {
+      if (text.trim())
+        suits2.add(parseBoardCardFromText("2", text).suit);
+    }
+    if (ranks.size > 0 || suits2.size > 0 || evidence.classList.includes("flipped")) {
+      for (const cls of evidence.classList) {
+        if (Object.hasOwn(CLASS_RANK_MAP, cls))
+          ranks.add(CLASS_RANK_MAP[cls]);
+        if (Object.hasOwn(CLASS_SUIT_MAP, cls))
+          suits2.add(CLASS_SUIT_MAP[cls]);
+      }
+    }
+    if (ranks.size !== 1 || suits2.size !== 1) {
+      throw new Error(`Board card needs one consistent rank and suit; found ${ranks.size} rank(s), ${suits2.size} suit(s)`);
+    }
+    return { rank: [...ranks][0], suit: [...suits2][0] };
   }
 
   // ../../packages/browser-reader/dist/tableInfoParsing.js
@@ -5926,7 +6309,7 @@
       isYou: raw.isYou,
       playerName,
       stack,
-      isAllIn: isAllInStackText(raw.stackText),
+      isAllIn: isAllInStackText(raw.stackText) || isAllInStackText(raw.stackContainerText ?? null),
       betReadError: raw.betValueText !== null && parseBetValue(raw.betValueText) === null && !isCheckText(raw.betValueText),
       isFolded,
       isCurrentToAct,
@@ -5992,6 +6375,9 @@
       if (hero.stack === null || !Number.isFinite(hero.stack) || hero.stack < 0) {
         criticalReasons.push("hero stack missing or invalid");
       }
+      if (hero.stack === 0 || hero.isAllIn) {
+        criticalReasons.push("hero has no remaining chips to act with");
+      }
       if (hero.isFolded) {
         criticalReasons.push("hero has already folded -- no decision to make");
       }
@@ -6018,6 +6404,9 @@
     }
     if (!context.potSemanticsVerified) {
       criticalReasons.push("main/add-on pot meaning needs live confirmation -- pot-based recommendations withheld");
+    }
+    if (context.contributionSemanticsVerified === false) {
+      criticalReasons.push("current-bet totals and absent/check markers need live confirmation -- call interpretation is provisional");
     }
     if (context.amountToCall === null || !Number.isFinite(context.amountToCall) || context.amountToCall < 0) {
       criticalReasons.push("amount-to-call is missing or invalid");
@@ -6264,8 +6653,42 @@
     return positions;
   }
 
+  // ../../packages/browser-reader/dist/potSemantics.js
+  function readPotProvenance(raw) {
+    const parse = (text) => {
+      if (text === null)
+        return null;
+      try {
+        return parseChipsValueText(text);
+      } catch {
+        return null;
+      }
+    };
+    return {
+      unit: "chips",
+      mainPot: parse(raw.potMainValueText),
+      displayedTotalPot: parse(raw.potTotalValueText),
+      decisionPot: null,
+      decisionPotSource: null,
+      isPotSemanticsVerified: false
+    };
+  }
+
   // ../../packages/browser-reader/dist/liveState.js
   function assessLiveState(raw, context) {
+    const pot = readPotProvenance(raw);
+    const legality = {
+      verified: false,
+      contributionMeaning: "unverified",
+      minBet: null,
+      minRaiseTo: null,
+      chipUnit: null,
+      aggressionReopened: null,
+      reasons: [
+        "Current-bet totals and absent/check-as-zero need live confirmation.",
+        "Action controls, minimum raise-to, chip unit and reopening rights have no verified reader."
+      ]
+    };
     const blinds = parseBlindValues(context.blindTexts);
     const readErrors = [...context.readErrors];
     if (blinds.smallBlind === null)
@@ -6285,7 +6708,9 @@
         positions: /* @__PURE__ */ new Map(),
         amountToCall: null,
         activeOpponents: null,
-        decisionPot: null,
+        decisionPot: pot.decisionPot,
+        pot,
+        legality,
         confidence: { level: "low", reasons: [...readErrors, error instanceof Error ? error.message : String(error)] }
       };
     }
@@ -6296,16 +6721,148 @@
       amountToCall,
       bigBlindWasDefaulted: blinds.bigBlind === null,
       isPositionKnown: hero !== void 0 && positions.has(hero.seatNumber),
-      potSemanticsVerified: false
+      potSemanticsVerified: pot.isPotSemanticsVerified,
+      contributionSemanticsVerified: false
     });
     return {
       state,
       ...blinds,
       positions,
       amountToCall,
-      decisionPot: null,
+      decisionPot: pot.decisionPot,
+      pot,
+      legality,
       activeOpponents: state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded).length,
       confidence: readErrors.length > 0 ? { level: "low", reasons: [...readErrors, ...confidence.reasons] } : confidence
+    };
+  }
+
+  // ../../packages/browser-reader/dist/legalityProof.js
+  var unknown = (reason) => ({ value: null, status: "unknown", confidence: "low", source: "insufficient evidence", reasons: [reason] });
+  function unknownBettingProof(reason) {
+    return {
+      lastFullRaiseAmount: unknown(reason),
+      fullMinimumRaiseTo: unknown(reason),
+      stackCappedUnderRaiseTo: unknown(reason),
+      actionReopened: unknown(reason)
+    };
+  }
+  function unknownContestablePot(reason) {
+    return { contestablePotBeforeCall: unknown(reason), contestablePotAfterCall: unknown(reason), callCost: unknown(reason), pots: [], uncalledReturns: [] };
+  }
+
+  // ../../packages/browser-reader/dist/liveLegalityEvidence.js
+  var LIVE_LEGALITY_OBSERVATIONS = {
+    source: "User live PokerNow evidence, 2026-10-05",
+    scope: "Observed situations only; no automatic matching by chip amounts",
+    normalRaise: { street: "flop", openingBet: 3, minRaiseButtonResult: 6, displayedBB: "3BB" },
+    stackCappedRaise: { heroContribution: 2, heroRemaining: 23, opposingTotal: 20, allowedRaiseTo: 25 },
+    potDisplay: { collected: 4, streetContributions: 3, displayedTotal: 7 },
+    callGap: { heroContribution: 2, opposingTotal: 8, displayedCall: 6 },
+    unverified: [
+      "Last-full-raise event coverage",
+      "PokerNow reopening after short/cumulative all-ins",
+      "Whole-hand eligibility and side pots",
+      "Uncalled returns and rake/drop"
+    ]
+  };
+  function assessLiveLegalityEvidence(raw, assessment, history) {
+    const state = assessment.state;
+    const seats = state?.seats.filter((s) => s.isOccupied) ?? [];
+    const hero = seats.find((s) => s.isYou);
+    const contributionsKnown = state !== null && seats.length > 0 && seats.every((s) => !s.betReadError && (s.currentBet !== null || s.isChecking));
+    const subtotal = contributionsKnown ? seats.reduce((sum, s) => sum + (s.currentBet ?? 0), 0) : null;
+    const { mainPot, displayedTotalPot } = assessment.pot;
+    const ledgerReason = "Current street snapshots do not contain complete whole-hand contributions, all eligible/folded/departed players, returns or rake evidence.";
+    return {
+      observations: LIVE_LEGALITY_OBSERVATIONS,
+      historyCoverage: {
+        kind: "snapshot_inferred",
+        complete: false,
+        observedEvents: [...history.records.values()].reduce((n, records) => n + records.length, 0),
+        reasons: ["Polling can omit intermediate actions; opponent history omits hero actions.", ...history.notes]
+      },
+      betting: unknownBettingProof("Complete ordered street events including hero and a verified reopening rule profile are unavailable."),
+      contestablePot: unknownContestablePot(ledgerReason),
+      displayReconciliation: {
+        confidence: "observation_only",
+        source: "Current DOM values; arithmetic comparison only, not pot eligibility proof",
+        collectedMainPot: mainPot,
+        displayedTotalPot,
+        currentStreetSubtotal: subtotal,
+        matches: subtotal === null || mainPot === null || displayedTotalPot === null ? null : Math.abs(mainPot + subtotal - displayedTotalPot) < 1e-8,
+        rawMainPotText: raw.potMainValueText,
+        rawDisplayedTotalPotText: raw.potTotalValueText
+      },
+      heroMaximumRaiseTo: {
+        value: hero?.stack != null && !hero.betReadError && (hero.currentBet !== null || hero.isChecking) ? hero.stack + (hero.currentBet ?? 0) : null,
+        source: "Read remaining stack plus explicit street contribution; capacity only, not legal permission",
+        confidence: "observation_only"
+      },
+      activation: { allowed: false, reasons: [
+        ledgerReason,
+        "Full raise and reopening cannot be proven from this history; selected raise-to/slider values do not supply missing proof.",
+        "Existing pot, chip-unit, action-control and policy gates remain in force."
+      ] }
+    };
+  }
+
+  // src/raiseControlRead.ts
+  var RAISE_SELECTORS = {
+    form: "form.raise-controller-form",
+    amount: ".raise-bet-value",
+    input: "input.value",
+    displayedBB: ".bb-value",
+    submit: '.action-buttons input[type="submit"].action-button.bet'
+  };
+  function isControlVisible(element) {
+    for (let node = element; node; node = node.parentElement) {
+      if (node.hasAttribute("hidden")) return false;
+      const style = getComputedStyle(node);
+      if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse") return false;
+    }
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+  function readRaiseControl(root = document, isVisible = isControlVisible) {
+    const issues = [];
+    const forms = [...root.querySelectorAll(RAISE_SELECTORS.form)].filter(isVisible);
+    const form = forms.length === 1 ? forms[0] : null;
+    if (forms.length > 1) issues.push("Multiple visible raise forms");
+    const containers = form ? [...form.querySelectorAll(RAISE_SELECTORS.amount)].filter(isVisible) : [];
+    const container = containers.length === 1 ? containers[0] : null;
+    if (form && containers.length === 0) issues.push("Visible raise form has no visible amount container");
+    if (containers.length > 1) issues.push("Multiple visible raise amount containers");
+    const inputs = container ? [...container.querySelectorAll(RAISE_SELECTORS.input)].filter(isVisible) : [];
+    const input = inputs.length === 1 ? inputs[0] : null;
+    if (container && inputs.length !== 1) issues.push("Expected exactly one visible selected raise-to input");
+    const selectedRaiseToText = input?.value ?? null;
+    let selectedRaiseToChips = null;
+    if (selectedRaiseToText !== null) {
+      try {
+        selectedRaiseToChips = parseChipsValueText(selectedRaiseToText);
+      } catch {
+        issues.push("Selected raise-to amount is unreadable");
+      }
+    }
+    const bbDisplays = container ? [...container.querySelectorAll(RAISE_SELECTORS.displayedBB)].filter(isVisible) : [];
+    if (bbDisplays.length > 1) issues.push("Multiple visible raise BB displays");
+    const submits = form ? [...form.querySelectorAll(RAISE_SELECTORS.submit)].filter(isVisible) : [];
+    const submit = submits.length === 1 ? submits[0] : null;
+    if (form && submits.length !== 1) issues.push("Expected exactly one visible Raise submit control");
+    const raiseSubmitVisible = submit?.value.trim().toLowerCase() === "raise";
+    if (submit && !raiseSubmitVisible) issues.push("Submit control is not labeled Raise");
+    return {
+      formVisible: forms.length > 0,
+      amountControlVisible: containers.length > 0,
+      selectedRaiseToText,
+      selectedRaiseToChips,
+      selectedRaiseToSource: selectedRaiseToChips === null ? null : ".raise-bet-value input.value (live value property)",
+      displayedBBText: bbDisplays.length === 1 ? bbDisplays[0].textContent : null,
+      submitText: submit?.value ?? null,
+      raiseSubmitVisible,
+      raiseSubmitEnabled: raiseSubmitVisible && submit !== null ? !submit.disabled && !submit.hasAttribute("disabled") && !submit.closest('fieldset[disabled], [inert], [aria-disabled="true"]') : null,
+      issues
     };
   }
 
@@ -6314,7 +6871,8 @@
     board: ".table-cards",
     boardCard: ".card-container",
     boardValue: ".value",
-    boardSuit: ".suit",
+    boardSuit: ".suit:not(.sub-suit)",
+    boardAllSuits: ".suit",
     seat: ".table-player-N (N=1..10)",
     name: ".table-player-name a",
     stack: ".table-player-stack .normal-value",
@@ -6337,11 +6895,23 @@
       return matches.length === 1 ? matches[0] : null;
     };
     const board = unique(document, TABLE_SELECTORS.board, "board container", true);
-    const boardCards = [...board?.querySelectorAll(TABLE_SELECTORS.boardCard) ?? []].map((card, index) => ({
-      // Do not drop an incomplete card and derive the wrong street from the survivors.
-      valueText: unique(card, TABLE_SELECTORS.boardValue, `board card ${index + 1} value`, true)?.textContent ?? "",
-      suitText: unique(card, TABLE_SELECTORS.boardSuit, `board card ${index + 1} suit`, true)?.textContent ?? ""
-    }));
+    const boardCardEvidence = [];
+    const boardCards = [...board?.querySelectorAll(TABLE_SELECTORS.boardCard) ?? []].map((card, index) => {
+      const evidence = {
+        classList: [...card.classList],
+        valueTexts: [...card.querySelectorAll(TABLE_SELECTORS.boardValue)].map((node) => node.textContent ?? ""),
+        suitTexts: [...card.querySelectorAll(TABLE_SELECTORS.boardSuit)].map((node) => node.textContent ?? ""),
+        allSuitTexts: [...card.querySelectorAll(TABLE_SELECTORS.boardAllSuits)].map((node) => node.textContent ?? "")
+      };
+      boardCardEvidence.push(evidence);
+      try {
+        const parsed = parseBoardCardFromEvidence(evidence);
+        return { valueText: formatCard(parsed).slice(0, -1), suitText: parsed.suit };
+      } catch (error) {
+        readErrors.push(`board card ${index + 1}: ${error instanceof Error ? error.message : String(error)}`);
+        return { valueText: "", suitText: "" };
+      }
+    });
     const seatEvidence = [];
     const seats = [];
     for (let seatNumber = 1; seatNumber <= 10; seatNumber++) {
@@ -6349,6 +6919,7 @@
       const classes = [...seat?.classList ?? []];
       const name = seat ? unique(seat, TABLE_SELECTORS.name, `seat ${seatNumber} name`, false) : null;
       const stack = seat ? unique(seat, TABLE_SELECTORS.stack, `seat ${seatNumber} stack`, false) : null;
+      const stackContainer = seat ? unique(seat, TABLE_SELECTORS.stackContainer, `seat ${seatNumber} stack container`, false) : null;
       const bet = seat ? unique(seat, TABLE_SELECTORS.bet, `seat ${seatNumber} bet`, false) : null;
       const holeCards = [...seat?.querySelectorAll(TABLE_SELECTORS.holeCard) ?? []];
       const isOccupied = name !== null;
@@ -6361,6 +6932,7 @@
         isYou: classes.includes("you-player"),
         playerNameText: name?.textContent ?? null,
         stackText: stack?.textContent ?? null,
+        stackContainerText: stackContainer?.textContent ?? null,
         statusClasses: classes,
         holeCardClassLists: holeCards.map((card) => [...card.classList]),
         betValueText: bet?.textContent ?? null
@@ -6371,7 +6943,7 @@
         nameFound: name !== null,
         stackValueFound: stack !== null,
         betFound: bet !== null,
-        stackContainerText: seat?.querySelector(TABLE_SELECTORS.stackContainer)?.textContent ?? null,
+        stackContainerText: stackContainer?.textContent ?? null,
         seatText: seat?.textContent ?? null
       });
     }
@@ -6395,10 +6967,12 @@
     return {
       raw,
       context,
+      raiseControl: readRaiseControl(),
       evidence: {
         selectors: TABLE_SELECTORS,
         seatEvidence,
         dealerClasses,
+        boardCardEvidence,
         boardContainerFound: board !== null,
         boardCardElementCount: boardCards.length,
         mainPotFound: main !== null,
@@ -6411,79 +6985,140 @@
   // src/diagnostics.ts
   var DIAGNOSTICS_KEY = "poker-ai:diagnostics";
   var lastSnapshot = null;
-  function logLiveDiagnostics(read, assessment, history, preflop = null) {
-    let enabled = false;
-    try {
-      enabled = localStorage.getItem(DIAGNOSTICS_KEY) === "1";
-    } catch {
-    }
-    if (!enabled) {
-      lastSnapshot = null;
-      return;
-    }
+  function buildLiveDiagnosticSnapshot(read, assessment, history, preflop = null, packet = null, unclassifiedControls = []) {
     const seats = assessment.state?.seats ?? [];
-    const snapshot = {
+    const seatRow = (seat) => {
+      const raw = read.raw.seats.find((row) => row.seatNumber === seat.seatNumber);
+      return {
+        seat: seat.seatNumber,
+        player: seat.playerName,
+        position: assessment.positions.get(seat.seatNumber) ?? null,
+        stack: seat.stack,
+        currentBet: seat.currentBet,
+        stackText: raw?.stackText ?? null,
+        currentBetText: raw?.betValueText ?? null,
+        isAllIn: seat.isAllIn ?? false,
+        isFolded: seat.isFolded,
+        isOffline: seat.isOffline,
+        isCurrentToAct: seat.isCurrentToAct,
+        isChecking: seat.isChecking,
+        betReadError: seat.betReadError ?? false
+      };
+    };
+    const hero = seats.find((s) => s.isOccupied && s.isYou);
+    const opponents = seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded);
+    const occupied = seats.filter((s) => s.isOccupied);
+    const policy = packet ? evaluateDecisionPolicy(packet) : null;
+    return {
+      version: 2,
+      parsedStateAvailable: assessment.state !== null,
+      units: { read: "chips", decisionPacket: "BB", candidateSizes: "additional BB; raiseToBB is total street BB" },
+      street: assessment.state?.street ?? null,
+      board: assessment.state ? formatCards(assessment.state.board) : null,
+      hero: hero ? seatRow(hero) : null,
+      activeOpponents: opponents.map(seatRow),
+      seats: occupied.map(seatRow),
+      monetary: {
+        rawMainPotText: read.raw.potMainValueText,
+        rawDisplayedTotalPotText: read.raw.potTotalValueText,
+        potContainerText: read.evidence.potContainerText,
+        ...assessment.pot,
+        calculatedAmountToCall: assessment.amountToCall,
+        amountToCallMeaning: "uncapped opposing contribution gap; totals and absent/check-as-zero are unverified",
+        highestActiveOpposingContribution: !assessment.state || opponents.some((s) => s.betReadError) ? null : Math.max(0, ...opponents.map((s) => s.currentBet ?? 0)),
+        knownNumericBetSubtotalIncludingFolded: assessment.state ? occupied.reduce((sum, s) => sum + (s.currentBet ?? 0), 0) : null,
+        betSubtotalHasUnknowns: !assessment.state || occupied.some((s) => s.currentBet === null || s.betReadError),
+        // Folded money still belongs to the pot; it is excluded only from the call target.
+        foldedNumericBetSubtotal: assessment.state ? occupied.filter((s) => s.isFolded).reduce((sum, s) => sum + (s.currentBet ?? 0), 0) : null,
+        smallBlind: assessment.smallBlind,
+        bigBlind: assessment.bigBlind,
+        rawBlindTexts: read.context.blindTexts,
+        allInCallCostIfGapIsCorrect: hero?.stack == null || assessment.amountToCall === null ? null : Math.min(hero.stack, assessment.amountToCall)
+      },
+      legality: {
+        ...assessment.legality,
+        proof: assessLiveLegalityEvidence(read.raw, assessment, history),
+        raiseControl: read.raiseControl,
+        unclassifiedControls,
+        controlsMeaning: "Selected raise-to is input evidence, not a legal minimum. Slider attributes and unclassified controls do not verify legality."
+      },
+      decision: {
+        packetBuilt: packet !== null,
+        decisionPotActuallyUsedBB: packet?.table.potBB ?? null,
+        packetAmountToCallBB: packet?.facingAction.amountBB ?? null,
+        policyPotActuallyUsedBB: packet?.policyContext?.potVerified && policy && policy.actionEVs.some((row) => row.action !== "FOLD" && row.evBB !== null) ? packet.table.potBB : null,
+        candidateActionSizes: packet ? generatePolicyCandidates(packet) : [],
+        candidateSizeStatus: packet?.policyContext ? "see policy reasons and verified bounds" : "withheld: no verified policy legality/pot inputs",
+        policy,
+        potEvidence: packet?.potEvidence ?? null,
+        engineCalculations: packet?.engineCalculations ?? null
+      },
+      confidence: assessment.confidence,
       preflop,
       raw: read.raw,
       evidence: read.evidence,
       context: read.context,
       actionHistory: { records: Object.fromEntries(history.records), observation: history.observation, notes: history.notes },
-      parsed: {
-        ...assessment,
-        positions: Object.fromEntries(assessment.positions),
-        boardCards: assessment.state ? formatCards(assessment.state.board) : null,
-        currentToActSeats: seats.filter((seat) => seat.isCurrentToAct).map((seat) => seat.seatNumber)
-      },
       assumptions: {
-        pot: "UNVERIFIED: main and add-on preserved separately; decisionPot is null; no pot odds or recommendations",
-        positions: "UNVERIFIED: ascending seat numbers wrap clockwise; folded occupied seats retain positions",
-        bets: "Absent/check indicators count as zero; confirm against the visible call button; call gap is not stack-capped",
-        street: "Derived from parsed board count; not independently read from PokerNow",
-        opponents: "Occupied and non-folded; includes all-in and offline players; sitting-out semantics need live confirmation"
+        pot: "Total = collected + street contributions was observed live; hero eligibility, returns and side pots still require proof before EV use.",
+        positions: "Ascending seat numbers assumed clockwise; verify against dealer and screen.",
+        bets: "Absent/check indicators retain the existing zero interpretation. Other action words are unknown. Confirm against controls.",
+        street: "Derived from board count; not independently read from PokerNow.",
+        opponents: "Occupied and non-folded, including offline/all-in; sitting-out semantics still unverified."
       }
     };
-    const serialized = JSON.stringify(snapshot);
-    if (serialized === lastSnapshot) return;
-    lastSnapshot = serialized;
-    console.groupCollapsed(`[Poker AI State] ${(/* @__PURE__ */ new Date()).toISOString()} | ${assessment.state?.street ?? "unreadable"} | confidence=${assessment.confidence.level}`);
-    console.log("Snapshot (raw selectors -> parsed fields -> confidence)", JSON.parse(serialized));
-    console.table([...history.records.values()].flat());
-    console.table(read.raw.seats.map((raw) => {
-      const seat = seats.find((s) => s.seatNumber === raw.seatNumber);
-      return {
-        seat: raw.seatNumber,
-        player: seat?.playerName ?? raw.playerNameText,
-        occupied: raw.isOccupied,
-        hero: raw.isYou,
-        position: assessment.positions.get(raw.seatNumber) ?? "unknown",
-        dealer: raw.seatNumber === read.context.dealerSeatNumber,
-        stackText: raw.stackText,
-        stack: seat?.stack ?? null,
-        allIn: seat?.isAllIn ?? false,
-        betText: raw.betValueText,
-        currentBet: seat?.currentBet ?? null,
-        betUnreadable: seat?.betReadError ?? null,
-        cards: seat ? formatCards(seat.holeCards) : "unreadable",
-        folded: seat?.isFolded ?? null,
-        toAct: seat?.isCurrentToAct ?? null,
-        offline: seat?.isOffline ?? null
-      };
+  }
+  function readUnclassifiedControls() {
+    return [...document.querySelectorAll('button, [role="button"], input[type="number"], input[type="range"]')].filter((el) => {
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && getComputedStyle(el).visibility !== "hidden";
+    }).map((el) => ({
+      tag: el.tagName,
+      text: el.textContent?.trim() ?? "",
+      ariaLabel: el.getAttribute("aria-label"),
+      disabled: el.hasAttribute("disabled"),
+      ariaDisabled: el.getAttribute("aria-disabled"),
+      type: el.getAttribute("type"),
+      value: el instanceof HTMLInputElement ? el.value : null,
+      min: el.getAttribute("min"),
+      max: el.getAttribute("max"),
+      step: el.getAttribute("step")
     }));
-    console.log("Pot comparison", {
-      mainText: read.raw.potMainValueText,
-      main: assessment.state?.potMainValue ?? null,
-      addOnText: read.raw.potTotalValueText,
-      addOn: assessment.state?.potTotalValue ?? null,
-      knownCurrentBetSubtotal: assessment.state ? seats.filter((s) => s.isOccupied).reduce((sum, s) => sum + (s.currentBet ?? 0), 0) : null,
-      currentBetSumHasUnknowns: seats.some((s) => s.betReadError),
-      amountToCall: assessment.amountToCall,
-      smallBlind: assessment.smallBlind,
-      bigBlind: assessment.bigBlind,
-      activeOpponents: assessment.activeOpponents,
-      decisionPot: assessment.decisionPot
-    });
-    console.log("Copyable snapshot JSON", JSON.stringify({ capturedAt: (/* @__PURE__ */ new Date()).toISOString(), ...snapshot }));
+  }
+  function logLiveDiagnostics(read, assessment, history, preflop = null, packet = null) {
+    let mode = null;
+    try {
+      mode = localStorage.getItem(DIAGNOSTICS_KEY);
+    } catch {
+    }
+    if (mode !== "1" && mode !== "once") {
+      lastSnapshot = null;
+      return;
+    }
+    const snapshot = buildLiveDiagnosticSnapshot(read, assessment, history, preflop, packet, readUnclassifiedControls());
+    const serialized = JSON.stringify(snapshot);
+    if (mode !== "once" && serialized === lastSnapshot) return;
+    lastSnapshot = serialized;
+    const captured = { capturedAt: (/* @__PURE__ */ new Date()).toISOString(), ...JSON.parse(serialized) };
+    console.groupCollapsed("[Poker AI State] " + captured.capturedAt + " | " + snapshot.street + " | confidence=" + assessment.confidence.level);
+    console.log("Monetary/legality snapshot", captured);
+    console.table(snapshot.seats);
+    console.log("Copyable snapshot JSON", JSON.stringify(captured));
     console.groupEnd();
+    if (mode === "once") {
+      try {
+        localStorage.removeItem(DIAGNOSTICS_KEY);
+      } catch {
+      }
+    }
+  }
+
+  // src/requestIdentity.ts
+  function decisionFingerprint(tableUrl, raw, context, raiseControl) {
+    return JSON.stringify({ tableUrl, raw, context, raiseControl });
+  }
+  function decisionRequestKey(epoch, fingerprint) {
+    return `${epoch}:${fingerprint}`;
   }
 
   // src/contentScript.ts
@@ -6494,6 +7129,7 @@
     potOddsLine: null,
     preflopLine: null,
     opponentStatsLine: null,
+    policyLine: null,
     aiStatus: "idle",
     aiResult: null,
     aiWarnings: []
@@ -6553,6 +7189,7 @@
     parts.push(
       `<div style="color:${AI_STATUS_COLORS[s.aiStatus]}; font-weight:600;">${escapeHtml(s.aiStatus.toUpperCase())}</div>`
     );
+    if (s.policyLine) parts.push(`<div>${escapeHtml(s.policyLine)}</div>`);
     if (s.aiResult) {
       parts.push(`<div style="font-size:16px; font-weight:700; margin:4px 0;">${escapeHtml(s.aiResult.action)}</div>`);
       parts.push(`<div>Confidence: ${(s.aiResult.confidence * 100).toFixed(0)}%</div>`);
@@ -6575,6 +7212,7 @@
       equitySource,
       bigBlind,
       decisionPot,
+      potProvenance,
       confidence,
       heroPosition,
       opponentRangeContext
@@ -6583,7 +7221,7 @@
     const numOpponentsRemaining = state.seats.filter(
       (s) => s.isOccupied && !s.isYou && !s.isFolded
     ).length;
-    if (confidence.level === "low" || hero.stack === null || !Number.isFinite(bigBlind) || bigBlind <= 0) {
+    if (confidence.level === "low" || hero.stack === null || !Number.isFinite(bigBlind) || bigBlind <= 0 || !potProvenance.isPotSemanticsVerified || potProvenance.decisionPotSource === null || potProvenance.decisionPot !== decisionPot) {
       throw new Error("Cannot build a DecisionPacket from an untrusted table read");
     }
     console.log(
@@ -6594,11 +7232,12 @@
     let callEV;
     if (amountToCall > 0 && decisionPot > 0) {
       potOddsBreakevenPercent = calculatePotOdds(decisionPot, amountToCall).breakevenEquityPercent;
-      if (equity !== void 0) callEV = calculateCallEV(equity, decisionPot, amountToCall).ev;
+      if (equity !== void 0) callEV = calculateCallEV(equity, decisionPot / bigBlind, amountToCall / bigBlind).ev;
     }
     let spr;
-    if (hero.stack !== null && decisionPot > 0) {
-      spr = calculateSPR(hero.stack, decisionPot);
+    const headsUpOpponent = numOpponentsRemaining === 1 ? state.seats.find((s) => s.isOccupied && !s.isYou && !s.isFolded) : void 0;
+    if (hero.stack !== null && hero.stack > 0 && headsUpOpponent?.stack != null && headsUpOpponent.stack > 0 && decisionPot > 0) {
+      spr = calculateSPR(Math.min(hero.stack, headsUpOpponent.stack), decisionPot);
     }
     let outs;
     if (state.board.length === 3 || state.board.length === 4) {
@@ -6625,6 +7264,10 @@
         ...amountToCall > 0 ? { amountBB: amountToCall / bigBlind } : {}
       },
       candidateActions: deriveCandidateActions(facingActionType),
+      potEvidence: { ...potProvenance, bigBlind },
+      // policyContext intentionally absent until live pot/legality and range
+      // uncertainty evidence are verified. The relay reports explicit fallback
+      // eligibility; never invent fold equity or exact raise controls here.
       engineCalculations: {
         equity,
         equitySource,
@@ -6642,6 +7285,7 @@
     try {
       const response = await fetch(RELAY_SERVER_URL, {
         method: "POST",
+        signal: AbortSignal.timeout(7e4),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode: "fast", decisionPacket: packet })
       });
@@ -6652,20 +7296,39 @@
         );
         return;
       }
+      const latest = readLiveTable();
+      const latestFingerprint = decisionFingerprint(location.origin + location.pathname, latest.raw, latest.context, latest.raiseControl);
+      if (requestKey !== decisionRequestKey(requestSequence, latestFingerprint)) {
+        lastRecommendationRequestKey = null;
+        overlayState.aiResult = null;
+        overlayState.aiStatus = "blocked";
+        overlayState.policyLine = null;
+        overlayState.aiWarnings = ["Table changed while the recommendation was pending."];
+        overlayState.equityLine = null;
+        overlayState.potOddsLine = null;
+        overlayState.preflopLine = null;
+        renderOverlay();
+        return;
+      }
+      overlayState.policyLine = data.policy ? `Decision: ${data.decisionSource}; policy ${data.policy.status} (${data.policy.confidence} confidence)` : null;
+      if (data.policy) console.log("[Poker AI Reader] Engine policy evidence:", data.policy);
       if (data.ok && data.result === null && data.blocked) {
         overlayState.aiResult = null;
         overlayState.aiStatus = "blocked";
-        overlayState.aiWarnings = data.uncertainty ?? [data.blockedReason];
+        overlayState.aiWarnings = data.uncertainty ?? [data.originalReason ?? data.blockedReason];
       } else if (data.ok) {
+        if (!response.ok || Array.isArray(data.result)) throw new Error("Invalid live relay response");
+        data.result = RecommendationSchema.parse(data.result);
         console.log(`[Poker AI Reader] AI recommendation (for: ${stateDescription}):`, data.result);
         overlayState.aiResult = {
-          action: data.result.action,
+          action: data.result.action + (data.result.sizingBB === void 0 ? "" : ` ${data.result.sizingBB}BB${data.decisionSource === "engine_policy" ? " additional" : ""}`) + (data.policy?.raiseToBB == null ? "" : ` (to ${data.policy.raiseToBB}BB)`),
           confidence: data.result.confidence,
           reasoning: data.result.reasoning
         };
         overlayState.aiWarnings = [
           ...data.blocked ? [`Blocked: ${data.blockedReason}${data.originalReason ? ` -- ${data.originalReason}` : ""}`] : [],
           ...data.consistencyWarnings ?? [],
+          ...data.policy?.reasons ?? [],
           ...packet.opponentContext?.rangeConfidence === "low" ? ["Opponent range confidence: low", ...packet.opponentContext.rangeAssumptions ?? [], ...packet.opponentContext.rangeFallbacks ?? []] : []
         ];
         overlayState.aiStatus = data.blocked ? "blocked" : "received";
@@ -6681,7 +7344,8 @@
       if (requestKey === lastRecommendationRequestKey) {
         overlayState.aiStatus = "error";
         overlayState.aiResult = null;
-        overlayState.aiWarnings = ["Failed to reach relay server -- is it running?"];
+        overlayState.policyLine = null;
+        overlayState.aiWarnings = ["Relay request failed, timed out, or returned an invalid response."];
         renderOverlay();
       }
     }
@@ -6692,178 +7356,209 @@
   var lastRecommendationRequestKey = null;
   var previousGameState = null;
   var actionHistory = emptyActionHistory();
+  var currentDiagnosticPacket = null;
   setInterval(() => {
-    const read = readLiveTable();
-    const assessment = assessLiveState(read.raw, read.context);
-    const stateJson = JSON.stringify({ raw: read.raw, context: read.context });
-    if (stateJson !== lastStateJson) {
-      const state = assessment.state;
-      if (!state || read.context.readErrors.length > 0) {
-        previousGameState = null;
-        actionHistory = emptyActionHistory();
-        opponentStats.observe(null, actionHistory);
-      } else {
-        actionHistory = updateActionHistory(actionHistory, previousGameState, state, {
-          bigBlind: assessment.bigBlind,
-          dealerSeatNumber: read.context.dealerSeatNumber
-        });
-        previousGameState = state;
-        opponentStats.observe(state, actionHistory);
+    try {
+      const read = readLiveTable();
+      const assessment = assessLiveState(read.raw, read.context);
+      const stateJson = decisionFingerprint(location.origin + location.pathname, read.raw, read.context, read.raiseControl);
+      if (stateJson !== lastStateJson) {
+        currentDiagnosticPacket = null;
+        const state = assessment.state;
+        if (!state || read.context.readErrors.length > 0) {
+          previousGameState = null;
+          actionHistory = emptyActionHistory();
+          opponentStats.observe(null, actionHistory);
+        } else {
+          actionHistory = updateActionHistory(actionHistory, previousGameState, state, {
+            bigBlind: assessment.bigBlind,
+            dealerSeatNumber: read.context.dealerSeatNumber
+          });
+          previousGameState = state;
+          opponentStats.observe(state, actionHistory);
+        }
       }
-    }
-    opponentStats.tick();
-    const preflop = buildLivePreflopContext(assessment, actionHistory);
-    logLiveDiagnostics(read, assessment, actionHistory, preflop);
-    if (stateJson !== lastStateJson) {
-      lastStateJson = stateJson;
-      lastRecommendationRequestKey = null;
-      requestSequence++;
-      const { state, confidence, bigBlind, amountToCall, positions, decisionPot } = assessment;
-      overlayState.street = state?.street ?? "unreadable";
-      overlayState.opponentStatsLine = state ? state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded).map((s) => {
-        const evidence = opponentStats.profile(s.playerName);
-        return s.playerName + ": " + (evidence ? evidence.playerProfile.handsObserved + " observed windows / " + evidence.playerProfile.eligibleHands + " eligible hands (" + evidence.statsStorage + ")" : "identity ambiguous");
-      }).join("; ") : null;
-      overlayState.aiResult = null;
-      overlayState.equityLine = null;
-      overlayState.potOddsLine = null;
-      overlayState.preflopLine = null;
-      overlayState.aiWarnings = confidence.reasons;
-      overlayState.aiStatus = "blocked";
-      renderOverlay();
-      if (!state) return;
-      const hero = state.seats.find((s) => s.isYou);
-      const heroPosition = hero ? positions.get(hero.seatNumber) : void 0;
-      if (preflop) {
-        overlayState.preflopLine = "Preflop: " + preflop.situation + (preflop.decisionSupport === "uncertain" ? " - insufficient strategic model / uncertain" : "");
-        overlayState.aiWarnings = [...confidence.reasons, ...preflop.reasons];
+      opponentStats.tick();
+      const preflop = buildLivePreflopContext(assessment, actionHistory);
+      logLiveDiagnostics(read, assessment, actionHistory, preflop, currentDiagnosticPacket);
+      if (stateJson !== lastStateJson) {
+        lastStateJson = stateJson;
+        lastRecommendationRequestKey = null;
+        requestSequence++;
+        const { state, confidence, bigBlind, amountToCall, positions, decisionPot } = assessment;
+        overlayState.street = state?.street ?? "unreadable";
+        overlayState.opponentStatsLine = state ? state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded).map((s) => {
+          const evidence = opponentStats.profile(s.playerName);
+          return s.playerName + ": " + (evidence ? evidence.playerProfile.handsObserved + " observed windows / " + evidence.playerProfile.eligibleHands + " eligible hands (" + evidence.statsStorage + ")" : "identity ambiguous");
+        }).join("; ") : null;
+        overlayState.aiResult = null;
+        overlayState.policyLine = null;
+        overlayState.equityLine = null;
+        overlayState.potOddsLine = null;
+        overlayState.preflopLine = null;
+        overlayState.aiWarnings = confidence.reasons;
+        overlayState.aiStatus = "blocked";
         renderOverlay();
-      }
-      if (confidence.level === "low" || !hero || hero.stack === null || bigBlind === null || amountToCall === null || decisionPot === null || heroPosition === void 0) return;
-      overlayState.aiStatus = "idle";
-      if (state.street === "preflop") {
-        if (!preflop) {
-          overlayState.aiStatus = "blocked";
-          overlayState.aiWarnings = ["Structured preflop context is unavailable."];
+        if (!state) return;
+        const hero = state.seats.find((s) => s.isYou);
+        const heroPosition = hero ? positions.get(hero.seatNumber) : void 0;
+        if (preflop) {
+          overlayState.preflopLine = "Preflop: " + preflop.situation + (preflop.decisionSupport === "uncertain" ? " - insufficient strategic model / uncertain" : "");
+          overlayState.aiWarnings = [...confidence.reasons, ...preflop.reasons];
+          renderOverlay();
+        }
+        if (confidence.level === "low" || !hero || hero.stack === null || bigBlind === null || amountToCall === null || decisionPot === null || heroPosition === void 0 || !assessment.pot.isPotSemanticsVerified || assessment.pot.decisionPotSource === null) return;
+        overlayState.aiStatus = "idle";
+        if (state.street === "preflop") {
+          if (!preflop) {
+            overlayState.aiStatus = "blocked";
+            overlayState.aiWarnings = ["Structured preflop context is unavailable."];
+            renderOverlay();
+            return;
+          }
+          const facing = amountToCall > 0 ? "raise" : "none";
+          const packet = {
+            hero: { holeCards: hero.holeCards, position: heroPosition, stackBB: hero.stack / bigBlind },
+            table: { potBB: decisionPot / bigBlind, board: [], street: "preflop", numOpponentsRemaining: preflop.activeOpponents },
+            facingAction: { type: facing, ...amountToCall > 0 ? { amountBB: amountToCall / bigBlind } : {} },
+            candidateActions: deriveCandidateActions(facing),
+            engineCalculations: {},
+            dataConfidence: confidence.level,
+            preflop,
+            potEvidence: { ...assessment.pot, bigBlind },
+            opponentContext: { opponents: state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded).map((s) => ({ seat: s.seatNumber, position: positions.get(s.seatNumber) ?? null, rangeBasis: "Preflop context remains uncertain", rangeConfidence: "low", rangeStatus: "prior_only", ...opponentStats.profile(s.playerName) ?? {} })) }
+          };
+          const uncertainty = preflopUncertainty(packet);
+          overlayState.preflopLine = "Preflop: " + preflop.situation;
+          if (uncertainty) {
+            overlayState.aiStatus = "blocked";
+            overlayState.aiWarnings = uncertainty;
+          } else if (hero.isCurrentToAct && hero.holeCards.length === 2) {
+            const requestKey = decisionRequestKey(requestSequence, stateJson);
+            lastRecommendationRequestKey = requestKey;
+            overlayState.aiStatus = "waiting";
+            overlayState.policyLine = null;
+            currentDiagnosticPacket = packet;
+            logLiveDiagnostics(read, assessment, actionHistory, preflop, packet);
+            requestRecommendation(packet, "structured preflop", requestKey);
+          }
           renderOverlay();
           return;
         }
-        const facing = amountToCall > 0 ? "raise" : "none";
-        const packet = {
-          hero: { holeCards: hero.holeCards, position: heroPosition, stackBB: hero.stack / bigBlind },
-          table: { potBB: decisionPot / bigBlind, board: [], street: "preflop", numOpponentsRemaining: preflop.activeOpponents },
-          facingAction: { type: facing, ...amountToCall > 0 ? { amountBB: amountToCall / bigBlind } : {} },
-          candidateActions: deriveCandidateActions(facing),
-          engineCalculations: {},
-          dataConfidence: confidence.level,
-          preflop,
-          opponentContext: { opponents: state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded).map((s) => ({ seat: s.seatNumber, position: positions.get(s.seatNumber) ?? null, rangeBasis: "Preflop context remains uncertain", rangeConfidence: "low", rangeStatus: "prior_only", ...opponentStats.profile(s.playerName) ?? {} })) }
-        };
-        const uncertainty = preflopUncertainty(packet);
-        overlayState.preflopLine = "Preflop: " + preflop.situation;
-        if (uncertainty) {
-          overlayState.aiStatus = "blocked";
-          overlayState.aiWarnings = uncertainty;
-        } else if (hero.isCurrentToAct && hero.holeCards.length === 2) {
-          const requestKey = requestSequence + ":" + stateJson;
-          lastRecommendationRequestKey = requestKey;
-          overlayState.aiStatus = "waiting";
-          requestRecommendation(packet, "structured preflop", requestKey);
-        }
-        renderOverlay();
-        return;
-      }
-      if (hero && hero.holeCards.length === 2) {
-        const numOpponents = state.seats.filter(
-          (s) => s.isOccupied && !s.isYou && !s.isFolded
-        ).length;
-        if (numOpponents >= 1) {
-          const opponents = state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded);
-          const estimates = opponents.map((opponent) => {
-            const records = actionHistory.records.get(opponent.seatNumber) ?? [];
-            return estimateOpponentRange({
-              position: positions.get(opponent.seatNumber) ?? null,
-              // Missing hero actions prevent counting observed raises as a complete sequence.
-              actions: records.map((r) => ({
-                street: r.street,
-                action: r.action,
-                priorRaises: null,
-                facing: "unknown",
-                wagerAction: r.wagerAction,
-                observation: r.observation
-              })),
-              historyCoverage: "partial",
-              effectiveStackBB: null,
-              playersDealtIn: null,
-              chipEvOnly: false,
-              knownCards: [...hero.holeCards, ...state.board],
-              tendencies: opponentStats.profile(opponent.playerName)?.playerProfile.stats
-            });
-          });
-          const selection = calculateEquityForEstimates(hero.holeCards, estimates, state.board, { iterations: 3e3 });
-          const equityResult = selection.equity === void 0 ? void 0 : { equity: selection.equity };
-          const equitySource = selection.source;
-          const opponentRangeContext = {
-            estimatedRangeDescription: estimates.map((estimate, i) => "Seat " + opponents[i].seatNumber + ": " + estimate.basis).join("; "),
-            rangeConfidence: selection.reason || estimates.some((e) => e.confidence === "low") ? "low" : "medium",
-            rangeStatus: selection.equity === void 0 ? "unavailable" : estimates.every((e) => e.status === "modeled") ? "modeled" : "prior_only",
-            rangeAssumptions: [
-              ...actionHistory.notes,
-              ...estimates.flatMap((e, i) => e.assumptions.map((reason) => "Seat " + opponents[i].seatNumber + ": " + reason)),
-              ...opponents.length > 1 ? ["Multiway equity is showdown share of one common pot; side pots and future betting are not modeled."] : []
-            ],
-            rangeFallbacks: [...estimates.flatMap((e, i) => e.fallbacks.map((reason) => "Seat " + opponents[i].seatNumber + ": " + reason)), ...selection.reason ? [selection.reason] : []],
-            opponents: estimates.map((estimate, i) => ({
-              seat: opponents[i].seatNumber,
-              position: positions.get(opponents[i].seatNumber) ?? null,
-              rangeBasis: estimate.basis,
-              rangeConfidence: estimate.confidence,
-              rangeStatus: estimate.status,
-              ...opponentStats.profile(opponents[i].playerName) ?? {}
-            }))
-          };
-          overlayState.aiWarnings = [opponentRangeContext.estimatedRangeDescription, ...opponentRangeContext.rangeAssumptions, ...opponentRangeContext.rangeFallbacks];
-          const equityLabel = equitySource === "estimated_multiway_ranges" ? "vs distinct opponent ranges; heuristic" : equitySource === "estimated_range" ? "vs estimated range; heuristic" : "vs random hands; ranges unavailable";
-          overlayState.equityLine = equityResult ? "Equity: " + (equityResult.equity * 100).toFixed(1) + "% (" + equityLabel + ")" : "Equity unavailable: opponent range is uncertain";
-          if (amountToCall > 0 && decisionPot > 0) {
-            const potOdds = calculatePotOdds(decisionPot, amountToCall);
-            console.log(
-              `[Poker AI Reader] Amount to call: ${amountToCall}. Breakeven equity needed: ${potOdds.breakevenEquityPercent.toFixed(1)}%`
-            );
-            overlayState.potOddsLine = `To call: ${amountToCall} (breakeven: ${potOdds.breakevenEquityPercent.toFixed(1)}%)`;
-          } else if (amountToCall === 0) {
-            console.log("[Poker AI Reader] No bet facing hero (check or already matched) -- pot odds not applicable.");
-            overlayState.potOddsLine = null;
-          }
-          renderOverlay();
-          if (hero.isCurrentToAct) {
-            const requestKey = `${requestSequence}:${stateJson}`;
-            if (requestKey !== lastRecommendationRequestKey) {
-              lastRecommendationRequestKey = requestKey;
-              overlayState.aiStatus = "waiting";
-              overlayState.aiResult = null;
-              overlayState.aiWarnings = opponentRangeContext ? [opponentRangeContext.estimatedRangeDescription ?? "", ...opponentRangeContext.rangeAssumptions ?? [], ...opponentRangeContext.rangeFallbacks ?? []] : [];
-              renderOverlay();
-              const packet = buildDecisionPacket({
-                state,
-                amountToCall,
-                equity: equityResult?.equity,
-                equitySource,
-                bigBlind,
-                decisionPot,
-                confidence,
-                heroPosition,
-                opponentRangeContext
+        if (hero && hero.holeCards.length === 2) {
+          const numOpponents = state.seats.filter(
+            (s) => s.isOccupied && !s.isYou && !s.isFolded
+          ).length;
+          if (numOpponents >= 1) {
+            const opponents = state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded);
+            const estimates = opponents.map((opponent) => {
+              const records = actionHistory.records.get(opponent.seatNumber) ?? [];
+              return estimateOpponentRange({
+                position: positions.get(opponent.seatNumber) ?? null,
+                // Missing hero actions prevent counting observed raises as a complete sequence.
+                actions: records.map((r) => ({
+                  street: r.street,
+                  action: r.action,
+                  priorRaises: null,
+                  facing: "unknown",
+                  wagerAction: r.wagerAction,
+                  observation: r.observation
+                })),
+                historyCoverage: "partial",
+                effectiveStackBB: null,
+                playersDealtIn: null,
+                chipEvOnly: false,
+                knownCards: [...hero.holeCards, ...state.board],
+                tendencies: opponentStats.profile(opponent.playerName)?.playerProfile.stats
               });
-              console.log(`[Poker AI Reader] Big blind detected: ${bigBlind}. Hero stackBB: ${packet.hero.stackBB.toFixed(2)}. Facing amountBB: ${packet.facingAction.amountBB?.toFixed(2) ?? "n/a"}`);
+            });
+            const selection = calculateEquityForEstimates(hero.holeCards, estimates, state.board, { iterations: 3e3 });
+            const equityResult = selection.equity === void 0 ? void 0 : { equity: selection.equity };
+            const equitySource = selection.source;
+            const opponentRangeContext = {
+              estimatedRangeDescription: estimates.map((estimate, i) => "Seat " + opponents[i].seatNumber + ": " + estimate.basis).join("; "),
+              rangeConfidence: selection.reason || estimates.some((e) => e.confidence === "low") ? "low" : "medium",
+              rangeStatus: selection.equity === void 0 ? "unavailable" : estimates.every((e) => e.status === "modeled") ? "modeled" : "prior_only",
+              rangeAssumptions: [
+                ...actionHistory.notes,
+                ...estimates.flatMap((e, i) => e.assumptions.map((reason) => "Seat " + opponents[i].seatNumber + ": " + reason)),
+                ...opponents.length > 1 ? ["Multiway equity is showdown share of one common pot; side pots and future betting are not modeled."] : []
+              ],
+              rangeFallbacks: [...estimates.flatMap((e, i) => e.fallbacks.map((reason) => "Seat " + opponents[i].seatNumber + ": " + reason)), ...selection.reason ? [selection.reason] : []],
+              opponents: estimates.map((estimate, i) => ({
+                seat: opponents[i].seatNumber,
+                position: positions.get(opponents[i].seatNumber) ?? null,
+                rangeBasis: estimate.basis,
+                rangeConfidence: estimate.confidence,
+                rangeStatus: estimate.status,
+                ...opponentStats.profile(opponents[i].playerName) ?? {}
+              }))
+            };
+            overlayState.aiWarnings = [opponentRangeContext.estimatedRangeDescription, ...opponentRangeContext.rangeAssumptions, ...opponentRangeContext.rangeFallbacks];
+            const equityLabel = equitySource === "estimated_multiway_ranges" ? "vs distinct opponent ranges; heuristic" : equitySource === "estimated_range" ? "vs estimated range; heuristic" : "vs random hands; ranges unavailable";
+            overlayState.equityLine = equityResult ? "Equity: " + (equityResult.equity * 100).toFixed(1) + "% (" + equityLabel + ")" : "Equity unavailable: opponent range is uncertain";
+            if (amountToCall > 0 && decisionPot > 0) {
+              const potOdds = calculatePotOdds(decisionPot, amountToCall);
               console.log(
-                `[Poker AI Reader] It's hero's turn -- requesting AI recommendation for street=${state.street}, board=${JSON.stringify(state.board)}, decisionPot=${decisionPot}`
+                `[Poker AI Reader] Amount to call: ${amountToCall}. Breakeven equity needed: ${potOdds.breakevenEquityPercent.toFixed(1)}%`
               );
-              requestRecommendation(packet, `${state.street} | board: ${JSON.stringify(state.board)} | pot: ${decisionPot}`, requestKey);
+              overlayState.potOddsLine = `To call: ${amountToCall} (breakeven: ${potOdds.breakevenEquityPercent.toFixed(1)}%)`;
+            } else if (amountToCall === 0) {
+              console.log("[Poker AI Reader] No bet facing hero (check or already matched) -- pot odds not applicable.");
+              overlayState.potOddsLine = null;
+            }
+            renderOverlay();
+            if (hero.isCurrentToAct) {
+              const requestKey = decisionRequestKey(requestSequence, stateJson);
+              if (requestKey !== lastRecommendationRequestKey) {
+                lastRecommendationRequestKey = requestKey;
+                overlayState.aiStatus = "waiting";
+                overlayState.policyLine = null;
+                overlayState.aiResult = null;
+                overlayState.aiWarnings = opponentRangeContext ? [opponentRangeContext.estimatedRangeDescription ?? "", ...opponentRangeContext.rangeAssumptions ?? [], ...opponentRangeContext.rangeFallbacks ?? []] : [];
+                renderOverlay();
+                const packet = buildDecisionPacket({
+                  state,
+                  amountToCall,
+                  equity: equityResult?.equity,
+                  equitySource,
+                  bigBlind,
+                  decisionPot,
+                  potProvenance: assessment.pot,
+                  confidence,
+                  heroPosition,
+                  opponentRangeContext
+                });
+                currentDiagnosticPacket = packet;
+                logLiveDiagnostics(read, assessment, actionHistory, preflop, packet);
+                console.log(`[Poker AI Reader] Big blind detected: ${bigBlind}. Hero stackBB: ${packet.hero.stackBB.toFixed(2)}. Facing amountBB: ${packet.facingAction.amountBB?.toFixed(2) ?? "n/a"}`);
+                console.log(
+                  `[Poker AI Reader] It's hero's turn -- requesting AI recommendation for street=${state.street}, board=${JSON.stringify(state.board)}, decisionPot=${decisionPot}`
+                );
+                requestRecommendation(packet, `${state.street} | board: ${JSON.stringify(state.board)} | pot: ${decisionPot}`, requestKey);
+              }
             }
           }
         }
       }
+    } catch (error) {
+      requestSequence++;
+      lastRecommendationRequestKey = null;
+      lastStateJson = null;
+      previousGameState = null;
+      actionHistory = emptyActionHistory();
+      currentDiagnosticPacket = null;
+      overlayState.aiResult = null;
+      overlayState.aiStatus = "blocked";
+      overlayState.street = "unreadable";
+      overlayState.opponentStatsLine = null;
+      overlayState.policyLine = null;
+      overlayState.equityLine = null;
+      overlayState.potOddsLine = null;
+      overlayState.preflopLine = null;
+      overlayState.aiWarnings = ["Live read/calculation failed; recommendation withheld."];
+      console.error("[Poker AI Reader] Poll failed", error);
+      renderOverlay();
     }
   }, 1e3);
 })();

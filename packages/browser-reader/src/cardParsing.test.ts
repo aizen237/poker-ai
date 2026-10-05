@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { parseBoardCardFromText, parseHoleCardFromClassList } from "./cardParsing.js";
+import { parseBoardCardFromText, parseBoardCardFromEvidence, parseHoleCardFromClassList } from "./cardParsing.js";
 
 describe("parseHoleCardFromClassList — real captured PokerNow examples", () => {
+  it("ignores inherited object properties in card classes", () => {
+    expect(parseHoleCardFromClassList(["flipped", "constructor"])).toBeNull();
+    expect(parseHoleCardFromClassList(["flipped", "toString", "card-h", "card-s-Q"])).toEqual({ rank: 12, suit: "h" });
+  });
   it("does not guess when visible card classes contain conflicting ranks or suits", () => {
     expect(parseHoleCardFromClassList(["flipped", "card-h", "card-s", "card-s-Q"])).toBeNull();
     expect(parseHoleCardFromClassList(["flipped", "card-h", "card-s-Q", "card-s-T"])).toBeNull();
@@ -68,5 +72,19 @@ describe("parseBoardCardFromText — real captured PokerNow examples", () => {
 
   it("throws on unrecognized suit text", () => {
     expect(() => parseBoardCardFromText("10", "x")).toThrow();
+  });
+});
+
+describe("board evidence normalization", () => {
+  it.each([["s", "\u2660"], ["h", "\u2665"], ["d", "\u2666"], ["c", "\u2663"]])("normalizes %s suit letters/symbols and repeated matching signals", (suit, symbol) => {
+    expect(parseBoardCardFromEvidence({ classList: [], valueTexts: [" 10 ", "T"], suitTexts: [suit!, symbol! + "\uFE0F"] }))
+      .toEqual({ rank: 10, suit });
+  });
+  it("rejects conflicting duplicates instead of taking the first one", () => {
+    expect(() => parseBoardCardFromEvidence({ classList: [], valueTexts: ["6"], suitTexts: ["h", "s"] })).toThrow("consistent");
+    expect(() => parseBoardCardFromEvidence({ classList: [], valueTexts: ["6", "9"], suitTexts: ["h"] })).toThrow("consistent");
+  });
+  it("rejects conflicting card classes even with matching text", () => {
+    expect(() => parseBoardCardFromEvidence({ classList: ["flipped", "card-h", "card-d", "card-s-6"], valueTexts: ["6"], suitTexts: ["h"] })).toThrow("consistent");
   });
 });

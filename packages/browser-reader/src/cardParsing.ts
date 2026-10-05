@@ -37,11 +37,11 @@ export function parseHoleCardFromClassList(classList: readonly string[]): Card |
   let rank: Rank | undefined;
 
   for (const cls of classList) {
-    if (cls in CLASS_SUIT_MAP) {
+    if (Object.hasOwn(CLASS_SUIT_MAP, cls)) {
       if (suit !== undefined && suit !== CLASS_SUIT_MAP[cls]) return null;
       suit = CLASS_SUIT_MAP[cls];
     }
-    if (cls in CLASS_RANK_MAP) {
+    if (Object.hasOwn(CLASS_RANK_MAP, cls)) {
       if (rank !== undefined && rank !== CLASS_RANK_MAP[cls]) return null;
       rank = CLASS_RANK_MAP[cls];
     }
@@ -59,23 +59,25 @@ const TEXT_SUIT_MAP: Record<string, Suit> = {
   s: "s",
   d: "d",
   c: "c",
+  "\u2660": "s", "\u2665": "h", "\u2666": "d", "\u2663": "c",
 };
 
 const TEXT_RANK_MAP: Record<string, Rank> = {
   "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9,
-  "10": 10, J: 11, Q: 12, K: 13, A: 14,
+  "10": 10, T: 10, J: 11, Q: 12, K: 13, A: 14,
 };
 
 /**
  * Parses a board (community) card from its plain-text value/suit spans,
  * e.g. <span class="value">10</span> <span class="suit">h</span>.
- * Verified against real PokerNow DOM: board cards use readable text
- * content, a different (and simpler) encoding than hole cards' class-
- * name-based approach.
+ * Board cards also expose rank/suit classes and repeat the suit in a decorative
+ * sub-suit span; the DOM reader selects the main span before calling this parser.
  */
 export function parseBoardCardFromText(valueText: string, suitText: string): Card {
-  const rank = TEXT_RANK_MAP[valueText.trim()];
-  const suit = TEXT_SUIT_MAP[suitText.trim().toLowerCase()];
+  const rankKey = valueText.trim().toUpperCase();
+  const suitKey = normalizeSuitText(suitText);
+  const rank = Object.hasOwn(TEXT_RANK_MAP, rankKey) ? TEXT_RANK_MAP[rankKey] : undefined;
+  const suit = Object.hasOwn(TEXT_SUIT_MAP, suitKey) ? TEXT_SUIT_MAP[suitKey] : undefined;
 
   if (rank === undefined) {
     throw new Error(`Unrecognized board card value text: "${valueText}"`);
@@ -85,4 +87,44 @@ export function parseBoardCardFromText(valueText: string, suitText: string): Car
   }
 
   return { rank, suit };
+}
+
+function normalizeSuitText(text: string): string {
+  return text.trim().replace(/[\uFE0E\uFE0F]/g, "").toLowerCase();
+}
+
+export interface BoardCardEvidence {
+  classList: readonly string[];
+  valueTexts: readonly string[];
+  /** Main .suit:not(.sub-suit) texts used to resolve the card. */
+  suitTexts: readonly string[];
+  /** All .suit texts, including decorative duplicates, retained for diagnostics only. */
+  allSuitTexts?: readonly string[];
+}
+
+/** A board card can render its suit more than once. Resolve agreeing signals,
+ * not a unique element or an arbitrary first match. Empty decorative nodes do
+ * not override readable text/classes; contradictory signals remain an error.
+ * Class encodings reuse the existing PokerNow maps. Classes alone require the
+ * already-supported face-up marker; never expose a hidden card from its classes.
+ */
+export function parseBoardCardFromEvidence(evidence: BoardCardEvidence): Card {
+  const ranks = new Set<Rank>();
+  const suits = new Set<Suit>();
+  for (const text of evidence.valueTexts) {
+    if (text.trim()) ranks.add(parseBoardCardFromText(text, "s").rank);
+  }
+  for (const text of evidence.suitTexts) {
+    if (text.trim()) suits.add(parseBoardCardFromText("2", text).suit);
+  }
+  if (ranks.size > 0 || suits.size > 0 || evidence.classList.includes("flipped")) {
+    for (const cls of evidence.classList) {
+      if (Object.hasOwn(CLASS_RANK_MAP, cls)) ranks.add(CLASS_RANK_MAP[cls]!);
+      if (Object.hasOwn(CLASS_SUIT_MAP, cls)) suits.add(CLASS_SUIT_MAP[cls]!);
+    }
+  }
+  if (ranks.size !== 1 || suits.size !== 1) {
+    throw new Error(`Board card needs one consistent rank and suit; found ${ranks.size} rank(s), ${suits.size} suit(s)`);
+  }
+  return { rank: [...ranks][0]!, suit: [...suits][0]! };
 }

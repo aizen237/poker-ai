@@ -8,6 +8,7 @@ import {
   type Position,
   type PokerGameState,
   type ConfidenceResult,
+  type PotProvenance,
 } from "@poker-ai/browser-reader";
 import {
   calculateCallEV,
@@ -20,6 +21,8 @@ import { preflopUncertainty, deriveCandidateActions, type DecisionPacket } from 
 import { calculateEquityForEstimates, estimateOpponentRange } from "@poker-ai/range-engine";
 import { readLiveTable } from "./tableRead.js";
 import { logLiveDiagnostics } from "./diagnostics.js";
+import { decisionFingerprint, decisionRequestKey } from "./requestIdentity.js";
+import { RecommendationSchema } from "@poker-ai/ai-core";
 console.log("[Poker AI Reader] Content script loaded on:", window.location.href);
 
 // ---------------------------------------------------------------------
@@ -39,6 +42,7 @@ interface OverlayState {
   potOddsLine: string | null;
   preflopLine: string | null;
   opponentStatsLine: string | null;
+  policyLine: string | null;
   aiStatus: AIStatus;
   aiResult: { action: string; confidence: number; reasoning: string } | null;
   aiWarnings: string[];
@@ -50,6 +54,7 @@ const overlayState: OverlayState = {
   potOddsLine: null,
   preflopLine: null,
   opponentStatsLine: null,
+  policyLine: null,
   aiStatus: "idle",
   aiResult: null,
   aiWarnings: [],
@@ -117,6 +122,7 @@ function renderOverlay() {
   parts.push(
     `<div style="color:${AI_STATUS_COLORS[s.aiStatus]}; font-weight:600;">${escapeHtml(s.aiStatus.toUpperCase())}</div>`,
   );
+  if (s.policyLine) parts.push(`<div>${escapeHtml(s.policyLine)}</div>`);
   if (s.aiResult) {
     parts.push(`<div style="font-size:16px; font-weight:700; margin:4px 0;">${escapeHtml(s.aiResult.action)}</div>`);
     parts.push(`<div>Confidence: ${(s.aiResult.confidence * 100).toFixed(0)}%</div>`);
@@ -143,6 +149,7 @@ interface BuildDecisionPacketInput {
   equitySource: DecisionPacket["engineCalculations"]["equitySource"];
   bigBlind: number;
   decisionPot: number;
+  potProvenance: PotProvenance;
   confidence: ConfidenceResult;
   /** A detected position is required; no BTN fallback. */
   heroPosition: Position;
@@ -152,7 +159,7 @@ interface BuildDecisionPacketInput {
 
 /**
  * Builds a full DecisionPacket from the live game state. This is the
- * "structured decision-policy layer": every deterministic fact the AI
+ * evidence packet: every deterministic fact the policy/explanation path
  * needs -- equity, pot odds, EV, SPR, outs, board texture, candidate
  * actions, an opponent read -- is computed and organized HERE, once, so
  * the AI never has to (or has to guess at) any of it itself. Each
@@ -171,6 +178,7 @@ function buildDecisionPacket(input: BuildDecisionPacketInput): DecisionPacket {
     equitySource,
     bigBlind,
     decisionPot,
+    potProvenance,
     confidence,
     heroPosition,
     opponentRangeContext,
@@ -180,7 +188,8 @@ function buildDecisionPacket(input: BuildDecisionPacketInput): DecisionPacket {
     (s) => s.isOccupied && !s.isYou && !s.isFolded,
   ).length;
 
-  if (confidence.level === "low" || hero.stack === null || !Number.isFinite(bigBlind) || bigBlind <= 0) {
+  if (confidence.level === "low" || hero.stack === null || !Number.isFinite(bigBlind) || bigBlind <= 0 ||
+      !potProvenance.isPotSemanticsVerified || potProvenance.decisionPotSource === null || potProvenance.decisionPot !== decisionPot) {
     throw new Error("Cannot build a DecisionPacket from an untrusted table read");
   }
   console.log(
@@ -193,12 +202,15 @@ function buildDecisionPacket(input: BuildDecisionPacketInput): DecisionPacket {
   let callEV: number | undefined;
   if (amountToCall > 0 && decisionPot > 0) {
     potOddsBreakevenPercent = calculatePotOdds(decisionPot, amountToCall).breakevenEquityPercent;
-    if (equity !== undefined) callEV = calculateCallEV(equity, decisionPot, amountToCall).ev;
+    if (equity !== undefined) callEV = calculateCallEV(equity, decisionPot / bigBlind, amountToCall / bigBlind).ev;
   }
 
   let spr: number | undefined;
-  if (hero.stack !== null && decisionPot > 0) {
-    spr = calculateSPR(hero.stack, decisionPot);
+  const headsUpOpponent = numOpponentsRemaining === 1
+    ? state.seats.find(s => s.isOccupied && !s.isYou && !s.isFolded) : undefined;
+  // A hero-only stack/pot ratio is not effective SPR. Omit multiway/unknown stacks.
+  if (hero.stack !== null && hero.stack > 0 && headsUpOpponent?.stack != null && headsUpOpponent.stack > 0 && decisionPot > 0) {
+    spr = calculateSPR(Math.min(hero.stack, headsUpOpponent.stack), decisionPot);
   }
 
   let outs: number | undefined;
@@ -228,6 +240,10 @@ function buildDecisionPacket(input: BuildDecisionPacketInput): DecisionPacket {
       ...(amountToCall > 0 ? { amountBB: amountToCall / bigBlind } : {}),
     },
     candidateActions: deriveCandidateActions(facingActionType),
+    potEvidence: { ...potProvenance, bigBlind },
+    // policyContext intentionally absent until live pot/legality and range
+    // uncertainty evidence are verified. The relay reports explicit fallback
+    // eligibility; never invent fold equity or exact raise controls here.
     engineCalculations: {
       equity,
       equitySource,
@@ -258,6 +274,7 @@ async function requestRecommendation(packet: DecisionPacket, stateDescription: s
   try {
     const response = await fetch(RELAY_SERVER_URL, {
       method: "POST",
+      signal: AbortSignal.timeout(70_000),
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mode: "fast", decisionPacket: packet }),
     });
@@ -270,20 +287,44 @@ async function requestRecommendation(packet: DecisionPacket, stateDescription: s
       return;
     }
 
+    // A response can arrive between polls. Re-read before showing it instead
+    // of assuming the last one-second snapshot still describes the live turn.
+    const latest = readLiveTable();
+    const latestFingerprint = decisionFingerprint(location.origin + location.pathname, latest.raw, latest.context, latest.raiseControl);
+    if (requestKey !== decisionRequestKey(requestSequence, latestFingerprint)) {
+      lastRecommendationRequestKey = null;
+      overlayState.aiResult = null;
+      overlayState.aiStatus = "blocked";
+      overlayState.policyLine = null;
+      overlayState.aiWarnings = ["Table changed while the recommendation was pending."];
+      overlayState.equityLine = null;
+      overlayState.potOddsLine = null;
+      overlayState.preflopLine = null;
+      renderOverlay();
+      return;
+    }
+
+    overlayState.policyLine = data.policy
+      ? `Decision: ${data.decisionSource}; policy ${data.policy.status} (${data.policy.confidence} confidence)` : null;
+    if (data.policy) console.log("[Poker AI Reader] Engine policy evidence:", data.policy);
     if (data.ok && data.result === null && data.blocked) {
       overlayState.aiResult = null;
       overlayState.aiStatus = "blocked";
-      overlayState.aiWarnings = data.uncertainty ?? [data.blockedReason];
+      overlayState.aiWarnings = data.uncertainty ?? [data.originalReason ?? data.blockedReason];
     } else if (data.ok) {
+      if (!response.ok || Array.isArray(data.result)) throw new Error("Invalid live relay response");
+      data.result = RecommendationSchema.parse(data.result);
       console.log(`[Poker AI Reader] AI recommendation (for: ${stateDescription}):`, data.result);
       overlayState.aiResult = {
-        action: data.result.action,
+        action: data.result.action + (data.result.sizingBB === undefined ? "" : ` ${data.result.sizingBB}BB${data.decisionSource === "engine_policy" ? " additional" : ""}`)
+          + (data.policy?.raiseToBB == null ? "" : ` (to ${data.policy.raiseToBB}BB)`),
         confidence: data.result.confidence,
         reasoning: data.result.reasoning,
       };
       overlayState.aiWarnings = [
         ...(data.blocked ? [`Blocked: ${data.blockedReason}${data.originalReason ? ` -- ${data.originalReason}` : ""}`] : []),
         ...(data.consistencyWarnings ?? []),
+        ...(data.policy?.reasons ?? []),
         ...(packet.opponentContext?.rangeConfidence === "low" ? ["Opponent range confidence: low", ...(packet.opponentContext.rangeAssumptions ?? []), ...(packet.opponentContext.rangeFallbacks ?? [])] : []),
       ];
       overlayState.aiStatus = data.blocked ? "blocked" : "received";
@@ -299,7 +340,8 @@ async function requestRecommendation(packet: DecisionPacket, stateDescription: s
     if (requestKey === lastRecommendationRequestKey) {
       overlayState.aiStatus = "error";
       overlayState.aiResult = null;
-      overlayState.aiWarnings = ["Failed to reach relay server -- is it running?"];
+      overlayState.policyLine = null;
+      overlayState.aiWarnings = ["Relay request failed, timed out, or returned an invalid response."];
       renderOverlay();
     }
   }
@@ -311,13 +353,16 @@ let lastStateJson: string | null = null;
 let lastRecommendationRequestKey: string | null = null;
 let previousGameState: GameState | null = null;
 let actionHistory: ActionHistory = emptyActionHistory();
+let currentDiagnosticPacket: DecisionPacket | null = null;
 
 setInterval(() => {
+  try {
   const read = readLiveTable();
   const assessment = assessLiveState(read.raw, read.context);
   // Include blinds, dealer, and extraction failures in the identity of a read.
-  const stateJson = JSON.stringify({ raw: read.raw, context: read.context });
+  const stateJson = decisionFingerprint(location.origin + location.pathname, read.raw, read.context, read.raiseControl);
   if (stateJson !== lastStateJson) {
+    currentDiagnosticPacket = null;
     const state = assessment.state;
     if (!state || read.context.readErrors.length > 0) {
       previousGameState = null;
@@ -334,7 +379,7 @@ setInterval(() => {
   }
   opponentStats.tick();
   const preflop = buildLivePreflopContext(assessment, actionHistory);
-  logLiveDiagnostics(read, assessment, actionHistory, preflop);
+  logLiveDiagnostics(read, assessment, actionHistory, preflop, currentDiagnosticPacket);
   if (stateJson !== lastStateJson) {
     lastStateJson = stateJson;
     // Invalidate in-flight results on every changed or failed read, including
@@ -345,6 +390,7 @@ setInterval(() => {
     overlayState.street = state?.street ?? "unreadable";
     overlayState.opponentStatsLine = state ? state.seats.filter(s=>s.isOccupied&&!s.isYou&&!s.isFolded).map(s=>{const evidence=opponentStats.profile(s.playerName);return s.playerName+": "+(evidence?evidence.playerProfile.handsObserved+" observed windows / "+evidence.playerProfile.eligibleHands+" eligible hands ("+evidence.statsStorage+")":"identity ambiguous");}).join("; ") : null;
     overlayState.aiResult = null;
+    overlayState.policyLine = null;
     overlayState.equityLine = null;
     overlayState.potOddsLine = null;
     overlayState.preflopLine = null;
@@ -362,7 +408,8 @@ setInterval(() => {
     // Gate ALL advice (including preflop and pot odds) before any
     // strategic calculation or request. Pot semantics remain unresolved pending capture.
     if (confidence.level === "low" || !hero || hero.stack === null || bigBlind === null ||
-        amountToCall === null || decisionPot === null || heroPosition === undefined) return;
+        amountToCall === null || decisionPot === null || heroPosition === undefined ||
+        !assessment.pot.isPotSemanticsVerified || assessment.pot.decisionPotSource === null) return;
 
     overlayState.aiStatus = "idle";
     if (state.street === "preflop") {
@@ -378,6 +425,7 @@ setInterval(() => {
         table: { potBB: decisionPot / bigBlind, board: [], street: "preflop", numOpponentsRemaining: preflop.activeOpponents },
         facingAction: { type: facing, ...(amountToCall > 0 ? { amountBB: amountToCall / bigBlind } : {}) },
         candidateActions: deriveCandidateActions(facing), engineCalculations: {}, dataConfidence: confidence.level, preflop,
+        potEvidence: { ...assessment.pot, bigBlind },
         opponentContext: { opponents: state.seats.filter(s=>s.isOccupied&&!s.isYou&&!s.isFolded).map(s=>({seat:s.seatNumber,position:positions.get(s.seatNumber)??null,rangeBasis:"Preflop context remains uncertain",rangeConfidence:"low",rangeStatus:"prior_only",...(opponentStats.profile(s.playerName)??{})})) },
       };
       const uncertainty = preflopUncertainty(packet);
@@ -386,9 +434,12 @@ setInterval(() => {
         overlayState.aiStatus = "blocked";
         overlayState.aiWarnings = uncertainty;
       } else if (hero.isCurrentToAct && hero.holeCards.length === 2) {
-        const requestKey = requestSequence + ":" + stateJson;
+        const requestKey = decisionRequestKey(requestSequence, stateJson);
         lastRecommendationRequestKey = requestKey;
         overlayState.aiStatus = "waiting";
+        overlayState.policyLine = null;
+        currentDiagnosticPacket = packet;
+        logLiveDiagnostics(read, assessment, actionHistory, preflop, packet);
         requestRecommendation(packet, "structured preflop", requestKey);
       }
       renderOverlay();
@@ -451,10 +502,11 @@ setInterval(() => {
         // same exact turn doesn't trigger multiple requests if polled
         // more than once before the state next changes.
         if (hero.isCurrentToAct) {
-          const requestKey = `${requestSequence}:${stateJson}`;
+          const requestKey = decisionRequestKey(requestSequence, stateJson);
           if (requestKey !== lastRecommendationRequestKey) {
             lastRecommendationRequestKey = requestKey;
             overlayState.aiStatus = "waiting";
+            overlayState.policyLine = null;
             overlayState.aiResult = null;
             overlayState.aiWarnings = opponentRangeContext ? [opponentRangeContext.estimatedRangeDescription ?? "", ...(opponentRangeContext.rangeAssumptions ?? []), ...(opponentRangeContext.rangeFallbacks ?? [])] : [];
             renderOverlay();
@@ -466,10 +518,13 @@ setInterval(() => {
               equitySource,
               bigBlind,
               decisionPot,
+              potProvenance: assessment.pot,
               confidence,
               heroPosition,
               opponentRangeContext,
             });
+            currentDiagnosticPacket = packet;
+            logLiveDiagnostics(read, assessment, actionHistory, preflop, packet);
             console.log(`[Poker AI Reader] Big blind detected: ${bigBlind}. Hero stackBB: ${packet.hero.stackBB.toFixed(2)}. Facing amountBB: ${packet.facingAction.amountBB?.toFixed(2) ?? "n/a"}`);
             console.log(
               `[Poker AI Reader] It's hero's turn -- requesting AI recommendation for street=${state.street}, board=${JSON.stringify(state.board)}, decisionPot=${decisionPot}`,
@@ -479,5 +534,25 @@ setInterval(() => {
         }
       }
     }
+  }
+  } catch (error) {
+    // An exception must invalidate outstanding responses and all derived display facts.
+    requestSequence++;
+    lastRecommendationRequestKey = null;
+    lastStateJson = null;
+    previousGameState = null;
+    actionHistory = emptyActionHistory();
+    currentDiagnosticPacket = null;
+    overlayState.aiResult = null;
+    overlayState.aiStatus = "blocked";
+    overlayState.street = "unreadable";
+    overlayState.opponentStatsLine = null;
+    overlayState.policyLine = null;
+    overlayState.equityLine = null;
+    overlayState.potOddsLine = null;
+    overlayState.preflopLine = null;
+    overlayState.aiWarnings = ["Live read/calculation failed; recommendation withheld."];
+    console.error("[Poker AI Reader] Poll failed", error);
+    renderOverlay();
   }
 }, 1000);

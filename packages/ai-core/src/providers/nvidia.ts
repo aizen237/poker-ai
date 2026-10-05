@@ -1,3 +1,4 @@
+import { decisionPolicyPromptLines } from "../decisionPolicy.js";
 import { preflopPromptLines } from "../preflopContext.js";
 import { formatCards } from "@poker-ai/shared";
 import { evaluateBest, HAND_CATEGORY_NAMES } from "@poker-ai/poker-engine";
@@ -7,7 +8,7 @@ import { parseRecommendation, type Recommendation } from "../recommendation.js";
 import type { AIProvider, AIProviderMetadata, GetRecommendationOptions } from "../provider.js";
 
 const NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
-const PROMPT_VERSION = "v8-opponent-evidence";
+const PROMPT_VERSION = "v9-engine-policy";
 
 function buildPrompt(packet: DecisionPacket): string {
   const lines: string[] = [];
@@ -29,6 +30,7 @@ function buildPrompt(packet: DecisionPacket): string {
   lines.push(`Candidate actions (the only ones on the table right now): ${packet.candidateActions.join(", ")}.`);
 
   lines.push(...preflopPromptLines(packet));
+  lines.push(...decisionPolicyPromptLines(packet));
   const calc = packet.engineCalculations;
   if (calc.equity !== undefined) {
     lines.push(`Hero's equity: ${(calc.equity * 100).toFixed(1)}%.`);
@@ -76,6 +78,7 @@ export function createNvidiaProvider(providerOptions: NvidiaProviderOptions): AI
     try {
       const response = await fetch(NVIDIA_API_URL, {
         method: "POST",
+        signal: AbortSignal.timeout(20_000),
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${providerOptions.apiKey}`,

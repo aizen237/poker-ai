@@ -1,8 +1,9 @@
 # Local development
 
 For the current live state investigation, see [LIVE_STATE_CHECK.md](LIVE_STATE_CHECK.md).
-Recommendations are withheld until the meaning of PokerNow's main/add-on pot
-values is confirmed; that guide explains the diagnostic toggle and capture steps.
+Live advice remains gated on complete contestable-pot and legality evidence.
+Observed display relationships are documented in LIVE_LEGALITY_PROOFS.md;
+V1_RELIABILITY_AUDIT.md lists remaining limitations and manual checks.
 
 Run these commands from the repository root (`poker-ai`) in PowerShell or a
 terminal in VS Code. Use Node 22.12+ on the 22.x line (verified with 22.16.0),
@@ -35,7 +36,10 @@ npm run dev:relay
 ```
 
 This builds everything first, including the extension, then runs the relay at
-`http://localhost:8787`. The workspace command
+`http://localhost:8787`, bound only to `127.0.0.1`. Browser origins are restricted
+to the PokerNow origins in the manifest; live consensus requests are rejected.
+`RELAY_PORT` can override the server port for tests, but the extension still uses
+8787 unless its URL is edited. The workspace command
 `npm run dev --workspace=@poker-ai/ai-relay-server` has the same rebuild guard.
 In another terminal, check it without making an AI request:
 
@@ -86,7 +90,7 @@ typecheck commands assume dependencies have already been built.
 | --- | --- |
 | Relay via `dev:relay` | Node runs `apps/ai-relay-server/src/server.ts` with `--experimental-strip-types`. It does not run `apps/ai-relay-server/dist/server.js`, although the build also produces that file. |
 | Workspace imports | npm links `node_modules/@poker-ai/<name>` to the workspace. Each package's `main` resolves to `packages/<name>/dist/index.js`, with its relative imports loading other `.js` files in that `dist` directory. This applies to `ai-core`, `browser-reader`, `range-engine`, `poker-engine`, `shared`, and `opponent-db`. TypeScript declarations come from `dist/index.d.ts`. |
-| Relay's current package use | `server.ts` directly imports `ai-core`; that package also loads compiled `poker-engine` and `shared` code. `browser-reader` is declared as a relay dependency but is not currently imported by `server.ts`; neither `range-engine` nor `opponent-db` is currently loaded by this relay's import graph. |
+| Relay's current package use | `server.ts` imports compiled `ai-core` and `opponent-db/browser`, and dynamically loads `opponent-db` for SQLite storage. Their transitive workspace dependencies also resolve through `dist`. |
 | Extension build | esbuild reads `apps/pokernow-extension/src/contentScript.ts` and resolves its package imports through their compiled `dist` entries. The bundle includes the used code from `browser-reader`, `poker-engine`, `ai-core`, `range-engine`, and their dependencies. |
 | Chrome | The manifest injects only `apps/pokernow-extension/contentScript.js`. Chrome executes the code embedded in this bundle, not the `.ts` source or separate workspace `dist` files. |
 

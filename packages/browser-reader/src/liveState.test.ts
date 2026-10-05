@@ -24,6 +24,8 @@ describe("live read assessment", () => {
     expect(result.state?.potMainValue).toBe(0);
     expect(result.state?.potTotalValue).toBe(7);
     expect(result.decisionPot).toBeNull();
+    expect(result.pot).toMatchObject({ mainPot: 0, displayedTotalPot: 7, decisionPot: null, decisionPotSource: null, isPotSemanticsVerified: false });
+    expect(result.legality).toMatchObject({ verified: false, minBet: null, minRaiseTo: null, chipUnit: null, aggressionReopened: null });
     expect(result.confidence.level).toBe("low");
     expect(result.confidence.reasons.join(" ")).toContain("pot meaning needs live confirmation");
     expect(result.activeOpponents).toBe(2);
@@ -91,6 +93,7 @@ describe("live read assessment", () => {
     raw.potMainValueText = null;
     const result = assessLiveState(raw, context);
     expect(result.state).toBeNull();
+    expect(result.pot.displayedTotalPot).toBe(7);
     expect(result.confidence).toEqual({ level: "low", reasons: ["Main pot element is missing"] });
   });
 
@@ -112,6 +115,19 @@ describe("live read assessment", () => {
 });
 
 describe("amount-to-call current-street contribution scenarios", () => {
+  it("satisfies the nonnegative opposing-maximum gap invariant for numeric contributions", () => {
+    for (const hero of [0, 2, 10, 25]) for (const opponent of [0, 4, 16]) for (const other of [0, 8, 20]) {
+      const raw = rawTable();
+      [hero, opponent, other].forEach((bet, i) => { raw.seats[i]!.betValueText = String(bet); });
+      const result = calculateAmountToCall(assembleGameState(raw));
+      expect(result).toBe(Math.max(0, Math.max(opponent, other) - hero));
+    }
+  });
+  it("keeps the wager gap distinct from hero's payable all-in cost", () => {
+    const raw = rawTable(); raw.seats[0]!.stackText = "3"; raw.seats[0]!.betValueText = "2";
+    raw.seats[1]!.betValueText = "20";
+    expect(calculateAmountToCall(assembleGameState(raw))).toBe(18);
+  });
   it.each([
     { label: "nobody has bet", hero: null, opponent: null, other: null, expected: 0 },
     { label: "opponent bets", hero: null, opponent: "10", other: null, expected: 10 },
@@ -156,6 +172,15 @@ describe("amount-to-call current-street contribution scenarios", () => {
 
 describe("decision-critical confidence checks independent of the pot investigation", () => {
   const knownContext = { amountToCall: 0, bigBlindWasDefaulted: false, isPositionKnown: true, potSemanticsVerified: true };
+  it("keeps confidence low if pot semantics are known but wager-total semantics are not", () => {
+    const result = computeDataConfidence(assembleGameState(rawTable()), { ...knownContext, contributionSemanticsVerified: false });
+    expect(result.level).toBe("low");
+    expect(result.reasons.join(" ")).toContain("call interpretation is provisional");
+  });
+  it("does not offer decisions to a hero with zero remaining chips", () => {
+    const raw = rawTable(); raw.seats[0]!.stackText = "0";
+    expect(computeDataConfidence(assembleGameState(raw), knownContext)).toMatchObject({ level: "low", reasons: expect.arrayContaining(["hero has no remaining chips to act with"]) });
+  });
   it("allows an explicit all-in opponent with an unknown stack but known contribution", () => {
     const raw = rawTable(); raw.seats[1]!.stackText = "All In"; raw.seats[1]!.betValueText = "10";
     expect(computeDataConfidence(assembleGameState(raw), { ...knownContext, amountToCall: 10 }).level).toBe("high");

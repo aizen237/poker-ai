@@ -1,4 +1,4 @@
-import { Deck, type Card } from "@poker-ai/shared";
+import { Deck, validateSimulationInput, type Card } from "@poker-ai/shared";
 import { evaluateBest } from "./evaluator.js";
 
 export interface EquityResult {
@@ -43,6 +43,8 @@ export function calculateEquity(
   }
 
   const iterations = options.iterations ?? DEFAULT_ITERATIONS;
+  validateSimulationInput([...heroCards, ...board], board.length, iterations);
+  if (!Number.isInteger(numOpponents) || numOpponents > 9) throw new Error("Invalid opponent count");
   const rng = options.rng ?? Math.random;
   const cardsToComplete = 5 - board.length;
 

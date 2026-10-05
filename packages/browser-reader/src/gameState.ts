@@ -8,6 +8,8 @@ export interface RawSeatInput {
   isYou: boolean;
   playerNameText: string | null;
   stackText: string | null;
+  /** Container can display literal All In without a numeric .normal-value child. */
+  stackContainerText?: string | null;
   /** Raw class-list fragments observed on the seat div, e.g. ["fold"], ["decision-current"], ["offline"]. */
   statusClasses: string[];
   /** One class-list array per hole card element found (0, 1, or 2 -- matches what's actually in the DOM). */
@@ -59,7 +61,9 @@ export interface SeatState {
 export interface PokerGameState {
   seats: SeatState[];
   board: Card[];
+  /** Parsed main-value display; not automatically the contestable EV pot. */
   potMainValue: number;
+  /** Legacy name: parsed add-on display, NOT a verified total pot. */
   potTotalValue: number | null;
   street: "preflop" | "flop" | "turn" | "river";
 }
@@ -140,7 +144,7 @@ function assembleSeat(raw: RawSeatInput): SeatState {
     isYou: raw.isYou,
     playerName,
     stack,
-    isAllIn: isAllInStackText(raw.stackText),
+    isAllIn: isAllInStackText(raw.stackText) || isAllInStackText(raw.stackContainerText ?? null),
     betReadError: raw.betValueText !== null && parseBetValue(raw.betValueText) === null && !isCheckText(raw.betValueText),
     isFolded,
     isCurrentToAct,

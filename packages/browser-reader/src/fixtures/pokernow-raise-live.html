@@ -1,0 +1,39 @@
+<form novalidate="" class="raise-controller-form">
+  <div class="raise-bet-value ">
+    <p class="label">Your bet</p>
+    <div class="value-input-ctn">
+      <span class="bb-value">10.5BB</span>
+      <input type="text" class="value" pattern="[0-9]*" inputmode="numeric" value="21">
+    </div>
+  </div>
+
+  <div class="raise-controller">
+    <div class="default-bet-buttons">
+      <button class="button-1 default-bet-button" type="button">Min Raise</button>
+      <button class="button-1 default-bet-button" type="button">1/2 Pot</button>
+      <button class="button-1 default-bet-button" type="button">3/4 Pot</button>
+      <button class="button-1 default-bet-button" type="button">Pot</button>
+      <button class="button-1 default-bet-button" type="button">All In</button>
+    </div>
+
+    <div class="slider">
+      <button class="control-button decrease" type="button">-</button>
+      <input class="slider-control" type="range" min="0" max="21" step="1" value="21">
+      <button class="control-button increase" type="button">+</button>
+    </div>
+  </div>
+
+  <div class="action-buttons">
+    <input
+      type="submit"
+      class="button-1 action-button green highlighted bet"
+      value="Raise"
+    >
+    <button
+      class="button-1 action-button gray highlighted with-tip back"
+      type="button"
+    >
+      Back
+    </button>
+  </div>
+</form>

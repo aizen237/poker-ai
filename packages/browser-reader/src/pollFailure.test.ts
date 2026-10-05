@@ -1,0 +1,20 @@
+import { afterEach, expect, it, vi } from "vitest";
+import { parseHTML } from "linkedom";
+vi.mock("../../../apps/pokernow-extension/src/opponentStats.js", () => ({ createLiveOpponentClient: () => ({ tick() {}, observe() {}, profile() { return null; } }) }));
+vi.mock("../../../apps/pokernow-extension/src/tableRead.js", () => ({ readLiveTable: () => { throw new Error("DOM changed mid-read"); } }));
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+it("clears a previous visible recommendation when the live polling reader throws", async () => {
+  const { document } = parseHTML('<html><body><div id="poker-ai-reader-overlay">CALL — confidence 99%</div></body></html>');
+  let poll: () => void = () => { throw new Error("Poll not registered"); };
+  vi.stubGlobal("document", document);
+  vi.stubGlobal("window", { location: { href: "https://pokernow.com/games/test" } });
+  vi.stubGlobal("setInterval", (callback: () => void) => { poll = callback; return 1; });
+  vi.spyOn(console, "log").mockImplementation(() => {});
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  await import("../../../apps/pokernow-extension/src/contentScript.js");
+  expect(() => poll()).not.toThrow();
+  const text = document.getElementById("poker-ai-reader-overlay")!.textContent;
+  expect(text).toContain("BLOCKED");
+  expect(text).toContain("recommendation withheld");
+  expect(text).not.toContain("confidence 99%");
+});

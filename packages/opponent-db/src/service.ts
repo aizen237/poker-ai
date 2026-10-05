@@ -5,12 +5,12 @@ interface ObservationStore {
  getObservations(identity:PlayerIdentity):HandObservation[];
  close():void;
 }
-/** Storage failures fall back to priors and never fail a recommendation. */
+/** Storage failures return unavailable status and priors without throwing. Policy decides whether to abstain. */
 export function createOpponentService(open:()=>Promise<ObservationStore>, now:()=>number=Date.now) {
  let store:ObservationStore|null=null,pending:Promise<ObservationStore|null>|null=null,retryAt=0;
  async function getStore():Promise<ObservationStore|null>{
   if(store)return store;if(now()<retryAt)return null;
-  if(!pending) pending=open().then(value=>{store=value;return value;}).catch(()=>{retryAt=now()+30000;return null;}).finally(()=>{pending=null;});
+  if(!pending) pending=Promise.resolve().then(open).then(value=>{store=value;return value;}).catch(()=>{retryAt=now()+30000;return null;}).finally(()=>{pending=null;});
   return pending;
  }
  function failed(){try{store?.close();}catch{}store=null;retryAt=now()+30000;}

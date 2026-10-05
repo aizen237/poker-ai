@@ -1,6 +1,7 @@
 import { OpponentProfileSchema } from "@poker-ai/opponent-db/browser";
 import { z } from "zod";
 import { buildPreflopContext, PreflopContextSchema } from "./preflopContext.js";
+import { PolicyContextSchema, PotEvidenceSchema } from "./decisionPolicy.js";
 
 const CardSchema = z.object({
   rank: z.union([
@@ -64,11 +65,11 @@ export const DecisionPacketSchema = z.object({
   hero: z.object({
     holeCards: z.tuple([CardSchema, CardSchema]),
     position: PositionSchema,
-    stackBB: z.number().positive(),
+    stackBB: z.number().finite().positive(),
   }),
 
   table: z.object({
-    potBB: z.number().nonnegative(), // 0 is valid: the very first action of a hand, before blinds have registered in the main pot display
+    potBB: z.number().finite().nonnegative(), // 0 is valid: the very first action of a hand, before blinds have registered in the main pot display
     board: z.array(CardSchema).max(5),
     street: StreetSchema,
     numOpponentsRemaining: z.number().int().min(1),
@@ -76,13 +77,17 @@ export const DecisionPacketSchema = z.object({
 
   facingAction: z.object({
     type: FacingActionSchema,
-    amountBB: z.number().nonnegative().optional(),
+    amountBB: z.number().finite().nonnegative().optional(),
   }),
 
   /** Derived via deriveCandidateActions() -- see its doc comment above. */
   candidateActions: z.array(CandidateActionSchema).min(1),
   /** Optional for legacy packets; preflop requests without it yield uncertainty. */
   preflop: PreflopContextSchema.optional(),
+  /** Optional evidence for the conservative deterministic policy; never an LLM action. */
+  policyContext: PolicyContextSchema.optional(),
+  /** Preserved display values/provenance for live packets; not interchangeable pots. */
+  potEvidence: PotEvidenceSchema.optional(),
 
   engineCalculations: z.object({
     equity: z.number().min(0).max(1).optional(),
@@ -122,7 +127,7 @@ export const DecisionPacketSchema = z.object({
 
   /** Explicit confidence flag per Rule 5: never let the AI reason
    *  confidently over uncertain data. */
-  dataConfidence: z.enum(["high", "medium", "low"]).default("high"),
+  dataConfidence: z.enum(["high", "medium", "low"]).default("low"),
 });
 
 export type DecisionPacket = z.infer<typeof DecisionPacketSchema>;
@@ -130,6 +135,10 @@ export type DecisionPacket = z.infer<typeof DecisionPacketSchema>;
 /** Validates and returns a typed packet, throwing with a clear message on any schema violation. */
 export function validateDecisionPacket(input: unknown): DecisionPacket {
   const packet = DecisionPacketSchema.parse(input);
+  const expectedBoard = { preflop: 0, flop: 3, turn: 4, river: 5 }[packet.table.street];
+  const cards = [...packet.hero.holeCards, ...packet.table.board];
+  if (packet.table.board.length !== expectedBoard) throw new Error("Board count contradicts street");
+  if (new Set(cards.map(c => `${c.rank}${c.suit}`)).size !== cards.length) throw new Error("Duplicate visible cards in DecisionPacket");
   if (packet.preflop) {
     if (packet.table.street !== "preflop") throw new Error("Preflop context cannot accompany a postflop packet");
     const context = buildPreflopContext(packet.preflop);

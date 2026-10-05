@@ -71,15 +71,21 @@ describe("validateDecisionPacket — accepts valid packets", () => {
     expect(() => validateDecisionPacket(packet)).not.toThrow();
   });
 
-  it("defaults dataConfidence to 'high' when omitted", () => {
+  it("defaults dataConfidence to 'low' when omitted", () => {
     const packet = validPacket() as Record<string, unknown>;
     delete packet.dataConfidence;
     const result = validateDecisionPacket(packet);
-    expect(result.dataConfidence).toBe("high");
+    expect(result.dataConfidence).toBe("low");
   });
 });
 
 describe("validateDecisionPacket — rejects invalid packets", () => {
+  it("rejects duplicate cards and inconsistent board/street", () => {
+    const duplicate = validPacket(); duplicate.table.board[0] = duplicate.hero.holeCards[0]!;
+    expect(() => validateDecisionPacket(duplicate)).toThrow("Duplicate");
+    const street = validPacket(); street.table.street = "river";
+    expect(() => validateDecisionPacket(street)).toThrow("Board count");
+  });
   it("rejects a packet missing hero entirely", () => {
     const packet = validPacket() as Record<string, unknown>;
     delete packet.hero;

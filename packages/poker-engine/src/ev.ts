@@ -8,8 +8,7 @@ export interface PotOddsResult {
 /**
  * Pot odds: the equity you need for a call to break even long-run.
  * Does not account for implied odds (future betting) — that's a separate,
- * harder-to-quantify concept the AI reasoning layer will handle, not this
- * deterministic calculation.
+ * model that this deterministic calculation does not supply.
  */
 export function calculatePotOdds(currentPot: number, amountToCall: number): PotOddsResult {
   if (currentPot < 0) throw new Error(`currentPot cannot be negative, got ${currentPot}`);
@@ -56,9 +55,8 @@ export function calculateFoldEV(): EVResult {
  * assumption: opponent either folds (fold-equity) or calls with the
  * remaining range. This is intentionally a simplified model — full raise
  * EV depends on opponent's exact continuing range and future streets,
- * which belongs in the AI reasoning layer's judgment, not a deterministic
- * formula. This gives a first-order estimate assuming a single opponent
- * response probability.
+ * which needs an explicit response model beyond this formula. The policy
+ * layer must retain those assumptions and uncertainty when comparing actions.
  */
 export function calculateBetEV(
   equityIfCalled: number,
@@ -83,6 +81,32 @@ export function calculateBetEV(
 
   const ev = foldEquity * evIfFold + (1 - foldEquity) * evIfCall;
   return { ev };
+}
+
+/**
+ * Heads-up fold-or-call model, measured from the current decision.
+ * The pot already includes existing street contributions. Investment is NEW
+ * hero chips; opponentCall is only the opponent's NEW matching contribution.
+ * Unlike a fresh bet, these amounts differ for a raise. No future betting,
+ * re-raises, rake, side pots, or uncalled chips are included.
+ */
+export function calculateRaiseEV(
+  equityIfCalled: number,
+  foldEquity: number,
+  currentPot: number,
+  investment: number,
+  opponentCall: number,
+): EVResult {
+  if (![equityIfCalled, foldEquity].every(p => Number.isFinite(p) && p >= 0 && p <= 1)) {
+    throw new Error("Equity and fold equity must be finite probabilities");
+  }
+  if (!Number.isFinite(currentPot) || currentPot < 0 ||
+      !Number.isFinite(investment) || investment <= 0 ||
+      !Number.isFinite(opponentCall) || opponentCall <= 0 || opponentCall > investment) {
+    throw new Error("Invalid pot, investment, or additional opponent call");
+  }
+  return { ev: foldEquity * currentPot + (1 - foldEquity) *
+    (equityIfCalled * (currentPot + opponentCall) - (1 - equityIfCalled) * investment) };
 }
 export function calculateSPR(effectiveStack: number, currentPot: number): number {
   if (currentPot <= 0) throw new Error(`currentPot must be positive to compute SPR, got ${currentPot}`);

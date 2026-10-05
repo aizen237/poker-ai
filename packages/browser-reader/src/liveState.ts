@@ -2,6 +2,7 @@ import { assembleGameState, calculateAmountToCall, type PokerGameState, type Raw
 import { computeDataConfidence, type ConfidenceResult } from "./dataConfidence.js";
 import { assignPositions, type Position } from "./position.js";
 import { parseBlindValues } from "./tableInfoParsing.js";
+import { readPotProvenance, type PotProvenance } from "./potSemantics.js";
 
 export interface LiveReadContext {
   blindTexts: readonly (string | null)[];
@@ -20,10 +21,27 @@ export interface LiveStateAssessment {
   activeOpponents: number | null;
   /** Intentionally unresolved: never substitute main or add-on without live evidence. */
   decisionPot: number | null;
+  pot: PotProvenance;
+  legality: {
+    verified: boolean;
+    contributionMeaning: "unverified";
+    minBet: number | null;
+    minRaiseTo: number | null;
+    chipUnit: number | null;
+    aggressionReopened: boolean | null;
+    reasons: string[];
+  };
 }
 
 /** Pure assessment of one read; test fixtures are raw values, not invented DOM markup. */
 export function assessLiveState(raw: RawTableInput, context: LiveReadContext): LiveStateAssessment {
+  const pot = readPotProvenance(raw);
+  const legality: LiveStateAssessment["legality"] = {
+    verified: false, contributionMeaning: "unverified", minBet: null, minRaiseTo: null,
+    chipUnit: null, aggressionReopened: null,
+    reasons: ["Current-bet totals and absent/check-as-zero need live confirmation.",
+      "Action controls, minimum raise-to, chip unit and reopening rights have no verified reader."],
+  };
   const blinds = parseBlindValues(context.blindTexts);
   const readErrors = [...context.readErrors];
   if (blinds.smallBlind === null) readErrors.push("small blind could not be read");
@@ -36,7 +54,7 @@ export function assessLiveState(raw: RawTableInput, context: LiveReadContext): L
     state = assembleGameState(raw);
   } catch (error) {
     return {
-      state: null, ...blinds, positions: new Map(), amountToCall: null, activeOpponents: null, decisionPot: null,
+      state: null, ...blinds, positions: new Map(), amountToCall: null, activeOpponents: null, decisionPot: pot.decisionPot, pot, legality,
       confidence: { level: "low", reasons: [...readErrors, error instanceof Error ? error.message : String(error)] },
     };
   }
@@ -47,10 +65,11 @@ export function assessLiveState(raw: RawTableInput, context: LiveReadContext): L
     amountToCall,
     bigBlindWasDefaulted: blinds.bigBlind === null,
     isPositionKnown: hero !== undefined && positions.has(hero.seatNumber),
-    potSemanticsVerified: false,
+    potSemanticsVerified: pot.isPotSemanticsVerified,
+    contributionSemanticsVerified: false,
   });
   return {
-    state, ...blinds, positions, amountToCall, decisionPot: null,
+    state, ...blinds, positions, amountToCall, decisionPot: pot.decisionPot, pot, legality,
     activeOpponents: state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded).length,
     confidence: readErrors.length > 0
       ? { level: "low", reasons: [...readErrors, ...confidence.reasons] }

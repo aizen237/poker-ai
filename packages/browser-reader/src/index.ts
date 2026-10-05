@@ -5,3 +5,6 @@ export * from "./dataConfidence.js";
 export * from "./actionHistory.js";
 export * from "./position.js";
 export * from "./liveState.js";
+export * from "./potSemantics.js";
+export * from "./legalityProof.js";
+export * from "./liveLegalityEvidence.js";

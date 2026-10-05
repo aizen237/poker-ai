@@ -1,3 +1,4 @@
+import { decisionPolicyPromptLines } from "../decisionPolicy.js";
 import { preflopPromptLines } from "../preflopContext.js";
 import { formatCards } from "@poker-ai/shared";
 import { evaluateBest, HAND_CATEGORY_NAMES } from "@poker-ai/poker-engine";
@@ -8,7 +9,7 @@ import type { AIProvider, AIProviderMetadata, GetRecommendationOptions } from ".
 
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 
-const PROMPT_VERSION = "v8-opponent-evidence";
+const PROMPT_VERSION = "v9-engine-policy";
 
 /**
  * Builds the prompt from a decision packet. Deliberately concise and
@@ -42,6 +43,7 @@ function buildPrompt(packet: DecisionPacket): string {
   lines.push(`Candidate actions (the only ones on the table right now): ${packet.candidateActions.join(", ")}.`);
 
   lines.push(...preflopPromptLines(packet));
+  lines.push(...decisionPolicyPromptLines(packet));
   const calc = packet.engineCalculations;
   if (calc.equity !== undefined) {
     lines.push(`Hero's equity: ${(calc.equity * 100).toFixed(1)}%.`);
@@ -95,6 +97,7 @@ export function createGroqProvider(providerOptions: GroqProviderOptions): AIProv
     try {
       const response = await fetch(GROQ_API_URL, {
         method: "POST",
+        signal: AbortSignal.timeout(20_000),
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${providerOptions.apiKey}`,

@@ -5,6 +5,7 @@ import {
   calculateFoldEV,
   calculatePotOdds,
   calculateSPR,
+  calculateRaiseEV,
 } from "./ev.js";
 
 describe("calculatePotOdds", () => {
@@ -102,5 +103,23 @@ describe("calculateSPR", () => {
   it("throws when pot is non-positive", () => {
     expect(() => calculateSPR(100, 0)).toThrow();
     expect(() => calculateSPR(100, -5)).toThrow();
+  });
+});
+
+describe("calculateRaiseEV", () => {
+  it("distinguishes new investment from the opponent's additional call", () => {
+    expect(calculateRaiseEV(0.6, 0.2, 20, 15, 10).ev).toBeCloseTo(13.6);
+  });
+  it("agrees with fresh-bet EV when both investments match", () => {
+    expect(calculateRaiseEV(0.6, 0.2, 20, 10, 10).ev).toBeCloseTo(calculateBetEV(0.6, 0.2, 20, 10).ev);
+  });
+  it("wins just the existing pot when opponent always folds", () => {
+    expect(calculateRaiseEV(0, 1, 20, 15, 10).ev).toBe(20);
+  });
+  it.each([
+    [NaN, 0.2, 20, 15, 10], [0.5, Infinity, 20, 15, 10], [0.5, 0.2, -1, 15, 10],
+    [0.5, 0.2, 20, 0, 10], [0.5, 0.2, 20, 15, 0], [0.5, 0.2, 20, 15, 20],
+  ])("rejects invalid or unmatched amounts %j", (e, f, p, i, c) => {
+    expect(() => calculateRaiseEV(e!, f!, p!, i!, c!)).toThrow();
   });
 });

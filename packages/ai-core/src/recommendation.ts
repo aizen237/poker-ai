@@ -8,6 +8,7 @@ import { z } from "zod";
  */
 export const RecommendationSchema = z.object({
   action: z.enum(["FOLD", "CHECK", "CALL", "BET", "RAISE", "ALL_IN"]),
+  /** Additional investment from this decision, in BB; not a total raise-to. */
   sizingBB: z.number().positive().optional(),
   confidence: z.number().min(0).max(1),
   reasoning: z.string().min(1),

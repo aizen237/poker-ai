@@ -12,10 +12,7 @@ import {
   createModelRouter,
   getModelsByProvider,
   validateDecisionPacket,
-  preflopUncertainty,
-  validateActionLegality,
-  validateReasoningConsistency,
-  type RouterOptions,
+  getPolicyRecommendation,
 } from "@poker-ai/ai-core";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -65,16 +62,25 @@ const opponentService = createOpponentService(async () => {
 });
 
 const app = express();
-app.use(cors());
+const allowedOrigins = new Set(["https://www.pokernow.com", "https://pokernow.com", "https://www.pokernow.club", "https://pokernow.club"]);
+// Reject before handlers, including simple requests; CORS headers alone do not prevent writes.
+app.use((req, res, next) => {
+  if (!["localhost", "127.0.0.1", "[::1]"].includes(req.hostname) ||
+      (req.headers.origin !== undefined && !allowedOrigins.has(req.headers.origin))) {
+    res.status(403).json({ ok: false, error: "Local PokerNow access only" }); return;
+  }
+  next();
+});
+app.use(cors({ origin: [...allowedOrigins], methods: ["GET", "POST", "OPTIONS"] }));
 app.use(express.json());
 
 app.post("/opponents/observations", async (req, res) => {
-  const parsed = HandObservationSchema.array().max(50).safeParse(req.body.observations);
+  const parsed = HandObservationSchema.array().max(50).safeParse(req.body?.observations);
   if (!parsed.success) { res.status(400).json({ ok:false, error:"Invalid opponent observations" }); return; }
   res.json({ ok:true, ...await opponentService.record(parsed.data) });
 });
 app.post("/opponents/profiles", async (req, res) => {
-  const parsed = ProfileLookupSchema.array().max(10).safeParse(req.body.players);
+  const parsed = ProfileLookupSchema.array().max(10).safeParse(req.body?.players);
   if (!parsed.success) { res.status(400).json({ ok:false, error:"Invalid opponent identities" }); return; }
   const results = await Promise.all(parsed.data.map(player => opponentService.profile(player.identity, player.displayName)));
   res.json({ ok:true, available:results.every(result=>result.available), profiles:results.map(result=>result.profile) });
@@ -82,7 +88,11 @@ app.post("/opponents/profiles", async (req, res) => {
 
 app.post("/recommendation", async (req, res) => {
   try {
-    const packet = validateDecisionPacket(req.body.decisionPacket);
+    const mode = req.body?.mode ?? "fast";
+    if (!["fast", "strong", "manual"].includes(mode)) {
+      res.status(400).json({ ok: false, error: "Live relay supports fast, strong or manual only; consensus is disabled." }); return;
+    }
+    const packet = validateDecisionPacket(req.body?.decisionPacket);
     // Refresh client-supplied profiles from local storage. Storage failures only supply priors.
     for (const opponent of packet.opponentContext?.opponents ?? []) {
       if (opponent.playerProfile) {
@@ -91,59 +101,11 @@ app.post("/recommendation", async (req, res) => {
         opponent.statsStorage = result.available ? "available" : "unavailable";
       }
     }
-    const mode: RouterOptions["mode"] = req.body.mode ?? "fast";
 
-    const uncertainty = preflopUncertainty(packet);
-    if (uncertainty) {
-      res.json({ ok: true, result: null, blocked: true, blockedReason: "preflop_model_uncertain", uncertainty });
-      return;
-    }
-    if (packet.dataConfidence === "low") {
-      res.json({
-        ok: true,
-        result: {
-          action: "FOLD",
-          confidence: 0,
-          reasoning: "Game state confidence is too low to make a reliable recommendation. Defaulting to FOLD rather than guessing.",
-        },
-        blocked: true,
-        blockedReason: "low_confidence",
-      });
-      return;
-    }
-
-    const result = await router.getRecommendation(packet, { mode });
-
-    if (Array.isArray(result)) {
-      // Consensus mode returns multiple providers' results, not one
-      // Recommendation -- legality validation isn't applied per-result
-      // here yet, since consensus mode isn't what the live extension
-      // actually uses today. Documented gap, not silently skipped.
-      res.json({ ok: true, result });
-      return;
-    }
-
-    const legality = validateActionLegality(result, packet);
-
-    if (!legality.isLegal) {
-      console.warn(`[Relay Server] AI recommendation rejected as illegal: ${legality.reason}`);
-    }
-
-    // Checked against whatever is actually being returned (post-legality
-    // fallback, if any) -- non-blocking, unlike legality: a contradiction
-    // here doesn't mean the action is wrong, just that the AI's stated
-    // reasoning doesn't match a fact it was given. Surfaced, not acted on.
-    const consistency = validateReasoningConsistency(legality.effectiveRecommendation, packet);
-    if (!consistency.isConsistent) {
-      console.warn(`[Relay Server] AI reasoning may be inconsistent with the facts: ${consistency.warnings.join(" ")}`);
-    }
-
-    res.json({
-      ok: true,
-      result: legality.effectiveRecommendation,
-      ...(legality.isLegal ? {} : { blocked: true, blockedReason: "illegal_action", originalReason: legality.reason }),
-      ...(consistency.isConsistent ? {} : { consistencyWarnings: consistency.warnings }),
+    const result = await getPolicyRecommendation(packet, router, { mode,
+      ...(typeof req.body.manualProviderName === "string" ? { manualProviderName: req.body.manualProviderName } : {}),
     });
+    res.json({ ok: true, ...result });
   } catch (error) {
     console.error("[Relay Server] Error handling /recommendation:", error);
     res.status(400).json({
@@ -157,8 +119,9 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true, providers: registeredProviders.map((p) => p.provider.metadata.name) });
 });
 
-const PORT = 8787;
-app.listen(PORT, () => {
+const PORT = Number(process.env.RELAY_PORT ?? 8787);
+if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) throw new Error("Invalid RELAY_PORT");
+app.listen(PORT, "127.0.0.1", () => {
   console.log(`[Relay Server] Listening on http://localhost:${PORT}`);
   console.log(`[Relay Server] Registered providers: ${registeredProviders.map((p) => p.provider.metadata.name).join(", ")}`);
 });
