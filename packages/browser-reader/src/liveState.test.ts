@@ -9,9 +9,9 @@ function rawTable(): RawTableInput {
   return {
     potMainValueText: "0", potTotalValueText: "7", boardCards: [],
     seats: [
-      { seatNumber: 1, isOccupied: true, isYou: true, playerNameText: "Hero", stackText: "100", statusClasses: ["decision-current"], holeCardClassLists: [["flipped", "card-h", "card-s-Q"], ["flipped", "card-s", "card-s-T"]], betValueText: null },
-      { seatNumber: 3, isOccupied: true, isYou: false, playerNameText: "Opponent", stackText: "100", statusClasses: [], holeCardClassLists: [["card-container"]], betValueText: null },
-      { seatNumber: 6, isOccupied: true, isYou: false, playerNameText: "Other", stackText: "100", statusClasses: [], holeCardClassLists: [], betValueText: null },
+      { seatNumber: 1, isOccupied: true, isYou: true, playerNameText: "Hero", stackText: "100", statusClasses: ["decision-current"], holeCardClassLists: [["flipped", "card-h", "card-s-Q"], ["flipped", "card-s", "card-s-T"]], betValueText: "0" },
+      { seatNumber: 3, isOccupied: true, isYou: false, playerNameText: "Opponent", stackText: "100", statusClasses: [], holeCardClassLists: [["card-container"]], betValueText: "0" },
+      { seatNumber: 6, isOccupied: true, isYou: false, playerNameText: "Other", stackText: "100", statusClasses: [], holeCardClassLists: [], betValueText: "0" },
     ],
   };
 }
@@ -27,7 +27,7 @@ describe("live read assessment", () => {
     expect(result.pot).toMatchObject({ mainPot: 0, displayedTotalPot: 7, decisionPot: null, decisionPotSource: null, isPotSemanticsVerified: false });
     expect(result.legality).toMatchObject({ verified: false, minBet: null, minRaiseTo: null, chipUnit: null, aggressionReopened: null });
     expect(result.confidence.level).toBe("low");
-    expect(result.confidence.reasons.join(" ")).toContain("pot meaning needs live confirmation");
+    expect(result.confidence.reasons.join(" ")).toContain("hero-contestable pot");
     expect(result.activeOpponents).toBe(2);
     expect([...result.positions]).toEqual([[1, "BTN"], [3, "SB"], [6, "BB"]]);
   });
@@ -175,7 +175,7 @@ describe("decision-critical confidence checks independent of the pot investigati
   it("keeps confidence low if pot semantics are known but wager-total semantics are not", () => {
     const result = computeDataConfidence(assembleGameState(rawTable()), { ...knownContext, contributionSemanticsVerified: false });
     expect(result.level).toBe("low");
-    expect(result.reasons.join(" ")).toContain("call interpretation is provisional");
+    expect(result.reasons.join(" ")).toContain("call gap unverified");
   });
   it("does not offer decisions to a hero with zero remaining chips", () => {
     const raw = rawTable(); raw.seats[0]!.stackText = "0";

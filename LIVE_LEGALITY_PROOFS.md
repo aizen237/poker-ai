@@ -1,5 +1,10 @@
 # Legality and contestable-pot evidence
 
+The [October 8 simple-pot audit](SIMPLE_POT_AUDIT.md) evaluates whether reconciled
+non-all-in snapshots can supply a decision pot. They cannot yet prove eligibility,
+return status or no-rake accounting; the document lists the missing evidence and
+the independent Portion 9 activation requirements.
+
 ## Live observations supplied on 2026-10-05
 
 - Flop `2s 8s 8d`: BB hero had 18 remaining and checked; BTN bet 3 and
@@ -15,6 +20,61 @@
 These observations establish those situations only. Matching the same numbers
 in a different hand is not proof of its history, eligibility, or action rights.
 The diagnostic adapter preserves this scope in `observations`.
+
+## Controlled live observations supplied on 2026-10-07
+
+Numeric wagers are total street contributions. Explicit `check` is zero in
+supported reads; **an absent label is still unknown**. The live assessment now
+verifies the uncapped call gap when hero and all active opponents have explicit
+readable contributions. Folded wagers are excluded from that maximum, but their
+chips are retained when reconciling the displayed pot.
+
+The observed displayed totals were `6 + 2 = 8`, `6 + 4 + 6 + 8 = 24`, and
+`6 + 36 + 18 + 36 = 96`. A current snapshot receives a display proof only if
+both pot displays and every occupied seat's explicit contribution reconcile.
+This proves **display arithmetic**, including the observed multiway case, not
+main/side-pot eligibility, awards, returns or a usable EV pot. Remaining stacks
+are never added. The observed call gaps `8 - 2 = 6` and `8 - 4 = 4` are covered.
+
+`scopedLiveVerification.ts` reuses the arithmetic proof below but releases only
+the observed flop/BB=2 raise patterns: opening 2, opening 3, 3 then 6, and
+3 then 6 then all-in 8. It requires independent complete ordered evidence,
+including hero actions, attached to the exact current snapshot; replayed stacks,
+contributions, roster and all-in states must match. Selected raise amounts,
+slider attributes and approximate polling records never supply that evidence.
+The extension currently has **no complete ordered event source**, so automatic
+live raise proofs remain unknown even when a snapshot has matching numbers.
+
+For the short all-in sequence, the last full increment is 3. The full minimum
+**before** the all-in to 8 was 9. The arithmetic full minimum **after** it is 11;
+that is not a captured UI selection or permission to raise. Non-reopening is
+certified only for the prior raiser at 6, still facing 2 with chips behind, as in
+the disabled-Raise observation. Other actors, full all-in reopening, cumulative
+short raises and other sequences remain unknown. Historical classification as
+a short raise does not certify permission for a new stack-capped under-raise.
+
+The supplied fold/check/all-in behavior, 0/3/4/5 board progression, observed
+new-hand reset and unequal heads-up all-in display are regression-covered.
+This does not establish reliable away/sit-out detection or a stable hand ID.
+The saved JSON fixture contains human-reported values, not invented DOM.
+
+Diagnostics expose these facts with `value`, `status`, `confidence`, `source`
+and explicit unknown `reasons`:
+
+| Diagnostic field | Meaning |
+| --- | --- |
+| `monetary.contributionSemantics` | Explicit active-seat street totals/check labels |
+| `monetary.callGap` | Uncapped opposing maximum minus hero contribution |
+| `monetary.potDisplayReconciliation` | Collected + all explicit contributions = displayed total |
+| `legality.proof.betting.lastFullRaiseAmount` | Ordered full-raise increment, never guessed from a snapshot |
+| `legality.proof.betting.fullMinimumRaiseTo` | Arithmetic bound, separate from permission |
+| `legality.proof.betting.minimumBeforeLastAggression` | Bound before the observed raise/short shove |
+| `legality.proof.betting.shortUnderRaise` | Historical classification; unknown without ordered evidence |
+| `legality.proof.betting.actionReopened` | Scoped prior actor's non-reopening; otherwise unknown |
+
+`isPotSemanticsVerified` retains its stricter EV meaning. It stays false alongside
+null `decisionPot`, `legality.verified=false`, low overall confidence and blocked
+live recommendations, even when individual display/call facts are proven.
 
 ## Implemented proofs
 
@@ -60,7 +120,8 @@ adapter does not fabricate inputs to either proof:
   Distinct observation numbers and no read errors do not prove complete order.
 - Whole-hand contributions, departed/folded money, uncalled returns, rake and
   side-pot eligibility have no complete live ledger.
-- The supplied under-raise capture establishes stack capping, not reopening.
+- The October 5 stack-cap capture does not prove reopening. The October 7
+  short-all-in sequence proves only the prior actor's denied raise right above.
 - Exact chip-unit, action-control, pot, equity and existing policy gates remain.
 
 Incomplete input produces unknown facts, never a guessed minimum/contestable pot.
@@ -75,7 +136,8 @@ Reload the extension, refresh PokerNow and capture diagnostics with
 Inspect `legality.proof` alongside `legality.raiseControl`:
 
 1. Compare collected + all explicit street contributions (including folded money)
-   against displayed total. `displayReconciliation.matches` is arithmetic only.
+   against displayed total. `displayReconciliation.matches` is arithmetic only;
+   a proven display is not a proven hero-contestable pot.
    Missing labels remain unknown; explicit check-as-zero matches the supplied case.
 2. Capture the entire ordered street, including hero actions and the last full
    raise, before testing short all-ins. Record whether the previously acting

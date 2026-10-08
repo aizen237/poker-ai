@@ -186,7 +186,7 @@ describe("live proof adapter never certifies incomplete polling history", () => 
   it("records the live equality while withholding contestability/minimum/reopening", () => {
     const raw = captured(); const assessment = assessLiveState(raw, { blindTexts: ["1", "2"], dealerSeatNumber: 2, readErrors: [] });
     const proof = assessLiveLegalityEvidence(raw, assessment, emptyActionHistory());
-    expect(proof.displayReconciliation).toMatchObject({ matches: true, currentStreetSubtotal: 3, confidence: "observation_only" });
+    expect(proof.displayReconciliation).toMatchObject({ matches: true, currentStreetSubtotal: 3, status: "proven", confidence: "high" });
     expect(proof.heroMaximumRaiseTo.value).toBe(18);
     expect(proof.betting.fullMinimumRaiseTo.status).toBe("unknown");
     expect(proof.contestablePot.contestablePotBeforeCall.status).toBe("unknown");

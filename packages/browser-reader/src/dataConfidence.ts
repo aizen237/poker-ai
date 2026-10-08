@@ -7,7 +7,7 @@ export interface ConfidenceContext {
   amountToCall: number | null;
   /** Explicit evidence is required before either displayed pot is used in a decision. */
   potSemanticsVerified: boolean;
-  /** Live reads explicitly mark the street-total/absent-marker interpretation unverified. */
+  /** True only for explicitly readable totals/check labels; absent markers remain unknown. */
   contributionSemanticsVerified?: boolean;
   /**
    * Legacy field name: true when the big blind could not be read this
@@ -107,10 +107,10 @@ export function computeDataConfidence(state: PokerGameState, context: Confidence
     criticalReasons.push("add-on pot value is invalid");
   }
   if (!context.potSemanticsVerified) {
-    criticalReasons.push("main/add-on pot meaning needs live confirmation -- pot-based recommendations withheld");
+    criticalReasons.push("hero-contestable pot, uncalled returns and rake/drop remain unverified -- EV recommendations withheld");
   }
   if (context.contributionSemanticsVerified === false) {
-    criticalReasons.push("current-bet totals and absent/check markers need live confirmation -- call interpretation is provisional");
+    criticalReasons.push("active contribution data is incomplete or ambiguous -- call gap unverified; absent labels are not proven zero");
   }
 
   if (context.amountToCall === null || !Number.isFinite(context.amountToCall) || context.amountToCall < 0) {

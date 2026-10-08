@@ -9,6 +9,7 @@ export interface PotProvenance {
   displayedTotalPot: number | null;
   decisionPot: number | null;
   decisionPotSource: string | null;
+  /** EV eligibility/returns/rake gate, NOT verification of displayed-total arithmetic. */
   isPotSemanticsVerified: boolean;
 }
 

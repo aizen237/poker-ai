@@ -4071,8 +4071,8 @@
       ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: "Partial histories cannot supply unbiased rate denominators" });
   });
   function identityKey(identity2) {
-    const valid = PlayerIdentitySchema.parse(identity2);
-    return JSON.stringify([valid.kind, valid.scope, valid.value]);
+    const valid2 = PlayerIdentitySchema.parse(identity2);
+    return JSON.stringify([valid2.kind, valid2.scope, valid2.value]);
   }
   function summarizeHand(e) {
     const metrics = { vpip: null, pfr: null, threeBet: null, foldToThreeBet: null, cBet: null, foldToCBet: null, wtsd: null, wsd: null };
@@ -4323,14 +4323,14 @@
   };
 
   // ../../packages/shared/dist/simulationInput.js
-  function validateSimulationInput(known, boardCount, iterations) {
+  function validateSimulationInput(known2, boardCount, iterations) {
     if (![0, 3, 4, 5].includes(boardCount))
       throw new Error("Invalid board count");
     if (!Number.isSafeInteger(iterations) || iterations < 1)
       throw new Error("Iterations must be a positive integer");
-    if (known.some((c) => !Number.isInteger(c.rank) || c.rank < 2 || c.rank > 14 || !["s", "h", "d", "c"].includes(c.suit)))
+    if (known2.some((c) => !Number.isInteger(c.rank) || c.rank < 2 || c.rank > 14 || !["s", "h", "d", "c"].includes(c.suit)))
       throw new Error("Invalid card");
-    if (new Set(known.map((c) => `${c.rank}${c.suit}`)).size !== known.length)
+    if (new Set(known2.map((c) => `${c.rank}${c.suit}`)).size !== known2.length)
       throw new Error("Duplicate known cards");
   }
 
@@ -4702,10 +4702,10 @@
     if (board.length !== 3 && board.length !== 4) {
       throw new Error(`calculateOuts requires a 3-card (flop) or 4-card (turn) board, got ${board.length}`);
     }
-    const known = [...holeCards, ...board];
-    const knownIds = new Set(known.map((c) => `${c.rank}${c.suit}`));
+    const known2 = [...holeCards, ...board];
+    const knownIds = new Set(known2.map((c) => `${c.rank}${c.suit}`));
     const unseenCards = fullDeck().filter((c) => !knownIds.has(`${c.rank}${c.suit}`));
-    const currentCategory = evaluateBest(known).category;
+    const currentCategory = evaluateBest(known2).category;
     const outs = [];
     for (const candidate of unseenCards) {
       const nextBoard = [...board, candidate];
@@ -5187,8 +5187,8 @@
     return result;
   }
   function estimateOpponentRange(input) {
-    const known = input.knownCards ?? [];
-    if (new Set(known.map((c) => c.rank + c.suit)).size !== known.length)
+    const known2 = input.knownCards ?? [];
+    if (new Set(known2.map((c) => c.rank + c.suit)).size !== known2.length)
       throw new Error("Duplicate known cards");
     let range = input.baseline ? new Map(input.baseline.range) : rangeFromList(allHandTypes().map(formatHandType));
     for (const [hand, weight] of range) {
@@ -5215,7 +5215,7 @@
       warn("Opponent position is unknown.");
     if (entryMultiplier !== 1 || aggressionMultiplier !== 1)
       warn("Range width uses opportunity-aware shrunk VPIP/PFR with a second reliability discount and bounded adjustment. Fold-to-3bet is not substituted for shove fold equity.");
-    const available = (candidate) => expandRange(candidate, known).some((c) => c.weight > 0);
+    const available = (candidate) => expandRange(candidate, known2).some((c) => c.weight > 0);
     let previousStreet = -1;
     let previousObservation = -1;
     for (const event of input.actions) {
@@ -5294,7 +5294,7 @@
         modeled ||= establishesModel;
       }
     }
-    const combos = expandRange(range, known);
+    const combos = expandRange(range, known2);
     const status = combos.length === 0 ? "unavailable" : modeled ? "modeled" : "prior_only";
     if (status !== "modeled")
       warn(status === "unavailable" ? "Supplied prior has no legal combos; equity is unavailable, not replaced by random hands." : "No supported conditioning evidence; broad legal-card prior only, not an estimated opponent strategy.");
@@ -5343,8 +5343,8 @@
       throw new Error("Board must contain 0, 3, 4, or 5 cards");
     if (opponentRanges.length < 1 || opponentRanges.length > 9)
       throw new Error("Requires 1 to 9 opponent ranges");
-    const known = [...heroCards2, ...board];
-    if (new Set(known.map(cardId)).size !== known.length)
+    const known2 = [...heroCards2, ...board];
+    if (new Set(known2.map(cardId)).size !== known2.length)
       throw new Error("Duplicate known cards");
     const iterations = options.iterations ?? 1e4;
     const maxAttempts = options.maxSamplingAttempts ?? Math.max(1e3, iterations * 100);
@@ -5360,7 +5360,7 @@
       return value;
     };
     const ranges = opponentRanges.map((range, i) => {
-      const combos = expandRange(range, known).map(masked);
+      const combos = expandRange(range, known2).map(masked);
       const mass = combos.reduce((sum, combo) => sum + combo.weight, 0);
       if (combos.length === 0 || mass <= 0)
         throw new Error("Opponent " + (i + 1) + " range has no legal combos after known-card removal");
@@ -5383,7 +5383,7 @@
         usedLow |= combo.low;
         usedHigh |= combo.high;
       }
-      const deck = new Deck(rng, [...known, ...hands.flatMap((hand) => hand.cards)]);
+      const deck = new Deck(rng, [...known2, ...hands.flatMap((hand) => hand.cards)]);
       const runout = [...board, ...deck.drawMany(5 - board.length)];
       const heroValue = evaluateBest([...heroCards2, ...runout]).value;
       const values = hands.map((hand) => evaluateBest([...hand.cards, ...runout]).value);
@@ -5652,7 +5652,7 @@
   function policyContextProblems(packet, ctx) {
     const legal = ctx.legal;
     const call = Math.max(0, legal.opponentStreetBetBB - legal.heroStreetBetBB);
-    const onGrid = (value) => near(value / legal.chipUnitBB, Math.round(value / legal.chipUnitBB));
+    const onGrid2 = (value) => near(value / legal.chipUnitBB, Math.round(value / legal.chipUnitBB));
     const problems = potEvidenceProblems(packet);
     if (!legal.verified)
       problems.push("Exact action legality has not been verified.");
@@ -5674,7 +5674,7 @@
       packet.hero.stackBB,
       legal.minBetBB,
       ...legal.minRaiseToBB === null ? [] : [legal.minRaiseToBB]
-    ].every(onGrid)) {
+    ].every(onGrid2)) {
       problems.push("Chip amounts or legal bounds do not match the verified chip unit.");
     }
     if (call > 0 && legal.aggressionReopened && legal.opponentStackBB > 0 && (legal.minRaiseToBB === null || legal.minRaiseToBB <= legal.opponentStreetBetBB)) {
@@ -6333,18 +6333,6 @@
       street: deriveStreet(board.length)
     };
   }
-  function calculateAmountToCall(state) {
-    const heroes = state.seats.filter((s) => s.isOccupied && s.isYou);
-    const hero = heroes[0];
-    if (heroes.length !== 1 || !hero || hero.isFolded)
-      return null;
-    const relevantSeats = state.seats.filter((s) => s.isOccupied && !s.isFolded);
-    if (relevantSeats.some((s) => s.betReadError || s.currentBet !== null && (!Number.isFinite(s.currentBet) || s.currentBet < 0)))
-      return null;
-    const heroBet = hero?.currentBet ?? 0;
-    const highestOpponentBet = state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded && s.currentBet !== null).reduce((max, s) => Math.max(max, s.currentBet), 0);
-    return Math.max(0, highestOpponentBet - heroBet);
-  }
 
   // ../../packages/browser-reader/dist/dataConfidence.js
   var EXPECTED_BOARD_COUNT = {
@@ -6403,10 +6391,10 @@
       criticalReasons.push("add-on pot value is invalid");
     }
     if (!context.potSemanticsVerified) {
-      criticalReasons.push("main/add-on pot meaning needs live confirmation -- pot-based recommendations withheld");
+      criticalReasons.push("hero-contestable pot, uncalled returns and rake/drop remain unverified -- EV recommendations withheld");
     }
     if (context.contributionSemanticsVerified === false) {
-      criticalReasons.push("current-bet totals and absent/check markers need live confirmation -- call interpretation is provisional");
+      criticalReasons.push("active contribution data is incomplete or ambiguous -- call gap unverified; absent labels are not proven zero");
     }
     if (context.amountToCall === null || !Number.isFinite(context.amountToCall) || context.amountToCall < 0) {
       criticalReasons.push("amount-to-call is missing or invalid");
@@ -6674,6 +6662,209 @@
     };
   }
 
+  // ../../packages/browser-reader/dist/legalityProof.js
+  var known = (value, source) => ({ value, status: "proven", confidence: "high", source, reasons: [] });
+  var unknown = (reason) => ({ value: null, status: "unknown", confidence: "low", source: "insufficient evidence", reasons: [reason] });
+  function unknownBettingProof(reason) {
+    return {
+      lastFullRaiseAmount: unknown(reason),
+      fullMinimumRaiseTo: unknown(reason),
+      stackCappedUnderRaiseTo: unknown(reason),
+      actionReopened: unknown(reason)
+    };
+  }
+  var valid = (n) => Number.isFinite(n) && n >= 0;
+  var onGrid = (n, unit) => valid(n) && Number.isSafeInteger(Math.round(n / unit)) && Math.abs(n / unit - Math.round(n / unit)) < 1e-8;
+  function proveBettingLegality(input) {
+    const fail = unknownBettingProof;
+    if (input.coverage !== "complete_ordered")
+      return fail("Ordered street history is incomplete; hero actions or intervening raises may be missing.");
+    if (!input.source.trim() || !input.rulesVerified || !input.rulesSource.trim())
+      return fail("No independently verified no-limit rule profile/source.");
+    if (!valid(input.chipUnit) || input.chipUnit === 0 || !onGrid(input.bigBlind, input.chipUnit) || input.bigBlind === 0)
+      return fail("Blind/chip unit is unknown or invalid.");
+    if (input.players.length < 2 || new Set(input.players.map((p) => p.seat)).size !== input.players.length || input.players.some((p) => !Number.isInteger(p.seat) || p.seat < 1 || !onGrid(p.contribution, input.chipUnit) || !onGrid(p.remainingStack, input.chipUnit)))
+      return fail("Invalid or ambiguous starting roster/contributions/stacks.");
+    const units = (n) => Math.round(n / input.chipUnit);
+    const bb = units(input.bigBlind);
+    const players = new Map(input.players.map((p) => [p.seat, { total: units(p.contribution), stack: units(p.remainingStack), folded: false }]));
+    const hero = players.get(input.heroSeat);
+    if (!hero)
+      return fail("Hero is absent from the street baseline.");
+    let highest = Math.max(...[...players.values()].map((p) => p.total));
+    if (input.street !== "preflop" && highest !== 0 || input.street === "preflop" && highest !== bb)
+      return fail("Street baseline is not verified ordinary blinds/zero postflop contributions; straddles and short blinds are unsupported.");
+    let lastFull = bb;
+    const acted = /* @__PURE__ */ new Map();
+    const reopened = (seat) => {
+      const prior = acted.get(seat);
+      return !prior || highest - prior.total >= prior.increment;
+    };
+    let sequence = -1;
+    for (const event of input.events) {
+      const player2 = players.get(event.seat);
+      if (!Number.isInteger(event.sequence) || event.sequence <= sequence || !player2 || player2.folded || player2.stack === 0 || !onGrid(event.raiseTo, input.chipUnit))
+        return fail("Unordered/ambiguous event or invalid actor/amount.");
+      sequence = event.sequence;
+      const total = units(event.raiseTo);
+      const addition = total - player2.total;
+      if (event.action === "fold" || event.action === "check") {
+        if (addition !== 0 || event.allIn || event.action === "check" && player2.total !== highest)
+          return fail("Check/fold contradicts the contribution ledger.");
+        if (event.action === "fold")
+          player2.folded = true;
+      } else {
+        if (addition <= 0 || addition > player2.stack || event.allIn !== (addition === player2.stack))
+          return fail("Wager/all-in contradicts independently known remaining chips.");
+        if (total < highest && !event.allIn)
+          return fail("Incomplete call without an all-in.");
+        if (total > highest) {
+          if (!reopened(event.seat))
+            return fail("Raise attempted without reopened action.");
+          if (![...players.entries()].some(([seat, p]) => seat !== event.seat && !p.folded && p.stack > 0))
+            return fail("No opponent has chips to respond to aggression.");
+          const increment = total - highest;
+          if (highest === 0 && increment < bb)
+            return fail("Short all-in opening bet is outside this verified rule subset.");
+          if (increment < lastFull && !event.allIn)
+            return fail("Subminimum raise is not all-in.");
+          if (increment >= lastFull)
+            lastFull = increment;
+          highest = total;
+        }
+        player2.stack -= addition;
+        player2.total = total;
+      }
+      acted.set(event.seat, { total: highest, increment: lastFull });
+    }
+    const source = `${input.source}; ${input.rulesSource}; complete ordered ${input.street} replay`;
+    const rights = !hero.folded && hero.stack > 0 && reopened(input.heroSeat);
+    const maximum = hero.total + hero.stack;
+    const canRespond = [...players.entries()].some(([seat, p]) => seat !== input.heroSeat && !p.folded && p.stack > 0);
+    return {
+      lastFullRaiseAmount: known(lastFull * input.chipUnit, source),
+      fullMinimumRaiseTo: highest > 0 ? known((highest + lastFull) * input.chipUnit, source) : unknown("No outstanding wager: this is a bet, not a raise."),
+      stackCappedUnderRaiseTo: known(rights && canRespond && highest > 0 && maximum > highest && maximum < highest + lastFull ? maximum * input.chipUnit : null, source),
+      actionReopened: known(rights, source)
+    };
+  }
+  function unknownContestablePot(reason) {
+    return { contestablePotBeforeCall: unknown(reason), contestablePotAfterCall: unknown(reason), callCost: unknown(reason), pots: [], uncalledReturns: [] };
+  }
+
+  // ../../packages/browser-reader/dist/scopedLiveVerification.js
+  var CONTROLLED_LIVE_SOURCE = "PokerNow controlled live evidence supplied 2026-10-07";
+  function contribution2(seat) {
+    if (!seat.betReadError && seat.currentBet !== null && Number.isFinite(seat.currentBet) && seat.currentBet >= 0) {
+      return known(seat.currentBet, `${CONTROLLED_LIVE_SOURCE}; seat ${seat.seatNumber} numeric current-street total`);
+    }
+    if (!seat.betReadError && seat.currentBet === null && seat.isChecking) {
+      return known(0, `${CONTROLLED_LIVE_SOURCE}; seat ${seat.seatNumber} explicit check = zero`);
+    }
+    return unknown(`Seat ${seat.seatNumber}: contribution absent or unreadable; only numeric totals and explicit check are supported.`);
+  }
+  function assessScopedMonetary(state, pot, readErrors) {
+    const seats = state?.seats.filter((s) => s.isOccupied) ?? [];
+    const invalid = state === null || seats.length < 2 || new Set(seats.map((s) => s.seatNumber)).size !== seats.length || readErrors.length > 0;
+    const invalidReason = `No unambiguous current table read${readErrors.length ? ": " + readErrors.join("; ") : ""}.`;
+    const rows = seats.map((s) => ({
+      seat: s.seatNumber,
+      folded: s.isFolded,
+      contribution: invalid ? unknown(invalidReason) : contribution2(s)
+    }));
+    const active = rows.filter((s) => !s.folded);
+    const missing = active.flatMap((s) => s.contribution.reasons);
+    const semantics = invalid || active.length < 2 || missing.length ? unknown(invalid ? invalidReason : missing.join(" ") || "Fewer than two active participants.") : known("total_street_contributions", `${CONTROLLED_LIVE_SOURCE}; explicit active-seat contributions`);
+    const heroes = seats.filter((s) => s.isYou && !s.isFolded);
+    const hero = heroes.length === 1 ? heroes[0] : void 0;
+    const heroValue = rows.find((s) => s.seat === hero?.seatNumber)?.contribution.value;
+    const opponentValues = active.filter((s) => s.seat !== hero?.seatNumber).map((s) => s.contribution.value);
+    const highest = semantics.status === "proven" && hero && opponentValues.length ? Math.max(...opponentValues) : null;
+    const callGap = highest !== null && heroValue != null ? known(Math.max(0, highest - heroValue), `${CONTROLLED_LIVE_SOURCE}; max active opposing total minus hero total, floored at zero; uncapped gap, not all-in payable cost`) : unknown(!hero ? "Hero missing, folded or ambiguous." : semantics.reasons.join(" ") || "Opposing contributions are incomplete.");
+    const subtotal = !invalid && rows.every((s) => s.contribution.value !== null) ? rows.reduce((sum, s) => sum + s.contribution.value, 0) : null;
+    const matches = subtotal !== null && pot.mainPot !== null && pot.displayedTotalPot !== null ? Math.abs(pot.mainPot + subtotal - pot.displayedTotalPot) < 1e-8 : null;
+    const display = matches === true ? known("collected_plus_street_contributions", `${CONTROLLED_LIVE_SOURCE}; current display reconciled including folded contributions; no remaining stacks added`) : unknown(matches === false ? "Collected pot plus street contributions does not match displayed total; transition/return/accounting state is unsupported." : `Pot display reconciliation lacks readable displays or explicit contributions for all occupied seats. ${rows.flatMap((s) => s.contribution.reasons).join(" ")}`);
+    return {
+      contributionSemantics: semantics,
+      contributions: rows,
+      callGap,
+      highestOpposingContribution: highest,
+      potDisplay: {
+        ...display,
+        collectedMainPot: pot.mainPot,
+        displayedTotalPot: pot.displayedTotalPot,
+        currentStreetSubtotal: subtotal,
+        matches,
+        scope: seats.length === 2 ? "heads_up_display_only" : "multiway_display_only",
+        contestablePotVerified: false
+      }
+    };
+  }
+  var bettingSnapshotSignature = (state) => JSON.stringify(state);
+  function proveScopedLiveBetting(state, input, observedBigBlind) {
+    const fail = (reason) => ({
+      ...unknownBettingProof(reason),
+      shortUnderRaise: unknown(reason),
+      minimumBeforeLastAggression: unknown(reason)
+    });
+    if (!state || !input || input.coverage !== "complete_ordered")
+      return fail("Complete ordered street evidence including hero is unavailable; polling may omit intermediate actions.");
+    if (input.snapshotSignature !== bettingSnapshotSignature(state) || input.street !== state.street)
+      return fail("Ordered evidence does not belong to the current snapshot/street.");
+    if (observedBigBlind !== void 0 && observedBigBlind !== input.bigBlind)
+      return fail("Ordered evidence big blind does not match the current blind read.");
+    if (input.street !== "flop" || input.bigBlind !== 2)
+      return fail("Raise rule evidence is scoped to the observed flop cases with BB=2; this context is unsupported.");
+    const hero = state.seats.find((s) => s.seatNumber === input.heroSeat && s.isYou && s.isOccupied && !s.isFolded);
+    if (!hero?.isCurrentToAct)
+      return fail("Hero is not the current active decision maker.");
+    const source = `${CONTROLLED_LIVE_SOURCE}; ${input.source}; ordered sequence, arithmetic-derived bounds`;
+    const proof = proveBettingLegality({ ...input, rulesVerified: true, rulesSource: source });
+    if (proof.lastFullRaiseAmount.status !== "proven")
+      return fail(proof.lastFullRaiseAmount.reasons.join(" "));
+    const totals = new Map(input.players.map((p) => [p.seat, { total: p.contribution, stack: p.remainingStack, folded: false, allIn: p.remainingStack === 0 }]));
+    let highest = 0;
+    const aggression = [];
+    for (const event of input.events) {
+      const p = totals.get(event.seat);
+      if (event.action === "fold")
+        p.folded = true;
+      if (event.action === "wager") {
+        p.stack -= event.raiseTo - p.total;
+        p.total = event.raiseTo;
+        p.allIn = event.allIn;
+        if (event.raiseTo > highest) {
+          highest = event.raiseTo;
+          aggression.push({ total: highest, allIn: event.allIn, seat: event.seat });
+        }
+      }
+    }
+    const occupied = state.seats.filter((s) => s.isOccupied);
+    if (occupied.length !== totals.size || occupied.some((s) => {
+      const end = totals.get(s.seatNumber);
+      const read = contribution2(s);
+      return !end || read.value !== end.total || s.isFolded !== end.folded || (s.isAllIn ?? false) !== end.allIn || (end.allIn ? s.stack !== null && s.stack !== 0 : s.stack !== end.stack);
+    }))
+      return fail("Ordered events do not reconcile with current contributions, stacks, all-in states or roster.");
+    const pattern = aggression.map((a) => `${a.total}${a.allIn ? "a" : ""}`).join(",");
+    const supported = ["2", "3", "3,6", "3,6,8a"].includes(pattern);
+    const allInEvents = input.events.filter((e) => e.allIn);
+    if (!supported || allInEvents.length !== (pattern === "3,6,8a" ? 1 : 0)) {
+      return fail("Sequence outside the observed opening-bet/3\u21926\u21928 short-all-in cases. Full all-in and cumulative reopening remain unverified.");
+    }
+    const short = pattern === "3,6,8a";
+    const nonReopening = short && aggression[1].seat === input.heroSeat && hero.currentBet === 6 && hero.stack != null && hero.stack > 2 && proof.actionReopened.value === false;
+    return {
+      ...proof,
+      shortUnderRaise: known(short, source),
+      minimumBeforeLastAggression: pattern.startsWith("3,6") ? known(short ? 9 : 6, source) : unknown("Last aggression was an opening bet, not a raise."),
+      // The capture proves a particular already-acted player's denied raise right.
+      // Do not promote mathematical full-raise reopening to live verification.
+      actionReopened: nonReopening ? known(false, `${source}; player raised to 6, faces Call 2 after short all-in to 8; Raise disabled`) : unknown("Reopening for this actor/sequence has not been independently observed; full all-in reopening is unverified."),
+      stackCappedUnderRaiseTo: unknown("No verified permission for a new stack-capped raise; historical short-under-raise classification is separate.")
+    };
+  }
+
   // ../../packages/browser-reader/dist/liveState.js
   function assessLiveState(raw, context) {
     const pot = readPotProvenance(raw);
@@ -6685,8 +6876,8 @@
       chipUnit: null,
       aggressionReopened: null,
       reasons: [
-        "Current-bet totals and absent/check-as-zero need live confirmation.",
-        "Action controls, minimum raise-to, chip unit and reopening rights have no verified reader."
+        "Contestable-pot eligibility, returns and rake/drop remain unverified.",
+        "Full live legality is not certified: exact action controls and chip units still require evidence."
       ]
     };
     const blinds = parseBlindValues(context.blindTexts);
@@ -6711,18 +6902,30 @@
         decisionPot: pot.decisionPot,
         pot,
         legality,
+        verification: { monetary: assessScopedMonetary(null, pot, readErrors), betting: proveScopedLiveBetting(null) },
         confidence: { level: "low", reasons: [...readErrors, error instanceof Error ? error.message : String(error)] }
       };
     }
     const positions = context.dealerSeatNumber === null ? /* @__PURE__ */ new Map() : assignPositions(state.seats, context.dealerSeatNumber);
     const hero = state.seats.find((s) => s.isYou);
-    const amountToCall = calculateAmountToCall(state);
+    const monetary = assessScopedMonetary(state, pot, readErrors);
+    const betting = proveScopedLiveBetting(readErrors.length ? null : state, context.bettingEvidence, blinds.bigBlind);
+    const amountToCall = monetary.callGap.value;
+    legality.contributionMeaning = monetary.contributionSemantics.status === "proven" ? "verified_total_street_contributions" : "unverified";
+    legality.minRaiseTo = betting.fullMinimumRaiseTo.value;
+    legality.aggressionReopened = betting.actionReopened.value;
+    legality.reasons.push(.../* @__PURE__ */ new Set([
+      ...monetary.callGap.reasons,
+      ...monetary.potDisplay.reasons,
+      ...betting.fullMinimumRaiseTo.reasons,
+      ...betting.actionReopened.reasons
+    ]));
     const confidence = computeDataConfidence(state, {
       amountToCall,
       bigBlindWasDefaulted: blinds.bigBlind === null,
       isPositionKnown: hero !== void 0 && positions.has(hero.seatNumber),
       potSemanticsVerified: pot.isPotSemanticsVerified,
-      contributionSemanticsVerified: false
+      contributionSemanticsVerified: monetary.contributionSemantics.status === "proven"
     });
     return {
       state,
@@ -6732,47 +6935,55 @@
       decisionPot: pot.decisionPot,
       pot,
       legality,
+      verification: { monetary, betting },
       activeOpponents: state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded).length,
       confidence: readErrors.length > 0 ? { level: "low", reasons: [...readErrors, ...confidence.reasons] } : confidence
     };
   }
 
-  // ../../packages/browser-reader/dist/legalityProof.js
-  var unknown = (reason) => ({ value: null, status: "unknown", confidence: "low", source: "insufficient evidence", reasons: [reason] });
-  function unknownBettingProof(reason) {
-    return {
-      lastFullRaiseAmount: unknown(reason),
-      fullMinimumRaiseTo: unknown(reason),
-      stackCappedUnderRaiseTo: unknown(reason),
-      actionReopened: unknown(reason)
-    };
-  }
-  function unknownContestablePot(reason) {
-    return { contestablePotBeforeCall: unknown(reason), contestablePotAfterCall: unknown(reason), callCost: unknown(reason), pots: [], uncalledReturns: [] };
-  }
-
   // ../../packages/browser-reader/dist/liveLegalityEvidence.js
   var LIVE_LEGALITY_OBSERVATIONS = {
-    source: "User live PokerNow evidence, 2026-10-05",
+    source: CONTROLLED_LIVE_SOURCE,
     scope: "Observed situations only; no automatic matching by chip amounts",
     normalRaise: { street: "flop", openingBet: 3, minRaiseButtonResult: 6, displayedBB: "3BB" },
+    normalRaise2: { street: "flop", openingBet: 2, minRaiseButtonResult: 4, displayedBB: "2BB" },
+    shortUnderRaise: {
+      orderedAggressionTotals: [3, 6, 8],
+      lastIsAllIn: true,
+      minimumBeforeShortRaise: 9,
+      alreadyActedTotal: 6,
+      displayedCall: 2,
+      raiseEnabled: false
+    },
     stackCappedRaise: { heroContribution: 2, heroRemaining: 23, opposingTotal: 20, allowedRaiseTo: 25 },
     potDisplay: { collected: 4, streetContributions: 3, displayedTotal: 7 },
+    potDisplays: [
+      { collected: 6, contributions: [2], total: 8 },
+      { collected: 6, contributions: [4, 6, 8], total: 24 },
+      { collected: 6, contributions: [36, 18, 36], total: 96 }
+    ],
     callGap: { heroContribution: 2, opposingTotal: 8, displayedCall: 6 },
+    observedStateBehavior: [
+      "Numeric wagers are total street contributions",
+      "Explicit check is zero contribution",
+      "Fold and all-in markers",
+      "Board counts 0/3/4/5 across streets",
+      "Observed new-hand board/history reset",
+      "Heads-up unequal all-in display excludes remaining stacks"
+    ],
     unverified: [
-      "Last-full-raise event coverage",
-      "PokerNow reopening after short/cumulative all-ins",
+      "Completeness of polling history",
+      "Full all-in/cumulative reopening and other actors/sequences",
       "Whole-hand eligibility and side pots",
-      "Uncalled returns and rake/drop"
+      "Uncalled returns and rake/drop",
+      "Away/sit-out detection"
     ]
   };
   function assessLiveLegalityEvidence(raw, assessment, history) {
     const state = assessment.state;
     const seats = state?.seats.filter((s) => s.isOccupied) ?? [];
     const hero = seats.find((s) => s.isYou);
-    const contributionsKnown = state !== null && seats.length > 0 && seats.every((s) => !s.betReadError && (s.currentBet !== null || s.isChecking));
-    const subtotal = contributionsKnown ? seats.reduce((sum, s) => sum + (s.currentBet ?? 0), 0) : null;
-    const { mainPot, displayedTotalPot } = assessment.pot;
+    const { monetary, betting } = assessment.verification;
     const ledgerReason = "Current street snapshots do not contain complete whole-hand contributions, all eligible/folded/departed players, returns or rake evidence.";
     return {
       observations: LIVE_LEGALITY_OBSERVATIONS,
@@ -6782,15 +6993,13 @@
         observedEvents: [...history.records.values()].reduce((n, records) => n + records.length, 0),
         reasons: ["Polling can omit intermediate actions; opponent history omits hero actions.", ...history.notes]
       },
-      betting: unknownBettingProof("Complete ordered street events including hero and a verified reopening rule profile are unavailable."),
+      contributionSemantics: monetary.contributionSemantics,
+      callGap: monetary.callGap,
+      contributions: monetary.contributions,
+      betting,
       contestablePot: unknownContestablePot(ledgerReason),
       displayReconciliation: {
-        confidence: "observation_only",
-        source: "Current DOM values; arithmetic comparison only, not pot eligibility proof",
-        collectedMainPot: mainPot,
-        displayedTotalPot,
-        currentStreetSubtotal: subtotal,
-        matches: subtotal === null || mainPot === null || displayedTotalPot === null ? null : Math.abs(mainPot + subtotal - displayedTotalPot) < 1e-8,
+        ...monetary.potDisplay,
         rawMainPotText: raw.potMainValueText,
         rawDisplayedTotalPotText: raw.potTotalValueText
       },
@@ -6801,7 +7010,8 @@
       },
       activation: { allowed: false, reasons: [
         ledgerReason,
-        "Full raise and reopening cannot be proven from this history; selected raise-to/slider values do not supply missing proof.",
+        ...betting.fullMinimumRaiseTo.reasons,
+        ...betting.actionReopened.reasons,
         "Existing pot, chip-unit, action-control and policy gates remain in force."
       ] }
     };
@@ -7024,10 +7234,13 @@
         potContainerText: read.evidence.potContainerText,
         ...assessment.pot,
         calculatedAmountToCall: assessment.amountToCall,
-        amountToCallMeaning: "uncapped opposing contribution gap; totals and absent/check-as-zero are unverified",
-        highestActiveOpposingContribution: !assessment.state || opponents.some((s) => s.betReadError) ? null : Math.max(0, ...opponents.map((s) => s.currentBet ?? 0)),
+        contributionSemantics: assessment.verification.monetary.contributionSemantics,
+        callGap: assessment.verification.monetary.callGap,
+        potDisplayReconciliation: assessment.verification.monetary.potDisplay,
+        amountToCallMeaning: "uncapped gap from explicit total street contributions/check; absent labels remain unknown; see callGap provenance",
+        highestActiveOpposingContribution: assessment.verification.monetary.highestOpposingContribution,
         knownNumericBetSubtotalIncludingFolded: assessment.state ? occupied.reduce((sum, s) => sum + (s.currentBet ?? 0), 0) : null,
-        betSubtotalHasUnknowns: !assessment.state || occupied.some((s) => s.currentBet === null || s.betReadError),
+        betSubtotalHasUnknowns: !assessment.state || assessment.verification.monetary.contributions.some((s) => s.contribution.value === null),
         // Folded money still belongs to the pot; it is excluded only from the call target.
         foldedNumericBetSubtotal: assessment.state ? occupied.filter((s) => s.isFolded).reduce((sum, s) => sum + (s.currentBet ?? 0), 0) : null,
         smallBlind: assessment.smallBlind,
@@ -7062,8 +7275,8 @@
       assumptions: {
         pot: "Total = collected + street contributions was observed live; hero eligibility, returns and side pots still require proof before EV use.",
         positions: "Ascending seat numbers assumed clockwise; verify against dealer and screen.",
-        bets: "Absent/check indicators retain the existing zero interpretation. Other action words are unknown. Confirm against controls.",
-        street: "Derived from board count; not independently read from PokerNow.",
+        bets: "Numeric labels are street totals and explicit check is zero in supported reads. Absence/other action words remain unknown.",
+        street: "Board counts 0/3/4/5 and an observed new-hand reset were confirmed live; this is not a stable hand identifier.",
         opponents: "Occupied and non-folded, including offline/all-in; sitting-out semantics still unverified."
       }
     };

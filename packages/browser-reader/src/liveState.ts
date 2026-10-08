@@ -1,14 +1,17 @@
-import { assembleGameState, calculateAmountToCall, type PokerGameState, type RawTableInput } from "./gameState.js";
+import { assembleGameState, type PokerGameState, type RawTableInput } from "./gameState.js";
 import { computeDataConfidence, type ConfidenceResult } from "./dataConfidence.js";
 import { assignPositions, type Position } from "./position.js";
 import { parseBlindValues } from "./tableInfoParsing.js";
 import { readPotProvenance, type PotProvenance } from "./potSemantics.js";
+import { assessScopedMonetary, proveScopedLiveBetting, type ScopedBettingEvidence } from "./scopedLiveVerification.js";
 
 export interface LiveReadContext {
   blindTexts: readonly (string | null)[];
   dealerSeatNumber: number | null;
   /** Missing/ambiguous selector results from this same synchronous DOM read. */
   readErrors: string[];
+  /** Optional independent complete capture; never manufactured from polling history. */
+  bettingEvidence?: ScopedBettingEvidence;
 }
 
 export interface LiveStateAssessment {
@@ -19,12 +22,16 @@ export interface LiveStateAssessment {
   bigBlind: number | null;
   amountToCall: number | null;
   activeOpponents: number | null;
-  /** Intentionally unresolved: never substitute main or add-on without live evidence. */
+  /** Unresolved contestability: reconciled display arithmetic alone is not an EV pot. */
   decisionPot: number | null;
   pot: PotProvenance;
+  verification: {
+    monetary: ReturnType<typeof assessScopedMonetary>;
+    betting: ReturnType<typeof proveScopedLiveBetting>;
+  };
   legality: {
     verified: boolean;
-    contributionMeaning: "unverified";
+    contributionMeaning: "unverified" | "verified_total_street_contributions";
     minBet: number | null;
     minRaiseTo: number | null;
     chipUnit: number | null;
@@ -39,8 +46,8 @@ export function assessLiveState(raw: RawTableInput, context: LiveReadContext): L
   const legality: LiveStateAssessment["legality"] = {
     verified: false, contributionMeaning: "unverified", minBet: null, minRaiseTo: null,
     chipUnit: null, aggressionReopened: null,
-    reasons: ["Current-bet totals and absent/check-as-zero need live confirmation.",
-      "Action controls, minimum raise-to, chip unit and reopening rights have no verified reader."],
+    reasons: ["Contestable-pot eligibility, returns and rake/drop remain unverified.",
+      "Full live legality is not certified: exact action controls and chip units still require evidence."],
   };
   const blinds = parseBlindValues(context.blindTexts);
   const readErrors = [...context.readErrors];
@@ -55,21 +62,30 @@ export function assessLiveState(raw: RawTableInput, context: LiveReadContext): L
   } catch (error) {
     return {
       state: null, ...blinds, positions: new Map(), amountToCall: null, activeOpponents: null, decisionPot: pot.decisionPot, pot, legality,
+      verification: { monetary: assessScopedMonetary(null, pot, readErrors), betting: proveScopedLiveBetting(null) },
       confidence: { level: "low", reasons: [...readErrors, error instanceof Error ? error.message : String(error)] },
     };
   }
   const positions = context.dealerSeatNumber === null ? new Map<number, Position>() : assignPositions(state.seats, context.dealerSeatNumber);
   const hero = state.seats.find((s) => s.isYou);
-  const amountToCall = calculateAmountToCall(state);
+  const monetary = assessScopedMonetary(state, pot, readErrors);
+  const betting = proveScopedLiveBetting(readErrors.length ? null : state, context.bettingEvidence, blinds.bigBlind);
+  const amountToCall = monetary.callGap.value;
+  legality.contributionMeaning = monetary.contributionSemantics.status === "proven" ? "verified_total_street_contributions" : "unverified";
+  legality.minRaiseTo = betting.fullMinimumRaiseTo.value;
+  legality.aggressionReopened = betting.actionReopened.value;
+  legality.reasons.push(...new Set([...monetary.callGap.reasons, ...monetary.potDisplay.reasons,
+    ...betting.fullMinimumRaiseTo.reasons, ...betting.actionReopened.reasons]));
   const confidence = computeDataConfidence(state, {
     amountToCall,
     bigBlindWasDefaulted: blinds.bigBlind === null,
     isPositionKnown: hero !== undefined && positions.has(hero.seatNumber),
     potSemanticsVerified: pot.isPotSemanticsVerified,
-    contributionSemanticsVerified: false,
+    contributionSemanticsVerified: monetary.contributionSemantics.status === "proven",
   });
   return {
     state, ...blinds, positions, amountToCall, decisionPot: pot.decisionPot, pot, legality,
+    verification: { monetary, betting },
     activeOpponents: state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded).length,
     confidence: readErrors.length > 0
       ? { level: "low", reasons: [...readErrors, ...confidence.reasons] }

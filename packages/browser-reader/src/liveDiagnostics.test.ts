@@ -62,6 +62,41 @@ describe("live monetary provenance and diagnostic snapshot", () => {
     expect(snapshot(input).monetary).toMatchObject({ calculatedAmountToCall: null, highestActiveOpposingContribution: null,
       knownNumericBetSubtotalIncludingFolded: 10, betSubtotalHasUnknowns: true });
   });
+  it.each(["Synthetic side-pot eligibility control", "Synthetic uncalled-return pending control"])("does not certify unclassified pot-container evidence: %s", text => {
+    const input = read();
+    input.raw.seats = input.raw.seats.slice(0, 2);
+    input.raw.seats[0]!.stackText = "50";
+    input.raw.seats[1]!.stackText = "50";
+    input.raw.seats[1]!.statusClasses = [];
+    input.raw.potTotalValueText = "27"; // Collected 5 + current contributions 2 + 20.
+    // A diagnostic string, NOT an invented PokerNow selector or captured label.
+    input.evidence.potContainerText = text;
+    const s = snapshot(input);
+    expect(s.monetary.potDisplayReconciliation.matches).toBe(true);
+    expect(s.activeOpponents.every(p => !p.isAllIn)).toBe(true);
+    expect(s.monetary).toMatchObject({ potContainerText: text, decisionPot: null, isPotSemanticsVerified: false });
+    expect(s.legality.proof.contestablePot.contestablePotBeforeCall.status).toBe("unknown");
+    expect(s.decision.packetBuilt).toBe(false);
+    expect(s.legality.proof.activation.allowed).toBe(false);
+  });
+  it("exposes scoped display/call proofs without upgrading polling or selected raise amounts", () => {
+    const input = read();
+    input.raw.potMainValueText = "6"; input.raw.potTotalValueText = "8";
+    input.raw.seats = input.raw.seats.slice(0, 2);
+    input.raw.seats[0]!.betValueText = "check";
+    input.raw.seats[1]!.betValueText = "2";
+    input.raw.seats[1]!.stackText = "50";
+    const s = snapshot(input);
+    expect(s.monetary.contributionSemantics).toMatchObject({ status: "proven", confidence: "high" });
+    expect(s.monetary.callGap).toMatchObject({ status: "proven", value: 2, source: expect.stringContaining("2026-10-07") });
+    expect(s.monetary.potDisplayReconciliation).toMatchObject({ status: "proven", matches: true, contestablePotVerified: false });
+    expect(s.monetary.betSubtotalHasUnknowns).toBe(false);
+    expect(s.legality.proof.historyCoverage.complete).toBe(false);
+    expect(s.legality.proof.betting.shortUnderRaise).toMatchObject({ status: "unknown", value: null, reasons: expect.any(Array) });
+    expect(s.legality.proof.betting.actionReopened.reasons.join(" ")).toContain("polling may omit");
+    expect(s.decision.candidateActionSizes).toEqual([]);
+    expect(s.confidence.level).toBe("low");
+  });
   it("preserves independently parsed pot displays when the state cannot be assembled", () => {
     const input = read(); input.raw.potMainValueText = "bad value";
     expect(snapshot(input).monetary).toMatchObject({ mainPot: null, displayedTotalPot: 20, decisionPot: null,

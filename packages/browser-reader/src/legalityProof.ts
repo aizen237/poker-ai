@@ -8,6 +8,7 @@ export interface ProvenFact<T> {
 }
 const known = <T>(value: T, source: string): ProvenFact<T> => ({ value, status: "proven", confidence: "high", source, reasons: [] });
 const unknown = <T>(reason: string): ProvenFact<T> => ({ value: null, status: "unknown", confidence: "low", source: "insufficient evidence", reasons: [reason] });
+export { known as provenFact, unknown as unknownFact };
 
 export interface BettingEvent {
   sequence: number;

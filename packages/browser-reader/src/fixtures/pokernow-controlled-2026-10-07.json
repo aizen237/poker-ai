@@ -1,0 +1,20 @@
+{
+  "provenance": "User-reported controlled live PokerNow observations supplied 2026-10-07; values only, not invented full DOM",
+  "potDisplays": [
+    { "main": 6, "contributions": [0, 2], "total": 8, "scaffolding": "Explicit zero hero contribution added to exercise the reported main 6 + bet 2 example" },
+    { "main": 6, "contributions": [4, 6, 8], "total": 24 },
+    { "main": 6, "contributions": [36, 18, 36], "total": 96 }
+  ],
+  "callGaps": [
+    { "hero": 2, "opponents": [8], "call": 6 },
+    { "hero": 4, "opponents": [6, 8], "call": 4 }
+  ],
+  "openingBets": [
+    { "bet": 2, "minimumRaiseTo": 4, "displayedBB": "2BB" },
+    { "bet": 3, "minimumRaiseTo": 6, "displayedBB": "3BB" }
+  ],
+  "shortAllIn": { "orderedAggression": [3, 6, 8], "minimumBeforeAllIn": 9, "lastFullIncrement": 3, "previouslyActedTotal": 6, "call": 2, "raiseEnabled": false },
+  "verifiedBoardCounts": [0, 3, 4, 5],
+  "newHandResetObserved": true,
+  "unverified": ["full all-in reopening", "side-pot eligibility/awards", "uncalled returns", "rake/drop", "whole-hand ledger", "away/sit-out", "polling completeness"]
+}

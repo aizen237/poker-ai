@@ -114,12 +114,18 @@ Low-confidence and unsupported-preflop blocks return no recommendation.
 
 ## Current live limitation
 
-The current workspace still has **unverified PokerNow pot semantics** and does
+The current workspace still has **unverified hero-contestable pot accounting** and does
 not verify exact raise controls/chip units or supply size-conditioned response
 models and range uncertainty bounds. Live polling also yields partial range
 evidence. The extension therefore does not fabricate `policyContext`, and the
 existing live read gate remains closed. Implementing the policy does not make
 those facts known or automatically enable engine-selected live advice.
+
+The controlled October 7 evidence now verifies explicit street contributions,
+supported call gaps and reconciled pot displays. Scoped raise/non-reopening
+proofs require complete ordered evidence, which live polling does not provide.
+Display verification does not certify returns, rake/drop or side-pot eligibility.
+See [LIVE_LEGALITY_PROOFS.md](LIVE_LEGALITY_PROOFS.md) for the exact boundaries.
 
 Next integration step: verify the existing live diagnostics, then populate the
 evidence contract first for closing heads-up CALL/FOLD spots. Only later supply

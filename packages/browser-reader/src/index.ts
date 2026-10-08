@@ -8,3 +8,4 @@ export * from "./liveState.js";
 export * from "./potSemantics.js";
 export * from "./legalityProof.js";
 export * from "./liveLegalityEvidence.js";
+export * from "./scopedLiveVerification.js";

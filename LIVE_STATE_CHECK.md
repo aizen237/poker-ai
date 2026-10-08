@@ -6,8 +6,10 @@ For the exact monetary data flow and code-level legality checks, see
 [LIVE_MONETARY_AUDIT.md](LIVE_MONETARY_AUDIT.md).
 
 The reader currently withholds recommendations, local push/fold output, and
-pot odds because the meaning of the displayed main/add-on pot values has not
-been confirmed. The overlay shows BLOCKED and explains the missing evidence.
+pot odds because hero-contestable eligibility, returns and rake/drop are not
+verified. Collected plus street contributions equaling displayed total has been
+confirmed in the supplied simple and multiway observations; this does not
+certify an EV pot. The overlay shows BLOCKED and explains the missing evidence.
 The packet requires a pot value; neither displayed value is substituted for it.
 This is a data validation gate, not a change to poker policy. No provider request
 is made while the gate is closed. Turning diagnostics off does not bypass it.
@@ -66,11 +68,11 @@ represent. Do not infer their meaning from a single static number.
 | Check | What to compare |
 | --- | --- |
 | Hero hole cards | Exactly two visible ranks and suits against `cards` and raw hole-card classes. Hidden opponent cards must remain empty. |
-| Board and street | All visible cards and their order; counts 0/3/4/5 imply preflop/flop/turn/river. Missing or incomplete markup must report an error, not silently lose a card. Street is derived from board count, not independently verified. |
+| Board and street | All visible cards and their order; counts 0/3/4/5 imply preflop/flop/turn/river, as confirmed in the controlled test. Missing or incomplete markup must report an error, not silently lose a card. One observed reset does not supply a stable hand ID. |
 | Every stack | Each named seat's displayed stack versus `stackText` and parsed `stack`. A missing stack must not remove the player from the seat table. |
 | Both pot numbers | Visible main number and add-on text versus raw and parsed values. Record which changes when a bet is placed, called, raised, and collected at the street boundary. Check whether current street bets are included, excluded, or represented separately; do not add the values speculatively. |
 | Every current bet | Each seat's numeric contribution or action label, including hero's previous contribution. Confirm whether numbers are total contributions this street or increments. |
-| Amount to call | Compare the visible PokerNow call button against `amountToCall`: highest non-folded opponent contribution minus hero's contribution, floored at zero. This reports the uncapped wager gap; note separately when hero cannot cover it. Absent/check indicators retain the existing zero-contribution interpretation, which needs live confirmation. Other text such as `call`, `raise`, or `All In` without a number produces unknown, not zero. |
+| Amount to call | Compare the visible PokerNow call button against `amountToCall`: highest non-folded opponent contribution minus hero's contribution, floored at zero. This reports the uncapped wager gap; note separately when hero cannot cover it. Numeric street totals and explicit check-as-zero are supported by the controlled evidence. Absent labels or other text such as `call`, `raise`, or `All In` without a number produce unknown, not zero. |
 | SB and BB | Displayed blinds versus both `blindTexts` entries and parsed values. The existing selector order assumes first SB, second BB. Missing/invalid values remain null and block BB calculations. |
 | Dealer and every position | Match the visible dealer button to `dealerSeatNumber`, then walk clockwise through the occupied seats and compare seat -> player -> position. Verify the existing ascending-seat-number assumption, including wraparound and empty seats. Folded players retain positions. Heads-up labels the dealer BTN (also SB) and the other player BB; tables larger than six collapse early positions to UTG. |
 | Folded/current/offline flags | Compare the screen indicators with `folded`, `toAct`, `offline`, and raw status classes. Exactly one current actor is required for a decision; hero must be that actor. |
@@ -83,8 +85,9 @@ snapshot. Compare `selectedRaiseToChips` to the editable chip amount and
 `raiseSubmitEnabled` reports its disabled state separately. Edit the amount and
 capture again to verify the live input property changes. Close the form and
 confirm the selected amount becomes null. Slider attributes are never used for
-the selected total or minimum. `legality.minRaiseTo` remains null and
-`legality.verified` remains false until the minimum is independently verified.
+the selected total or minimum. `legality.minRaiseTo` requires independent complete
+ordered evidence for the scoped cases; ordinary polling leaves it null.
+`legality.verified` remains false even when a partial fact is proven.
 
 `legality.proof` now reports scoped live observations, current display arithmetic,
 history coverage, and explicit unknown/proven facts for the full raise increment,
@@ -113,7 +116,9 @@ The repository now includes the supplied 6h/Kd/3h/9h board-card HTML capture in
 both `.suit.sub-suit` and a main `.suit` span. The reader selects
 `.suit:not(.sub-suit)`, with rank/suit class fallback; diagnostics retain all
 texts/classes in `evidence.boardCardEvidence`. The capture does not establish
-pot or action-control semantics; no live fixture for those fields exists yet.
+contestable-pot semantics. The supplied raise-form HTML and controlled monetary
+observations are saved separately in that fixture directory; they do not supply
+a complete live contribution ledger.
 `src/tableRead.ts` lists the existing selectors and records missing
 or ambiguous matches. Its diagnostics retain selector counts, raw text, card
 classes, and dealer classes. If a selector fails, save the relevant element's

@@ -23,3 +23,13 @@ simulated in DOM tests because Linkedom does not implement browser layout.
 The capture establishes where to read the selected total and submit label. It
 does not establish a legal minimum: slider min/max/value and the Min Raise
 button must not be treated as numeric minimum-raise evidence.
+
+## Controlled monetary/legality observations
+
+`pokernow-controlled-2026-10-07.json` records the supplied pot sums, call gaps,
+minimum selections, short-all-in/non-reopening sequence and board transitions.
+It is a human-reported value fixture, not a DOM capture or a full hand ledger.
+Tests supply synthetic seats, cards, zero contributions and starting stacks as
+needed to exercise these values. Those scaffolds are not additional live evidence.
+The fixture explicitly retains the unverified side-pot/returns/rake/reopening
+and away/sit-out limitations. See the root `LIVE_LEGALITY_PROOFS.md` for scope.

@@ -40,10 +40,13 @@ export function buildLiveDiagnosticSnapshot(
       potContainerText: read.evidence.potContainerText,
       ...assessment.pot,
       calculatedAmountToCall: assessment.amountToCall,
-      amountToCallMeaning: "uncapped opposing contribution gap; totals and absent/check-as-zero are unverified",
-      highestActiveOpposingContribution: !assessment.state || opponents.some(s => s.betReadError) ? null : Math.max(0, ...opponents.map(s => s.currentBet ?? 0)),
+      contributionSemantics: assessment.verification.monetary.contributionSemantics,
+      callGap: assessment.verification.monetary.callGap,
+      potDisplayReconciliation: assessment.verification.monetary.potDisplay,
+      amountToCallMeaning: "uncapped gap from explicit total street contributions/check; absent labels remain unknown; see callGap provenance",
+      highestActiveOpposingContribution: assessment.verification.monetary.highestOpposingContribution,
       knownNumericBetSubtotalIncludingFolded: assessment.state ? occupied.reduce((sum, s) => sum + (s.currentBet ?? 0), 0) : null,
-      betSubtotalHasUnknowns: !assessment.state || occupied.some(s => s.currentBet === null || s.betReadError),
+      betSubtotalHasUnknowns: !assessment.state || assessment.verification.monetary.contributions.some(s => s.contribution.value === null),
       // Folded money still belongs to the pot; it is excluded only from the call target.
       foldedNumericBetSubtotal: assessment.state ? occupied.filter(s => s.isFolded).reduce((sum, s) => sum + (s.currentBet ?? 0), 0) : null,
       smallBlind: assessment.smallBlind, bigBlind: assessment.bigBlind, rawBlindTexts: read.context.blindTexts,
@@ -69,8 +72,8 @@ export function buildLiveDiagnosticSnapshot(
     assumptions: {
       pot: "Total = collected + street contributions was observed live; hero eligibility, returns and side pots still require proof before EV use.",
       positions: "Ascending seat numbers assumed clockwise; verify against dealer and screen.",
-      bets: "Absent/check indicators retain the existing zero interpretation. Other action words are unknown. Confirm against controls.",
-      street: "Derived from board count; not independently read from PokerNow.",
+      bets: "Numeric labels are street totals and explicit check is zero in supported reads. Absence/other action words remain unknown.",
+      street: "Board counts 0/3/4/5 and an observed new-hand reset were confirmed live; this is not a stable hand identifier.",
       opponents: "Occupied and non-folded, including offline/all-in; sitting-out semantics still unverified.",
     },
   };
