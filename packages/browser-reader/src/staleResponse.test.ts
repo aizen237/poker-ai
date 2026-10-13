@@ -1,13 +1,22 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { parseHTML } from "linkedom";
-const mocks = vi.hoisted(() => ({ read: vi.fn(), assess: vi.fn() }));
+const mocks = vi.hoisted(() => ({ read: vi.fn(), assess: vi.fn(), revision: "source-1" }));
+// Isolate delivery validation behind an independently authorized decision fixture.
+// Actual proof production and source revisions are exercised in decisionProofRuntime.test.ts.
+vi.mock("../../../apps/pokernow-extension/src/decisionProofs.js", () => ({
+  buildLiveDecisionProofs: () => ({ evidence: { version: 1, binding: "synthetic boundary fixture", decisionEpoch: "1", handId: "hand", connectionGeneration: 1, proofs: [] },
+    activation: { allowed: true, state: "proof_ready", supportedDecisionType: "heads_up_call_fold", failedProofs: [], reasons: [] } }),
+  liveProofRevision: () => mocks.revision,
+  activationLabel: () => "Inputs proven; evaluating supported policy",
+}));
 vi.mock("../../../apps/pokernow-extension/src/opponentStats.js", () => ({ createLiveOpponentClient: () => ({ tick() {}, observe() {}, profile() { return null; } }) }));
 vi.mock("../../../apps/pokernow-extension/src/tableRead.js", () => ({ readLiveTable: mocks.read }));
 vi.mock("@poker-ai/browser-reader", async importOriginal => ({ ...await importOriginal<object>(), assessLiveState: mocks.assess }));
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
-it.each(["changed DOM", "malformed result", "consensus array", "HTTP error"])("withholds %s at the live response boundary", async scenario => {
+it.each(["changed DOM", "changed source proof", "malformed result", "consensus array", "HTTP error"])("withholds %s at the live response boundary", async scenario => {
   vi.resetModules();
+  mocks.revision = "source-1";
   const { document } = parseHTML("<html><body></body></html>");
   const location = { origin: "https://pokernow.com", pathname: "/games/test", href: "https://pokernow.com/games/test" };
   vi.stubGlobal("document", document); vi.stubGlobal("location", location); vi.stubGlobal("window", { location });
@@ -38,8 +47,9 @@ it.each(["changed DOM", "malformed result", "consensus array", "HTTP error"])("w
   poll();
   expect(fetchMock).toHaveBeenCalledOnce();
   if (scenario === "changed DOM") observedStack = 20; // No second poll: re-read at delivery.
+  if (scenario === "changed source proof") mocks.revision = "source-2"; // Identical DOM; no second poll.
   const result = scenario === "consensus array" ? [] : { action: scenario === "malformed result" ? "INVALID" : "CALL", confidence: 0.99, reasoning: "stale recommendation" };
   complete({ ok: scenario !== "HTTP error", json: async () => ({ ok: true, result }) });
-  await vi.waitFor(() => expect(document.getElementById("poker-ai-reader-overlay")!.textContent).toContain(scenario === "changed DOM" ? "Table changed" : "invalid response"));
+  await vi.waitFor(() => expect(document.getElementById("poker-ai-reader-overlay")!.textContent).toContain(scenario.startsWith("changed") ? "Table changed" : "invalid response"));
   expect(document.getElementById("poker-ai-reader-overlay")!.textContent).not.toContain("stale recommendation");
 });

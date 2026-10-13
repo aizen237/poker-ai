@@ -40,6 +40,15 @@ it("starts the real relay locally and rejects foreign origins, hosts, consensus 
       expect(response.status).toBe(400);
       expect((await response.json()).ok).toBe(false);
     }
+    // The live HTTP endpoint requires scoped proofs even if a caller omits the live pot marker.
+    const blocked = await fetch(url + "/recommendation", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "fast", decisionPacket: {
+        hero: { holeCards: [{ rank: 14, suit: "s" }, { rank: 12, suit: "d" }], position: "BTN", stackBB: 20 },
+        table: { potBB: 20, board: [{ rank: 2, suit: "c" }, { rank: 7, suit: "h" }, { rank: 8, suit: "d" }], street: "flop", numOpponentsRemaining: 1 },
+        facingAction: { type: "bet", amountBB: 5 }, candidateActions: ["FOLD", "CALL"], engineCalculations: {}, dataConfidence: "high",
+      } }) });
+    expect(blocked.status).toBe(200);
+    expect(await blocked.json()).toMatchObject({ ok: true, result: null, blockedReason: "scoped_decision_proof", activation: { allowed: false } });
     expect((await fetch(url + "/opponents/observations", { method: "POST" })).status).toBe(400);
     expect((await fetch(url + "/opponents/profiles", { method: "POST" })).status).toBe(400);
   } finally {

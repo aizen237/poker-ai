@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "build": "npm run build --prefix ../..",
-    "bundle": "esbuild src/contentScript.ts --bundle --outfile=contentScript.js --format=iife",
+    "bundle": "esbuild src/contentScript.ts src/eventSource.ts --bundle --outdir=. --format=iife",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

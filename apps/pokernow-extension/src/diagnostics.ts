@@ -3,6 +3,9 @@ import type { ActionHistory, LiveStateAssessment } from "@poker-ai/browser-reade
 import { assessLiveLegalityEvidence } from "@poker-ai/browser-reader";
 import { formatCards } from "@poker-ai/shared";
 import type { LiveTableRead } from "./tableRead.js";
+import type { LiveTimelineDiagnostic } from "./liveTimeline.js";
+import { buildLiveDecisionProofs, liveProofRevision } from "./decisionProofs.js";
+import { buildLivePreflopExecution } from "./preflop.js";
 
 const DIAGNOSTICS_KEY = "poker-ai:diagnostics";
 let lastSnapshot: string | null = null;
@@ -12,13 +15,14 @@ export function buildLiveDiagnosticSnapshot(
   read: LiveTableRead, assessment: LiveStateAssessment, history: ActionHistory,
   preflop: PreflopContext | null = null, packet: DecisionPacket | null = null,
   unclassifiedControls: unknown[] = [],
+  handTimeline: LiveTimelineDiagnostic | null = null,
 ) {
   const seats = assessment.state?.seats ?? [];
   const seatRow = (seat: (typeof seats)[number]) => {
     const raw = read.raw.seats.find(row => row.seatNumber === seat.seatNumber);
     return { seat: seat.seatNumber, player: seat.playerName, position: assessment.positions.get(seat.seatNumber) ?? null,
       stack: seat.stack, currentBet: seat.currentBet, stackText: raw?.stackText ?? null, currentBetText: raw?.betValueText ?? null,
-      isAllIn: seat.isAllIn ?? false, isFolded: seat.isFolded, isOffline: seat.isOffline,
+      isAllIn: seat.isAllIn ?? false, isSettling: seat.isSettling ?? false, isFolded: seat.isFolded, isOffline: seat.isOffline,
       isCurrentToAct: seat.isCurrentToAct, isChecking: seat.isChecking, betReadError: seat.betReadError ?? false };
   };
   const hero = seats.find(s => s.isOccupied && s.isYou);
@@ -55,6 +59,7 @@ export function buildLiveDiagnosticSnapshot(
     legality: { ...assessment.legality, proof: assessLiveLegalityEvidence(read.raw, assessment, history), raiseControl: read.raiseControl, unclassifiedControls,
       controlsMeaning: "Selected raise-to is input evidence, not a legal minimum. Slider attributes and unclassified controls do not verify legality." },
     decision: {
+      scopedProofs: buildLiveDecisionProofs(read, assessment, handTimeline, preflop, packet?.decisionProofs?.decisionEpoch ?? "diagnostic", packet),
       packetBuilt: packet !== null,
       decisionPotActuallyUsedBB: packet?.table.potBB ?? null,
       packetAmountToCallBB: packet?.facingAction.amountBB ?? null,
@@ -62,6 +67,9 @@ export function buildLiveDiagnosticSnapshot(
       candidateActionSizes: packet ? generatePolicyCandidates(packet) : [],
       candidateSizeStatus: packet?.policyContext ? "see policy reasons and verified bounds" : "withheld: no verified policy legality/pot inputs",
       policy,
+      preflopExecution: assessment.state?.street === "preflop"
+        ? buildLivePreflopExecution(read, assessment, handTimeline ? liveProofRevision(handTimeline) : "source unavailable") : null,
+      preflopStrategyScope: "Conditional six-max 100BB+ RFI reference, 2.5BB fixed opening convention. Facing-open response unsupported. Cards/turn/window/connection/roster/position/blinds/stacks need independent proofs; RAISE also needs size legality. Contestable pot, EV, rake and postflop eligibility are not chart prerequisites.",
       potEvidence: packet?.potEvidence ?? null,
       engineCalculations: packet?.engineCalculations ?? null,
     },
@@ -69,6 +77,7 @@ export function buildLiveDiagnosticSnapshot(
     preflop,
     raw: read.raw, evidence: read.evidence, context: read.context,
     actionHistory: { records: Object.fromEntries(history.records), observation: history.observation, notes: history.notes },
+    handTimeline,
     assumptions: {
       pot: "Total = collected + street contributions was observed live; hero eligibility, returns and side pots still require proof before EV use.",
       positions: "Ascending seat numbers assumed clockwise; verify against dealer and screen.",
@@ -94,11 +103,12 @@ function readUnclassifiedControls(): unknown[] {
 export function logLiveDiagnostics(
   read: LiveTableRead, assessment: LiveStateAssessment, history: ActionHistory,
   preflop: PreflopContext | null = null, packet: DecisionPacket | null = null,
+  handTimeline: LiveTimelineDiagnostic | null = null,
 ): void {
   let mode: string | null = null;
   try { mode = localStorage.getItem(DIAGNOSTICS_KEY); } catch { /* diagnostics stay off */ }
   if (mode !== "1" && mode !== "once") { lastSnapshot = null; return; }
-  const snapshot = buildLiveDiagnosticSnapshot(read, assessment, history, preflop, packet, readUnclassifiedControls());
+  const snapshot = buildLiveDiagnosticSnapshot(read, assessment, history, preflop, packet, readUnclassifiedControls(), handTimeline);
   const serialized = JSON.stringify(snapshot);
   if (mode !== "once" && serialized === lastSnapshot) return;
   lastSnapshot = serialized;

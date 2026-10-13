@@ -32,6 +32,9 @@ export interface ActionHistory {
 export interface ActionHistoryContext {
   dealerSeatNumber?: number | null;
   bigBlind?: number | null;
+  /** V2 diagnostic timeline only; legacy range/stat consumers retain their behavior. */
+  includeHero?: boolean;
+  requireExplicitContributions?: boolean;
 }
 
 export function emptyActionHistory(): ActionHistory {
@@ -50,9 +53,10 @@ function heroCards(state: PokerGameState): string | null {
   return cards?.length === 2 ? cards.map((c) => `${c.rank}${c.suit}`).sort().join(",") : null;
 }
 
-function contribution(seat: SeatState): number | null {
+function contribution(seat: SeatState, strict = false): number | null {
   if (seat.betReadError) return null;
-  // Retains the reader's absent/check -> zero interpretation, pending live verification.
+  if (strict && seat.currentBet === null && !seat.isChecking) return null;
+  // Legacy callers retain absent-as-zero; the V2 timeline requires explicit evidence.
   if (seat.currentBet === null) return 0;
   return Number.isFinite(seat.currentBet) && seat.currentBet >= 0 ? seat.currentBet : null;
 }
@@ -91,6 +95,7 @@ export function updateActionHistory(
   current: PokerGameState,
   context: ActionHistoryContext = {},
 ): ActionHistory {
+  const readContribution = (seat: SeatState) => contribution(seat, context.requireExplicitContributions);
   const boundary = previous ? boundaryReason(history, previous, current, context) : "No preceding read; actions before this baseline are unknown.";
   const reset = boundary !== null;
   const next: ActionHistory = reset ? emptyActionHistory() : {
@@ -120,7 +125,7 @@ export function updateActionHistory(
   }
   const sameStreet = previous !== null && previous.street === current.street;
   const cleanStreet = current.seats.filter((s) => s.isOccupied && !s.isFolded)
-    .every((s) => contribution(s) === 0 && !s.isChecking);
+    .every((s) => readContribution(s) === 0 && !s.isChecking);
   if (!reset && (!sameStreet || history.awaitingStreetBaseline)) {
     next.awaitingStreetBaseline = !cleanStreet;
     next.streetContributions.clear();
@@ -130,7 +135,7 @@ export function updateActionHistory(
   const baselineTotals = new Map(next.streetContributions);
   if (!reset && sameStreet && !history.awaitingStreetBaseline && previous) {
     for (const seat of previous.seats) {
-      const total = contribution(seat);
+      const total = readContribution(seat);
       if (seat.isOccupied && total !== null) baselineTotals.set(seat.seatNumber, Math.max(baselineTotals.get(seat.seatNumber) ?? 0, total));
     }
   }
@@ -140,7 +145,7 @@ export function updateActionHistory(
       baselineTotals.delete(seat.seatNumber);
       next.streetContributions.delete(seat.seatNumber);
     }
-    const total = contribution(seat);
+    const total = readContribution(seat);
     if (seat.isOccupied && total !== null) next.streetContributions.set(seat.seatNumber, Math.max(baselineTotals.get(seat.seatNumber) ?? 0, total));
   }
   if (reset || !previous) return next;
@@ -155,20 +160,20 @@ export function updateActionHistory(
     return before && identity(seat) !== null && identity(seat) === identity(before) ? [{ seat, before }] : [];
   });
   const increased = pairs.filter(({ seat, before }) => !seat.isFolded && !before.isFolded &&
-    contribution(seat) !== null && contribution(seat)! > (baselineTotals.get(seat.seatNumber) ?? 0));
+    readContribution(seat) !== null && readContribution(seat)! > (baselineTotals.get(seat.seatNumber) ?? 0));
   const activeBefore = previous.seats.filter((s) => s.isOccupied && !s.isFolded);
-  const unknownWager = activeBefore.some((s) => contribution(s) === null) || current.seats.some((s) => s.isOccupied && !s.isFolded && contribution(s) === null);
+  const unknownWager = activeBefore.some((s) => readContribution(s) === null) || current.seats.some((s) => s.isOccupied && !s.isFolded && readContribution(s) === null);
   const rosterChanged = previous.seats.some((s) => identity(s) !== identity(current.seats.find((now) => now.seatNumber === s.seatNumber))) ||
     current.seats.some((s) => identity(s) !== identity(previous.seats.find((before) => before.seatNumber === s.seatNumber)));
-  const previousHighest = Math.max(0, ...activeBefore.map((s) => baselineTotals.get(s.seatNumber) ?? contribution(s) ?? 0));
+  const previousHighest = Math.max(0, ...activeBefore.map((s) => baselineTotals.get(s.seatNumber) ?? readContribution(s) ?? 0));
   if (increased.length > 1) note("Multiple wagers changed in one observation; bet/call/raise order is unknown and was omitted.");
   if (unknownWager) note("An active contribution was unreadable; numeric action classification was omitted.");
   if (rosterChanged) note("Seat identities changed during the observation; numeric action classification was omitted.");
 
   for (const { seat, before } of pairs) {
-    if (seat.isYou || before.isFolded) continue;
+    if ((seat.isYou && !context.includeHero) || before.isFolded) continue;
     const records = next.records.get(seat.seatNumber) ?? [];
-    const total = contribution(seat);
+    const total = readContribution(seat);
     const priorTotal = baselineTotals.get(seat.seatNumber) ?? 0;
     let action: TrackedAction | null = null;
     let wagerAction: WagerAction | null = null;

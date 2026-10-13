@@ -5,8 +5,10 @@ import type { Recommendation } from "./recommendation.js";
 import { preflopUncertainty } from "./preflopContext.js";
 import { validateActionLegality } from "./actionLegality.js";
 import { validateReasoningConsistency } from "./consistencyCheck.js";
+import { assessPacketDecisionProofs, type DecisionActivation } from "./decisionProofs.js";
 
 export interface PolicyRecommendationResult {
+  activation?: DecisionActivation;
   result: Recommendation | ConsensusResult[] | null;
   policy: DecisionPolicyResult;
   decisionSource: "engine_policy" | "llm_fallback" | "abstained";
@@ -19,6 +21,9 @@ export interface PolicyRecommendationResult {
 }
 
 function engineExplanation(policy: DecisionPolicyResult): Recommendation {
+  if (policy.ruleExplanation) return { action: policy.chosenAction!,
+    ...(policy.chosenSizeBB === null ? {} : { sizingBB: policy.chosenSizeBB }),
+    confidence: 0.65, reasoning: policy.ruleExplanation };
   const best = policy.actionEVs.find(row => row.action === policy.chosenAction &&
     (policy.chosenSizeBB === null ? row.investmentBB === 0 : row.investmentBB === policy.chosenSizeBB))!;
   return {
@@ -38,15 +43,25 @@ export async function getPolicyRecommendation(
   packet: DecisionPacket,
   router: ModelRouter,
   options: RouterOptions,
+  requireScopedProofs = false,
 ): Promise<PolicyRecommendationResult> {
   const policy = evaluateDecisionPolicy(packet);
-  const preflop = preflopUncertainty(packet);
-  if (packet.opponentContext?.opponents?.some(opponent => opponent.statsStorage === "unavailable")) {
+  const proofActivation = assessPacketDecisionProofs(packet, requireScopedProofs);
+  const activation = proofActivation ? { ...proofActivation,
+    allowed: proofActivation.allowed && policy.status === "selected",
+    state: proofActivation.allowed && policy.status !== "selected"
+      ? policy.status === "unsupported" ? "unsupported" as const : "waiting_for_proof" as const : proofActivation.state,
+    reasons: [...proofActivation.reasons, ...(proofActivation.allowed && policy.status !== "selected" ? policy.reasons : [])] } : undefined;
+  if (activation && !activation.allowed) return { result: null, policy, activation, decisionSource: "abstained", blocked: true,
+    blockedReason: "scoped_decision_proof", uncertainty: activation.reasons };
+  const chartSelected = packet.table.street === "preflop" && policy.status === "selected" && !!policy.strategySource;
+  const preflop = chartSelected ? null : preflopUncertainty(packet);
+  if (!chartSelected && packet.opponentContext?.opponents?.some(opponent => opponent.statsStorage === "unavailable")) {
     return { result: null, policy, decisionSource: "abstained", blocked: true,
       blockedReason: "opponent_storage_unavailable",
       uncertainty: ["Opponent storage failed; retained population priors are not a verified player model. Recommendation withheld."] };
   }
-  if (preflop || packet.dataConfidence === "low" || !policy.llmMayChoose && policy.status !== "selected") {
+  if (preflop || !chartSelected && packet.dataConfidence === "low" || !policy.llmMayChoose && policy.status !== "selected") {
     return { result: null, policy, decisionSource: "abstained", blocked: true,
       blockedReason: preflop ? "preflop_model_uncertain" : packet.dataConfidence === "low" ? "low_confidence" : "policy_uncertain",
       uncertainty: preflop ?? policy.reasons };
@@ -66,7 +81,7 @@ export async function getPolicyRecommendation(
       // An explanation outage must not erase or change a supported engine selection.
     }
     // Provider confidence, alternatives, action and size are never copied over the lock.
-    return { result: { ...fixed, reasoning }, policy, decisionSource: "engine_policy", explanationSource };
+    return { result: { ...fixed, reasoning }, policy, ...(activation ? { activation } : {}), decisionSource: "engine_policy", explanationSource };
   }
 
   const raw = await router.getRecommendation(packet, options);

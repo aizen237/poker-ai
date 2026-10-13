@@ -2,6 +2,8 @@ import { OpponentProfileSchema } from "@poker-ai/opponent-db/browser";
 import { z } from "zod";
 import { buildPreflopContext, PreflopContextSchema } from "./preflopContext.js";
 import { PolicyContextSchema, PotEvidenceSchema } from "./decisionPolicy.js";
+import { DecisionProofsSchema } from "./decisionProofs.js";
+import { PreflopExecutionSchema } from "./preflopPolicy.js";
 
 const CardSchema = z.object({
   rank: z.union([
@@ -69,7 +71,7 @@ export const DecisionPacketSchema = z.object({
   }),
 
   table: z.object({
-    potBB: z.number().finite().nonnegative(), // 0 is valid: the very first action of a hand, before blinds have registered in the main pot display
+    potBB: z.number().finite().nonnegative().nullable(), // Null is allowed only for the non-EV preflop reference.
     board: z.array(CardSchema).max(5),
     street: StreetSchema,
     numOpponentsRemaining: z.number().int().min(1),
@@ -84,8 +86,12 @@ export const DecisionPacketSchema = z.object({
   candidateActions: z.array(CandidateActionSchema).min(1),
   /** Optional for legacy packets; preflop requests without it yield uncertainty. */
   preflop: PreflopContextSchema.optional(),
+  /** Current controls/window observations; independent scoped proofs are still mandatory. */
+  preflopExecution: PreflopExecutionSchema.optional(),
   /** Optional evidence for the conservative deterministic policy; never an LLM action. */
   policyContext: PolicyContextSchema.optional(),
+  /** Decision-local facts; global historyComplete remains a separate diagnostic. */
+  decisionProofs: DecisionProofsSchema.optional(),
   /** Preserved display values/provenance for live packets; not interchangeable pots. */
   potEvidence: PotEvidenceSchema.optional(),
 
@@ -135,6 +141,7 @@ export type DecisionPacket = z.infer<typeof DecisionPacketSchema>;
 /** Validates and returns a typed packet, throwing with a clear message on any schema violation. */
 export function validateDecisionPacket(input: unknown): DecisionPacket {
   const packet = DecisionPacketSchema.parse(input);
+  if (packet.table.street !== "preflop" && packet.table.potBB === null) throw new Error("Postflop decision pot is required");
   const expectedBoard = { preflop: 0, flop: 3, turn: 4, river: 5 }[packet.table.street];
   const cards = [...packet.hero.holeCards, ...packet.table.board];
   if (packet.table.board.length !== expectedBoard) throw new Error("Board count contradicts street");

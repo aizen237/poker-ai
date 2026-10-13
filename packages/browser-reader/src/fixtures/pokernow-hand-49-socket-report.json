@@ -1,0 +1,24 @@
+{
+  "provenance": "Historical user-supplied summary from the first hand-49 audit, before the full file was available. This remains a report, NOT reconstructed socket frames. The full export now exists at evidence/hand-49-raw-socket.json and supersedes the missing-evidence statements below.",
+  "fullRawEvidence": "evidence/hand-49-raw-socket.json",
+  "handStart": {
+    "gN": 49,
+    "hI": "0kunwn5db0aj",
+    "seats": [[1, "v7UmNXTwjJ"], [3, "OoArqYL22g"]],
+    "iHPI": ["OoArqYL22g", "v7UmNXTwjJ"],
+    "pCPlayerIds": ["OoArqYL22g", "v7UmNXTwjJ"],
+    "dealerID": "OoArqYL22g",
+    "dealerSeat": 3,
+    "sBPI": "OoArqYL22g",
+    "bBPI": "v7UmNXTwjJ",
+    "tB": {"OoArqYL22g": 1, "v7UmNXTwjJ": 2}
+  },
+  "pCNote": "Only the two player IDs were reported, not the pC container type, ordering or card values. pCPlayerIds is an audit projection, not a PokerNow field.",
+  "socketNowChain": [1791681980133, 1791681982561, 1791682081744, 1791682082616],
+  "chainRelation": "Reported continuous pre/now chain; exact wrapper types, local generation number and field-to-frame placement were not supplied.",
+  "laterContribution": {"playerId": "OoArqYL22g", "from": 1, "to": 2},
+  "finalTurn": {"cPI": "v7UmNXTwjJ", "pITT": "v7UmNXTwjJ"},
+  "eventsData": [],
+  "eventsDataScope": "Reported empty throughout, including the contribution transition. Does not prove no action occurred.",
+  "unavailable": ["Full frame boundaries and payloads", "Prior-hand removal frame", "pC values", "Independent tB-to-screen/log action cross-check", "Six-player seat/action order", "2.5BB legality metadata"]
+}

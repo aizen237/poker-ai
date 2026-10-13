@@ -12,3 +12,5 @@ export * from "./consistencyCheck.js";
 export * from "./preflopContext.js";
 export * from "./decisionPolicy.js";
 export * from "./policyRecommendation.js";
+export * from "./decisionProofs.js";
+export * from "./preflopPolicy.js";

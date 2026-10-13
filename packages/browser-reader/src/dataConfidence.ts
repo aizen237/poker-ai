@@ -53,6 +53,9 @@ const EXPECTED_BOARD_COUNT: Record<PokerGameState["street"], number> = {
 export function computeDataConfidence(state: PokerGameState, context: ConfidenceContext): ConfidenceResult {
   const criticalReasons: string[] = [];
   const uncertainReasons: string[] = [];
+  if (state.seats.some(s => s.isOccupied && s.isSettling)) {
+    criticalReasons.push("settlement display present -- waiting for stable remaining stacks");
+  }
 
   const hero = state.seats.find((s) => s.isYou);
   if (state.seats.filter((s) => s.isOccupied && s.isYou).length > 1) {

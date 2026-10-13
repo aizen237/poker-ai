@@ -319,7 +319,8 @@ describe("live pot provenance through the policy", () => {
   it("preserves separate display values and the BB conversion", () => {
     const p = validateDecisionPacket(withEvidence());
     expect(p.potEvidence).toMatchObject({ mainPot: 10, displayedTotalPot: 40, decisionPot: 40, bigBlind: 2 });
-    expect(evaluateDecisionPolicy(p).chosenAction).toBe("CALL");
+    // A pot certificate alone no longer bypasses the other scoped live proofs.
+    expect(evaluateDecisionPolicy(p)).toMatchObject({ chosenAction: null, llmMayChoose: false });
   });
   it.each(["unverified", "missing_source", "missing_pot", "bad_conversion", "source_mismatch"])("blocks %s despite a claimed verified policy pot", problem => {
     const p = withEvidence();

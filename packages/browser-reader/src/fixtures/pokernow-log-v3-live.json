@@ -1,0 +1,18 @@
+[
+  {
+    "msg": "Flop: [Kc, 8c, 4c]",
+    "createdAt": "179147737859100"
+  },
+  {
+    "msg": "\"PLAYER_A @ PLAYER_ID_A\" calls 4",
+    "createdAt": "179147737773000"
+  },
+  {
+    "msg": "\"PLAYER_B @ PLAYER_ID_B\" raises to 4",
+    "createdAt": "179147737522200"
+  },
+  {
+    "msg": "\"PLAYER_C @ PLAYER_ID_C\" folds",
+    "createdAt": "179147737114700"
+  }
+]

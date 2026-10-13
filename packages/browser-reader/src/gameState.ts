@@ -10,6 +10,8 @@ export interface RawSeatInput {
   stackText: string | null;
   /** Container can display literal All In without a numeric .normal-value child. */
   stackContainerText?: string | null;
+  /** Base/prize display is transient and cannot certify spendable remaining chips. */
+  stackIsSettlement?: boolean;
   /** Raw class-list fragments observed on the seat div, e.g. ["fold"], ["decision-current"], ["offline"]. */
   statusClasses: string[];
   /** One class-list array per hole card element found (0, 1, or 2 -- matches what's actually in the DOM). */
@@ -38,6 +40,8 @@ export interface SeatState {
   stack: number | null;
   /** Literal All In stack label, not an inferred numeric zero. */
   isAllIn?: boolean;
+  /** Winner/prize display; stack remains unknown until the normal display returns. */
+  isSettling?: boolean;
   /** A present bet label could not be interpreted as a contribution or check. */
   betReadError?: boolean;
   isFolded: boolean;
@@ -120,8 +124,9 @@ function assembleSeat(raw: RawSeatInput): SeatState {
   const isOffline = raw.statusClasses.includes("offline");
 
   const playerName = raw.playerNameText?.trim() || null;
+  const isSettling = raw.stackIsSettlement === true || raw.statusClasses.includes("winner");
   let stack: number | null = null;
-  if (playerName !== null && raw.stackText !== null) {
+  if (!isSettling && playerName !== null && raw.stackText !== null) {
     try {
       stack = parsePlayerNameAndStack(playerName, raw.stackText).stack;
     } catch {
@@ -144,6 +149,7 @@ function assembleSeat(raw: RawSeatInput): SeatState {
     isYou: raw.isYou,
     playerName,
     stack,
+    isSettling,
     isAllIn: isAllInStackText(raw.stackText) || isAllInStackText(raw.stackContainerText ?? null),
     betReadError: raw.betValueText !== null && parseBetValue(raw.betValueText) === null && !isCheckText(raw.betValueText),
     isFolded,

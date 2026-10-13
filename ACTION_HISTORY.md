@@ -1,5 +1,10 @@
 # V1 snapshot action reconstruction
 
+V2 now has a **separate** server-log timeline and hero-inclusive diagnostic
+fallback; see [V2_HAND_TIMELINE.md](V2_HAND_TIMELINE.md). The behavior described
+below remains the default for V1 range/stat consumers. It is not upgraded into
+complete legality evidence by the new capture layer.
+
 This is a partial history of observed opponent actions, not PokerNow's action
 log. The extension still polls once per second. It processes changed reads,
 including dealer/blind changes, and the existing diagnostics include action

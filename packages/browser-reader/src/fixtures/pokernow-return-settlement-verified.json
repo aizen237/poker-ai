@@ -1,0 +1,8 @@
+{
+  "provenance": "User-reported successful controlled live test; not a raw API response or complete hand ledger. No source timestamps were supplied.",
+  "sequence": ["aizen23 bets 4", "aizen folds", "aizemmmm folds", "Uncalled bet of 4 returned to aizen23", "aizen23 collected 6 from pot"],
+  "return": { "action": "uncalled_return", "amount": 4, "player": "aizen23", "playerId": "OoArqYL22g", "seat": 3, "returnedUncalledDelta": 4, "netCommittedDelta": -4 },
+  "award": { "kind": "pot_award", "amount": 6, "seat": 3, "potAwardsDelta": 6 },
+  "verified": ["observed explicit return format", "player ID / seat mapping", "original text and timestamp retained", "conditional return effect", "separate pot award"],
+  "notVerified": ["complete whole-hand accounting", "side pots", "rake/drop", "history completeness", "Portion 9 activation"]
+}

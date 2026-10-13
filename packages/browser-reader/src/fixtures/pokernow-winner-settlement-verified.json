@@ -1,0 +1,24 @@
+{
+  "reportedDate": "2026-10-08",
+  "status": "passed",
+  "provenance": "User-reported live winner-settlement verification; no new raw DOM, source timestamps or complete hand ledger supplied.",
+  "player": "aizen23",
+  "duringSettlement": {
+    "displayedBaseChips": 45,
+    "displayedPrizeText": "+24",
+    "awardChips": 24,
+    "diagnosticStatus": "settlement_display",
+    "isSettling": true,
+    "usableStack": null
+  },
+  "afterNextHandStarted": {
+    "ordinaryStack": 69,
+    "isSettling": false,
+    "prizeElementPresent": false,
+    "stackSource": "Observed ordinary display, not parser-synthesized base plus prize"
+  },
+  "duplicateStackErrorObserved": false,
+  "prizeDoubleCountingObserved": false,
+  "repeatSettlementOrUncalledReturnTestNeeded": false,
+  "notVerified": ["complete whole-hand accounting", "side pots", "rake/drop", "history completeness", "Portion 9 activation"]
+}

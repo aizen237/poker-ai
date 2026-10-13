@@ -5,6 +5,12 @@
   "description": "Reads live PokerNow table state for assisted-mode play (read-only, no automated actions)",
   "content_scripts": [
     {
+      "matches": ["https://www.pokernow.com/games/*", "https://pokernow.com/games/*", "https://www.pokernow.club/games/*", "https://pokernow.club/games/*"],
+      "js": ["eventSource.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
       "matches": [
         "https://www.pokernow.com/games/*",
         "https://pokernow.com/games/*",

@@ -1,0 +1,27 @@
+{
+  "provenance": "Public client code inspection, not a captured live table/response or a completeness certificate",
+  "discoveryPage": "https://www.pokernow.com/start-game",
+  "bundle": "https://cdn.pokernow.com/game.bundle-9f91bdafa0b201469fb7.js",
+  "sha256": "532016f561ebeab0d1622ba5cdf7b44351c5a6235b8c4e41633d368cab3f31e6",
+  "socket": {
+    "queryRoomKey": "gameID",
+    "initialEvent": "registered",
+    "initialState": "gameState",
+    "heroIdentity": "currentPlayer.id",
+    "fullStateEvent": "rup",
+    "patchEvent": "gC",
+    "handId": "hI",
+    "handNumber": "gN",
+    "frameCursor": "now",
+    "predecessor": "pre"
+  },
+  "log": {
+    "method": "GET",
+    "path": "/api/games/{gameID}/log_v3?hand_number={handNumber}",
+    "rowFields": ["createdAt", "msg"],
+    "clientIncrementalParameter": "after_at",
+    "clientDisplay": ".log-modal-entries .entry-ctn",
+    "implementationUsesAfterAt": false
+  },
+  "unverified": ["live payload contract", "response completeness/pagination", "timestamp uniqueness and ordering", "delivery lag", "all message templates", "chip units and call amount meaning", "end-of-hand settlement watermark", "reconnect/backfill coverage", "player ID-to-seat mapping"]
+}

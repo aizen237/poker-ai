@@ -1,6 +1,7 @@
 import { parseBoardCardFromEvidence, type LiveReadContext, type RawTableInput, type BoardCardEvidence } from "@poker-ai/browser-reader";
 import { formatCard } from "@poker-ai/shared";
 import { readRaiseControl } from "./raiseControlRead.js";
+import { readStackDisplay } from "./stackRead.js";
 
 // Existing PokerNow selectors, kept together for inspection. No alternate DOM
 // layout is assumed when a selector fails; record the failure instead.
@@ -12,7 +13,8 @@ export const TABLE_SELECTORS = {
   boardAllSuits: ".suit",
   seat: ".table-player-N (N=1..10)",
   name: ".table-player-name a",
-  stack: ".table-player-stack .normal-value",
+  stack: ".table-player-stack > .chips-value > .normal-value, .table-player-stack > .normal-value",
+  stackPrize: ".table-player-stack > .table-player-stack-prize",
   stackContainer: ".table-player-stack",
   holeCard: ".table-player-cards .card-container",
   bet: ".table-player-bet-value",
@@ -57,25 +59,37 @@ export function readLiveTable() {
     const seat = unique(document, `.table-player-${seatNumber}`, `seat ${seatNumber}`, false);
     const classes = [...(seat?.classList ?? [])];
     const name = seat ? unique(seat, TABLE_SELECTORS.name, `seat ${seatNumber} name`, false) : null;
-    const stack = seat ? unique(seat, TABLE_SELECTORS.stack, `seat ${seatNumber} stack`, false) : null;
     const stackContainer = seat ? unique(seat, TABLE_SELECTORS.stackContainer, `seat ${seatNumber} stack container`, false) : null;
+    const stack = readStackDisplay(stackContainer, classes.includes("winner"));
+    if (seat && [...seat.querySelectorAll(".table-player-stack-prize")].some(prize => !stackContainer?.contains(prize))) {
+      stack.stackText = null;
+      stack.isSettling = true;
+      stack.evidence.status = "unknown";
+      stack.evidence.displayedBaseText = null;
+      stack.evidence.displayedBaseChips = null;
+      stack.evidence.reason = "prize marker outside the unique stack container";
+      stack.evidence.remainingStackReason = stack.evidence.reason;
+    }
+    if (name && stackContainer && stack.evidence.reason) readErrors.push(`seat ${seatNumber} stack: ${stack.evidence.reason}`);
     const bet = seat ? unique(seat, TABLE_SELECTORS.bet, `seat ${seatNumber} bet`, false) : null;
     const holeCards = [...(seat?.querySelectorAll(TABLE_SELECTORS.holeCard) ?? [])];
     // A missing stack must not erase a named player from occupancy/position counts.
     const isOccupied = name !== null;
-    if (!name && (stack || classes.includes("you-player") || classes.includes("decision-current"))) {
+    if (!name && (stackContainer || classes.includes("you-player") || classes.includes("decision-current"))) {
       readErrors.push(`seat ${seatNumber}: player markers present but name element missing`);
     }
     seats.push({
       seatNumber, isOccupied, isYou: classes.includes("you-player"),
-      playerNameText: name?.textContent ?? null, stackText: stack?.textContent ?? null,
+      playerNameText: name?.textContent ?? null, stackText: stack.stackText,
+      stackIsSettlement: stack.isSettling,
       stackContainerText: stackContainer?.textContent ?? null,
       statusClasses: classes, holeCardClassLists: holeCards.map((card) => [...card.classList]),
       betValueText: bet?.textContent ?? null,
     });
     seatEvidence.push({
       seatNumber, seatMatches: document.querySelectorAll(`.table-player-${seatNumber}`).length,
-      nameFound: name !== null, stackValueFound: stack !== null, betFound: bet !== null,
+      nameFound: name !== null, stackValueFound: stack.stackText !== null, betFound: bet !== null,
+      stackDisplay: stack.evidence,
       stackContainerText: stackContainer?.textContent ?? null,
       seatText: seat?.textContent ?? null,
     });

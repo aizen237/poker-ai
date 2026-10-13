@@ -1,0 +1,13 @@
+{
+  "provenance": "User-reported passive live capture, 2026-10-09. Exact cursor/timestamp values below; this is a report of eight observations, not reconstructed raw socket envelopes.",
+  "socketNowChain": [1791550069807, 1791550246565, 1791550293788, 1791550294653, 1791550298347, 1791550299157, 1791550302458, 1791550303264],
+  "observedRelation": "Each gC pre exactly equalled the preceding now within this one connection; now increased.",
+  "logTimestampMatches": [
+    { "socketNow": 1791550293788, "createdAt": "179155029378800", "description": "aizen calls 2" },
+    { "socketNow": 1791550298347, "createdAt": "179155029834700", "description": "aizemmmm calls 2 and goes all in" },
+    { "socketNow": 1791550302458, "createdAt": "179155030245800", "description": "aizen23 checks" },
+    { "socketNow": 1791550303264, "createdAt": "179155030326400", "description": "Flop [...]" }
+  ],
+  "httpEvidence": "Rows still contain only msg/createdAt. Repeated responses had stable ETags until content changed; exact ETag values were not supplied. No explicit sequence, watermark, event ID, revision or completeness acknowledgment.",
+  "limits": "Not every socket update has a matching log row. Timestamp units, uniqueness, tie order, complete logging, reconnect/backfill and decision-linked catch-up remain unproven."
+}

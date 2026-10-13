@@ -104,7 +104,7 @@ app.post("/recommendation", async (req, res) => {
 
     const result = await getPolicyRecommendation(packet, router, { mode,
       ...(typeof req.body.manualProviderName === "string" ? { manualProviderName: req.body.manualProviderName } : {}),
-    });
+    }, true);
     res.json({ ok: true, ...result });
   } catch (error) {
     console.error("[Relay Server] Error handling /recommendation:", error);

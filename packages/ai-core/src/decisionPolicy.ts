@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { calculateCallEV, calculateFoldEV, calculateRaiseEV } from "@poker-ai/poker-engine";
 import type { DecisionPacket } from "./decisionPacket.js";
+import { assessPacketDecisionProofs, type DecisionActivation } from "./decisionProofs.js";
+import { evaluatePreflopReference } from "./preflopPolicy.js";
 
 const chips = z.number().finite().nonnegative();
 const probability = z.number().finite().min(0).max(1);
@@ -78,6 +80,9 @@ export interface PolicyActionEV {
   assumptions: string[];
 }
 export interface DecisionPolicyResult {
+  strategySource?: string;
+  ruleExplanation?: string;
+  activation?: DecisionActivation;
   version: "v1";
   status: "selected" | "uncertain" | "unsupported";
   chosenAction: PolicyActionEV["action"] | null;
@@ -102,7 +107,7 @@ export function potEvidenceProblems(packet: DecisionPacket): string[] {
   if (!evidence.isPotSemanticsVerified || evidence.decisionPot === null || !evidence.decisionPotSource) {
     return ["Live decision-pot semantics/provenance are unverified."];
   }
-  if (!near(evidence.decisionPot / evidence.bigBlind, packet.table.potBB)) {
+  if (packet.table.potBB === null || !near(evidence.decisionPot / evidence.bigBlind, packet.table.potBB)) {
     return ["DecisionPacket potBB contradicts the verified chip pot / big blind."];
   }
   if (packet.policyContext && (!packet.policyContext.potVerified || packet.policyContext.potSource !== evidence.decisionPotSource)) {
@@ -122,7 +127,7 @@ export function policyContextProblems(packet: DecisionPacket, ctx: PolicyContext
     problems.push("Street contributions contradict the facing action/call cost.");
   }
   if (call > packet.hero.stackBB) problems.push("An unmatched all-in/short call needs separate pot accounting.");
-  if (packet.table.potBB + EPS < legal.heroStreetBetBB + legal.opponentStreetBetBB) {
+  if (packet.table.potBB === null || packet.table.potBB + EPS < legal.heroStreetBetBB + legal.opponentStreetBetBB) {
     problems.push("Verified pot cannot exclude the current street contributions.");
   }
   if (packet.facingAction.type === "all_in" && legal.opponentStackBB > 0) {
@@ -163,8 +168,10 @@ export function policyWagerProblems(packet: DecisionPacket, investmentBB: number
 
 /** Finite candidate grid, not a search over every legal size or a solver. */
 export function generatePolicyCandidates(packet: DecisionPacket): PolicyCandidate[] {
+  const activation = assessPacketDecisionProofs(packet);
+  if (activation && !activation.allowed) return [];
   const ctx = packet.policyContext;
-  if (packet.table.street === "preflop" || !ctx || !ctx.potVerified || ctx.accounting !== "single_pot_no_rake" ||
+  if (packet.table.street === "preflop" || packet.table.potBB === null || !ctx || !ctx.potVerified || ctx.accounting !== "single_pot_no_rake" ||
       packet.table.numOpponentsRemaining !== 1 || policyContextProblems(packet, ctx).length || !ctx.legal.aggressionReopened) return [];
   const legal = ctx.legal;
   const call = packet.facingAction.amountBB ?? 0;
@@ -198,20 +205,52 @@ function boundedEV(estimate: PolicyEstimate, formula: (equity: number) => number
 
 /** Pure, deterministic and conditional on explicit evidence; never infers fold equity. */
 export function evaluateDecisionPolicy(packet: DecisionPacket): DecisionPolicyResult {
+  const result = evaluatePolicyWithProofs(packet);
+  if (result.activation?.allowed && result.status !== "selected") {
+    result.activation = { ...result.activation, allowed: false,
+      state: result.status === "unsupported" ? "unsupported" : "waiting_for_proof",
+      reasons: [...result.activation.reasons, ...result.reasons] };
+  }
+  return result;
+}
+
+function evaluatePolicyWithProofs(packet: DecisionPacket): DecisionPolicyResult {
+  const activation = assessPacketDecisionProofs(packet);
   const result: DecisionPolicyResult = {
     version: "v1", status: "unsupported", chosenAction: null, chosenSizeBB: null, raiseToBB: null,
     actionEVs: [], assumptions: ["Chip EV only; sunk contributions are excluded from incremental cost."],
     reasons: [], confidence: "low", equitySource: packet.engineCalculations.equitySource ?? "unknown",
-    foldEquitySource: "not supplied", llmMayChoose: true,
+    foldEquitySource: "not supplied", llmMayChoose: activation === null,
+    ...(activation ? { activation } : {}),
   };
   const stop = (reason: string) => { result.reasons.push(reason); return result; };
+  if (activation && !activation.allowed) { result.reasons.push(...activation.reasons); return result; }
+  if (packet.table.street === "preflop") {
+    result.llmMayChoose = false;
+    // No offline/legacy bypass into the new action lock.
+    if (!activation) return stop("Scoped proofs are mandatory for the deterministic preflop reference.");
+    const reference = evaluatePreflopReference(packet);
+    result.strategySource = reference.strategySource;
+    result.reasons.push(...reference.reasons);
+    if (!reference.action) return result;
+    result.status = "selected";
+    result.chosenAction = reference.action;
+    result.chosenSizeBB = reference.investmentBB;
+    result.raiseToBB = reference.raiseToBB;
+    result.ruleExplanation = reference.explanation;
+    result.confidence = "medium";
+    result.assumptions = ["Six-max normal blinds, no antes/straddles; 100BB+ effective; chip-EV context.",
+      "Existing reference membership, not a solver or an EV comparison. Fixed 2.5BB opening convention."];
+    result.equitySource = "not used by the RFI reference";
+    result.foldEquitySource = "not assumed";
+    return result;
+  }
   const potProblems = potEvidenceProblems(packet);
   if (potProblems.length) { result.reasons.push(...potProblems); result.llmMayChoose = false; return result; }
-  if (packet.dataConfidence !== "high") {
+  if (packet.dataConfidence !== "high" || packet.table.potBB === null) {
     result.llmMayChoose = false;
-    return stop("High table-read confidence is required by this policy.");
+    return stop("High table-read confidence and a known decision pot are required by the EV policy.");
   }
-  if (packet.table.street === "preflop") return stop("Preflop remains on the existing context/fallback path.");
   if (packet.table.numOpponentsRemaining !== 1) return stop("Multiway action EV and side pots are not modeled in V1.");
   const expectedBoard = { flop: 3, turn: 4, river: 5 }[packet.table.street];
   if (packet.table.board.length !== expectedBoard || new Set([...packet.hero.holeCards, ...packet.table.board].map(c => `${c.rank}${c.suit}`)).size !== expectedBoard + 2) {
@@ -308,6 +347,6 @@ export function decisionPolicyPromptLines(packet: DecisionPacket): string[] {
   const policy = evaluateDecisionPolicy(packet);
   return ["All sizingBB values mean ADDITIONAL investment now in BB, not total raise-to. ALL_IN invests the remaining stack. Never invent minimum raise sizes or reopening rights.",
     "Engine decision policy: " + JSON.stringify(policy), policy.status === "selected"
-    ? "EXPLANATION ONLY: preserve the engine action and exact additional-investment sizingBB. Explain its EV, assumptions and uncertainty concisely. Do not propose an alternative or override the action. These are conditional model estimates, not solver correctness."
+    ? "EXPLANATION ONLY: preserve the engine action and exact additional-investment sizingBB. Explain the supplied rule or EV, assumptions and uncertainty concisely. Never invent EV for a chart rule. Do not propose an alternative or override the action. These are conditional models, not solver correctness."
     : "The engine has not selected an action. Any permitted AI fallback is AI judgment, not an engine-supported recommendation. Do not invent fold equity, missing response models, or treat diagnostic EV as authoritative."];
 }

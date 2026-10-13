@@ -5,8 +5,11 @@ facts, estimating uncertain opponent ranges, and displaying assisted advice.
 It does not click actions or play automatically.
 
 **Current status:** parsing, simulation and conservative policy components are
-implemented and tested. Live recommendations remain gated because complete
-action history, contestable-pot accounting and exact legality are not proven.
+implemented and tested. Live recommendations use decision-specific proof gates;
+contestable pot, ordered decision windows, exact legality and model inputs remain
+unproven by the current live adapter. Global `historyComplete` stays diagnostic,
+not an activation requirement. Preflop/nonterminal strategy remains unimplemented
+in the deterministic policy; this pass does not unlock live assisted advice.
 This is not a completed solver or an unrestricted live recommendation system.
 
 ## Local setup
@@ -33,6 +36,8 @@ refresh the PokerNow tab. Source changes alone are not enough.
 
 ## Documentation
 
+- [Scoped decision proofs, exact blockers and readiness](SCOPED_DECISION_PROOFS.md)
+- [V2 hand/event timeline and required live capture](V2_HAND_TIMELINE.md)
 - [V1 architecture](V1_ARCHITECTURE.md)
 - [Reliability audit and current limitations](V1_RELIABILITY_AUDIT.md)
 - [Live DOM/state verification](LIVE_STATE_CHECK.md)
