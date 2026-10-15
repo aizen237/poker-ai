@@ -38,6 +38,12 @@ function engineExplanation(policy: DecisionPolicyResult): Recommendation {
   };
 }
 
+/** Synchronous display of an independently authorized, locked engine selection. */
+export function lockedEngineRecommendation(policy: DecisionPolicyResult): Recommendation | null {
+  return policy.status === "selected" && policy.activation?.allowed === true && policy.llmMayChoose === false && policy.chosenAction !== null
+    ? engineExplanation(policy) : null;
+}
+
 /** The action lock is enforced in code, including manual/consensus/failover paths. */
 export async function getPolicyRecommendation(
   packet: DecisionPacket,

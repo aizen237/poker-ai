@@ -280,6 +280,9 @@
     return capture;
   }
 
+  // src/firstUtgState.ts
+  var allowed = new Set("id hI gN now pre r gT seats iHPI dealerID dealerSeat sBPI bBPI tB pGS cPI pITT smallBlind bigBlind ante deadButton gM mode aD aS cM cR players pC cRPI eventsData rHP rHC oTC gameResult".split(" "));
+
   // src/firstUtgSource.ts
   var object3 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
   var token2 = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(v);
@@ -330,14 +333,18 @@
       const heroId = p[0] === "registered" ? p[1].currentPlayer?.id : knownHero;
       const frame = {};
       for (const key of keys) if (Object.hasOwn(raw, key)) frame[key] = raw[key];
-      if (p[0] === "registered") delete frame.gameResult;
+      if (p[0] === "registered" || frame.gameResult !== "<D>") delete frame.gameResult;
       if (Object.hasOwn(raw, "players")) {
         if (!object3(raw.players) || Object.keys(raw.players).length > 10) return null;
         frame.players = Object.fromEntries(Object.entries(raw.players).map(([id, player]) => [id, object3(player) ? Object.fromEntries(["id", "stack", "status", "disconnectedSince"].filter((k) => Object.hasOwn(player, k)).map((k) => [k, player[k]])) : player]));
       }
       if (Object.hasOwn(raw, "pC")) {
         if (!object3(raw.pC) || Object.keys(raw.pC).length > 10) return null;
-        frame.pC = Object.fromEntries(Object.entries(raw.pC).map(([id, hand]) => [id, object3(hand) && Array.isArray(hand.cards) ? { cards: hand.cards.map((c) => object3(c) ? { value: id === heroId ? c.value : null, showing: c.showing } : c) } : hand]));
+        if (Object.values(raw.pC).some((hand) => !object3(hand) || !Array.isArray(hand.cards) || hand.cards.length > 2 || hand.cards.some((c) => !object3(c) || !(c.value === null || typeof c.value === "string") || typeof c.showing !== "boolean"))) return null;
+        frame.pC = Object.fromEntries(Object.entries(raw.pC).map(([id, hand]) => [
+          id,
+          { cards: hand.cards.map((c) => ({ value: id === heroId ? c.value : null, showing: c.showing })) }
+        ]));
       }
       const result = { event: p[0], heroId: token2(heroId) ? heroId : null, frame };
       return JSON.stringify(result).length <= 4e4 ? result : null;

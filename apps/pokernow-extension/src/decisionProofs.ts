@@ -81,13 +81,15 @@ export function buildLiveDecisionProofs(read: LiveTableRead, assessment: LiveSta
       deepEnough && !settling ? [] : ["Hero and every active opponent must have proven 100BB+ hand-start effective capacity."]);
     const first = currentFirstUtg(read, assessment, timeline);
     if (first) {
+      const continuity = source!.firstUtgProof!.continuity;
+      set("connection", "proven", `Validated first-UTG source prefix: generation ${continuity.generation}, registration ${continuity.baselineSequence} through ${continuity.throughSequence}, cursor ${continuity.cursor}. ${first.provenance} Not whole-hand/log coverage.`);
       set("stack", "proven", `${first.provenance} Numeric remaining DOM stacks independently >=100BB for all six players.`);
       set("callCost", "proven", `${first.provenance} Normal SB=1/BB=2 source totals; UTG contribution zero at first turn. Call gap=2 chips.`);
     }
   }
   const envelope: DecisionProofs = { version: 1, decisionEpoch: epoch,
     binding: "diagnostic-only: no packet",
-    handId: source?.identity ? timeline!.current.handId : null, connectionGeneration: chain?.generation ?? null, proofs };
+    handId: source?.identity ? timeline!.current.handId : null, connectionGeneration: source?.firstUtgProof?.continuity.generation ?? chain?.generation ?? null, proofs };
   if (packet) envelope.binding = decisionProofBinding({ ...packet, decisionProofs: envelope }, epoch);
   // Inspect chart membership before packet construction so an out-of-chart FOLD
   // is not accidentally held behind an irrelevant Raise-panel prerequisite.
@@ -104,7 +106,7 @@ export function buildLiveDecisionProofs(read: LiveTableRead, assessment: LiveSta
 export function liveProofRevision(timeline: LiveTimelineDiagnostic): string {
   const s = timeline.sourceStatus;
   return JSON.stringify({ connected: s.connected, identity: s.identity, handId: timeline.current.handId,
-    firstUtg: s.firstUtg,
+    firstUtg: s.firstUtgProof ?? null,
     generation: s.sourceMetadata.socketContinuity.generation, continuity: s.sourceMetadata.socketContinuity.status,
     gap: s.sourceMetadata.socketContinuity.chainGap, lastCursor: s.sourceMetadata.socket.at(-1)?.metadata.frame,
     events: timeline.current.events.map(e => [e.id, e.order, e.actor?.seat]), coverage: timeline.current.coverage.status,

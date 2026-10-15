@@ -15,7 +15,7 @@ import type { LiveTableRead } from "../../../apps/pokernow-extension/src/tableRe
 
 // Full, unmodified live export. Variants below are explicitly regression mutations.
 const capture = JSON.parse(readFileSync(new URL("../../../evidence/hand-53-sixmax-utg-raw-socket.json", import.meta.url), "utf8"));
-function fixture(change?: (frames: any[]) => void) {
+function fixture(change?: (frames: any[]) => void, logActions: string[] = []) {
   const frames = structuredClone(capture.frames);
   change?.(frames);
   const registered = frames[0].payload.gameState, start = frames[1].payload;
@@ -23,7 +23,12 @@ function fixture(change?: (frames: any[]) => void) {
   let now = frames[0].localReceivedAt, sequence = 0, identitySequence = 0;
   let identity: HandIdentityEvidence | null = null;
   const runtime = createTimelineRuntime({ tableId, sessionId: "hand53", now: () => now,
-    fetchLog: async () => new Response("[]") });
+    fetchLog: async url => new Response(JSON.stringify(url.includes("hand_number=53") ? [
+      { msg: "-- starting hand #53", createdAt: "1000" },
+      { msg: "Player stacks: " + registered.seats.map(([seat, id]: [number, string]) =>
+        `#${seat} "${registered.players[id].name} @ ${id}" (${registered.players[id].stack})`).join(" | "), createdAt: "1001" },
+      ...logActions.map((msg, i) => ({ msg, createdAt: String(1002 + i) })),
+    ] : [])) });
   function accept(event: string, payload: any, generation = 1) {
     const wire = "42" + JSON.stringify([event, payload]);
     // Same projection, metadata, identity order and runtime as eventSource.ts.
@@ -63,6 +68,43 @@ function fixture(change?: (frames: any[]) => void) {
 }
 
 describe("hand-53 first UTG live adapter (full captured envelopes)", () => {
+  // Reported action grammar combined with the existing hand-53 capture. The
+  // actors/timestamps are regression scaffolding, NOT the failed smoke hand.
+  it.each(["normal", "missed", "mixed", "hero"])("allows %s forced posts without inventing voluntary actions", async variant => {
+    const actions = variant === "normal" ? ['"dfgdfgdfg @ mNU27Fo1qX" posts a small blind of 1', '"tyertete @ TTXBlZfl8G" posts a big blind of 2']
+      : variant === "missed" ? ['"dfgdfgdfg @ mNU27Fo1qX" posts a missing small blind of 1', '"tyertete @ TTXBlZfl8G" posts a missed big blind of 2']
+      : variant === "hero" ? ['"aizen @ v7UmNXTwjJ" posts a missing small blind of 1', '"aizen @ v7UmNXTwjJ" posts a missed big blind of 2']
+      : ['"dfgdfgdfg @ mNU27Fo1qX" posts a small blind of 1', '"dfgdfgdfg @ mNU27Fo1qX" posts a missing small blind of 1', '"tyertete @ TTXBlZfl8G" posts a missed big blind of 2'];
+    const f = fixture(undefined, actions);
+    await f.runtime.tick(); f.advance(3001); await f.runtime.tick();
+    const r = f.build(), posts = r.snapshot.current.events.filter(e => e.action === "post");
+    expect(posts).toHaveLength(actions.length);
+    expect(posts.every(e => e.wagerAction === "post" && e.actor?.seat !== null)).toBe(true);
+    if (variant === "hero") expect(posts.every(e => e.actor?.isHero === true)).toBe(true);
+    expect(r.packet.preflop!.situation).toBe("unopened");
+    expect(r.policy.chosenAction).toBe("FOLD");
+    expect(r.snapshot.current.historyComplete).toBe(false);
+  });
+  it.each(["calls 2", "raises to 6", "posts a mystery fee of 2"].flatMap(action =>
+    ["aizen @ v7UmNXTwjJ", "Jrbfurbx @ amlHsejLtc"].map(actor => ({ action, actor }))))("forced posts do not hide later $actor $action", async ({ action, actor }) => {
+    const f = fixture(undefined, ['"dfgdfgdfg @ mNU27Fo1qX" posts a missing small blind of 1', `"${actor}" ${action}`]);
+    await f.runtime.tick(); f.advance(3001); await f.runtime.tick();
+    const r = f.build();
+    expect(r.policy.chosenAction).toBeNull();
+    expect(r.preliminary.unopened!.proofs.find(p => p.scope === "actionWindow")!.status).toBe("contradicted");
+  });
+  it.each([false, true])("metadata does not mask unknown actions (unknown=%s)", async unknown => {
+    const f = fixture(undefined, [
+      'The player "aizen @ v7UmNXTwjJ" joined the game with a stack of 250.',
+      "Your hand is 8\u2665, 5\u2665",
+      ...(unknown ? ["Unknown source update"] : []),
+    ]);
+    await f.runtime.tick(); f.advance(3001); await f.runtime.tick();
+    const r = f.build();
+    expect(r.snapshot.current.events.filter(e => e.action === "player_join" || e.action === "hole_cards")).toHaveLength(2);
+    expect(r.policy.chosenAction).toBe(unknown ? null : "FOLD");
+    expect(r.snapshot.current.historyComplete).toBe(false);
+  });
   it("activates 85s FOLD without pot, log prefix, equity or Raise controls", async () => {
     const f = fixture(), r = f.build();
     expect(r.snapshot.sourceStatus.firstUtg).toMatchObject({ handId: "x9h6owk0kbw5", handNumber: 53, heroSeat: 1, heroCards: ["8h", "5h"] });
@@ -87,6 +129,19 @@ describe("hand-53 first UTG live adapter (full captured envelopes)", () => {
     const r = f.build();
     expect(r.preliminary.activation.failedProofs).toEqual(["raiseLegality"]);
     expect(r.policy.chosenAction).toBeNull();
+  });
+  it("QTo UTG is FOLD and does not consume raise, pot or equity proofs", () => {
+    // Card mutation of hand 53 only; this is NOT a replay of absent hand-62 evidence.
+    const f = fixture(frames => {
+      frames[1].payload.pC.v7UmNXTwjJ.cards[0].value = "Qc";
+      frames[1].payload.pC.v7UmNXTwjJ.cards[1].value = "Td";
+    });
+    const r = f.build();
+    expect(r.policy).toMatchObject({ chosenAction: "FOLD", activation: { allowed: true } });
+    expect(r.policy.activation!.requiredProofs).not.toEqual(expect.arrayContaining(["raiseLegality"]));
+    expect(r.policy.activation!.requiredProofs).not.toEqual(expect.arrayContaining(["pot"]));
+    expect(r.policy.activation!.requiredProofs).not.toEqual(expect.arrayContaining(["equity"]));
+    expect(r.snapshot.current.historyComplete).toBe(false);
   });
   it.each(["pre", "generation", "dealer", "blind", "ante", "roster", "players", "hero-call", "opponent-call", "events", "turn"])("rejects changed source %s", variant => {
     const f = fixture(frames => {

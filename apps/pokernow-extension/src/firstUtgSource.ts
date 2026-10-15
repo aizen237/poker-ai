@@ -1,9 +1,24 @@
-/** Scoped source witness for the captured registration -> first UTG hand-start
- * transition. No general patch reducer or full action-history claim. */
+import { initializeUtgState, advanceUtgState } from "./firstUtgState.js";
+
+/** Scoped first-UTG witness from consecutive bounded source state.
+ * No general poker-state emulator or full action-history claim. */
 const object = (v: unknown): v is Record<string, any> => !!v && typeof v === "object" && !Array.isArray(v);
 const token = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(v);
 const integer = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+// Object member order is not semantic; array order and absent/null are.
+const equivalent = (a: any, b: any): boolean => {
+  if (a === b) return true;
+  if (Array.isArray(a)) return Array.isArray(b) && a.length === b.length && a.every((v, i) => equivalent(v, b[i]));
+  return object(a) && object(b) && Object.keys(a).length === Object.keys(b).length &&
+    Object.keys(a).every(k => Object.hasOwn(b, k) && equivalent(a[k], b[k]));
+};
+/** Internal validation receipt, never accepted from a page message. */
+export interface SourceBootstrapReceipt {
+  kind: "registration" | "equivalent_refresh";
+  sequence: number; generation: number; tableId: string; handId: string; handNumber: number;
+  now: number; pre: number | undefined;
+}
 const keys = ["id", "hI", "gN", "now", "pre", "r", "gT", "seats", "iHPI", "dealerID", "dealerSeat", "sBPI", "bBPI",
   "tB", "pGS", "cPI", "pITT", "smallBlind", "bigBlind", "ante", "deadButton", "gM", "mode", "oTC", "gameResult",
   "aD", "aS", "cM", "cR", "cRPI", "rHP", "rHC", "eventsData"];
@@ -23,7 +38,9 @@ export function projectFirstUtgSource(data: unknown, knownHero: string | null): 
     const heroId = p[0] === "registered" ? p[1].currentPlayer?.id : knownHero;
     const frame: Record<string, any> = {};
     for (const key of keys) if (Object.hasOwn(raw, key)) frame[key] = raw[key];
-    if (p[0] === "registered") delete frame.gameResult;
+    // Only the observed hand-boundary removal marker is consumed by the proof.
+    // Settlement payloads may contain unrelated player/result data.
+    if (p[0] === "registered" || frame.gameResult !== "<D>") delete frame.gameResult;
     if (Object.hasOwn(raw, "players")) {
       if (!object(raw.players) || Object.keys(raw.players).length > 10) return null;
       frame.players = Object.fromEntries(Object.entries(raw.players).map(([id, player]) => [id, object(player)
@@ -31,8 +48,10 @@ export function projectFirstUtgSource(data: unknown, knownHero: string | null): 
     }
     if (Object.hasOwn(raw, "pC")) {
       if (!object(raw.pC) || Object.keys(raw.pC).length > 10) return null;
-      frame.pC = Object.fromEntries(Object.entries(raw.pC).map(([id, hand]) => [id, object(hand) && Array.isArray(hand.cards)
-        ? { cards: hand.cards.map((c: unknown) => object(c) ? { value: id === heroId ? c.value : null, showing: c.showing } : c) } : hand]));
+      if (Object.values(raw.pC).some(hand => !object(hand) || !Array.isArray(hand.cards) || hand.cards.length > 2 ||
+          hand.cards.some((c: unknown) => !object(c) || !(c.value === null || typeof c.value === "string") || typeof c.showing !== "boolean"))) return null;
+      frame.pC = Object.fromEntries(Object.entries(raw.pC).map(([id, hand]) => [id,
+        { cards: (hand as any).cards.map((c: any) => ({ value: id === heroId ? c.value : null, showing: c.showing })) }]));
     }
     const result = { event: p[0], heroId: token(heroId) ? heroId : null, frame };
     return JSON.stringify(result).length <= 40_000 ? result : null;
@@ -46,9 +65,21 @@ export interface FirstUtgWitness {
   provenance: string;
 }
 
+/** The sole continuity authority for this decision class. Minted inside the
+ * validated reducer, never accepted from page messages or metadata inventory. */
+export interface FirstUtgProof {
+  version: 1;
+  scope: "first_utg_boundary";
+  historyComplete: false;
+  expiresAt: number;
+  continuity: { status: "validated_prefix"; baselineSequence: number; throughSequence: number;
+    generation: number; tableId: string; handId: string; cursor: number };
+  witness: FirstUtgWitness;
+}
+
 function firstUtg(reg: UtgProjection, next: UtgProjection, tableId: string, generation: number, at: number): FirstUtgWitness | null {
   const a = reg.frame, b = next.frame, hero = reg.heroId;
-  if (!hero || reg.event !== "registered" || next.event !== "gC" || a.id !== tableId ||
+  if (!hero || next.event !== "gC" || a.id !== tableId ||
       (Object.hasOwn(b, "id") && b.id !== tableId) || b.r === true || next.heroId !== hero ||
       !integer(a.now) || !integer(b.now) || b.pre !== a.now || b.now <= a.now ||
       !integer(a.gN) || b.gN !== a.gN + 1 || !token(a.hI) || !token(b.hI) || a.hI === b.hI ||
@@ -89,33 +120,120 @@ function firstUtg(reg: UtgProjection, next: UtgProjection, tableId: string, gene
   if (new Set(heroCards).size !== 2) return null;
   return { tableId, handId: b.hI, handNumber: b.gN, generation, cursor: b.now, previousCursor: a.now, receivedAt: at,
     heroId: hero, heroSeat: cycle[3]![0], heroCards, smallBlind: 1, bigBlind: 2, players,
-    provenance: `PokerNow direct hand-start ${a.hI}/${a.gN} -> ${b.hI}/${b.gN}, pre=${b.pre}, now=${b.now}; first UTG turn has no preceding voluntary turn; forced blinds only. Hand-53 observed source profile.` };
+    provenance: `PokerNow validated hand-start ${a.hI}/${a.gN} -> ${b.hI}/${b.gN}, pre=${b.pre}, now=${b.now}; first UTG turn has no preceding voluntary turn; forced blinds only. Hand-53 observed source profile; bounded consecutive source state.` };
 }
 
-/** A later update of ANY kind expires the witness. No inferred update reducer. */
+/** Every later update expires the current decision witness. Validated state may
+ * continue to the next hand; it never certifies action-history completeness. */
 export function createFirstUtgSource(tableId: string, now: () => number) {
-  let baseline: { data: UtgProjection; generation: number; sequence: number } | null = null;
+  let baseline: { data: UtgProjection; generation: number; sequence: number; baselineSequence: number } | null = null;
   let witness: FirstUtgWitness | null = null;
+  // Diagnostic history only: never consumed by snapshot() or proof activation.
+  let lastCertificate: { handId: string; generation: number; issuedBySequence: number; receivedAt: number; expiresAt: number;
+    invalidation: { at: number; sequence: number | null; reason: string } | null } | null = null;
+  const invalidateWitness = (reason: string, sequence: number | null) => {
+    witness = null;
+    if (lastCertificate && (!lastCertificate.invalidation || sequence !== null &&
+        lastCertificate.invalidation.sequence === sequence && lastCertificate.invalidation.at === now())) {
+      lastCertificate.invalidation = { at: now(), sequence, reason };
+    }
+  };
   let lastSequence = -1;
   let lastGeneration = 0;
+  let rejectedGeneration: number | null = null;
+  let lastObservedAt = -1;
+  let registrationSeen = false;
+  type Observation = { sequence: number; generation: number; observedAt: number; projection: UtgProjection | null };
+  const observations: Observation[] = [];
+  let retainedCharacters = 0, droppedObservations = 0;
+  let reason = "No bounded first-UTG source projection received.";
+  const currentProof = (): FirstUtgProof | null => {
+    if (!witness || !baseline || now() < witness.receivedAt || now() - witness.receivedAt > 10_000 ||
+        baseline.generation !== witness.generation || baseline.data.frame.hI !== witness.handId || baseline.data.frame.now !== witness.cursor) return null;
+    return { version: 1, scope: "first_utg_boundary", historyComplete: false, expiresAt: witness.receivedAt + 10_000,
+      continuity: { status: "validated_prefix", baselineSequence: baseline.baselineSequence, throughSequence: baseline.sequence,
+        generation: baseline.generation, tableId, handId: witness.handId, cursor: witness.cursor }, witness: structuredClone(witness) };
+  };
   return {
-    accept(raw: unknown, sequence: unknown, generation: unknown, observedAt: unknown) {
-      if (!integer(sequence) || !integer(generation) || generation < 1) { witness = null; baseline = null; return; }
-      if (sequence <= lastSequence) return; // Same local delivery replay does not refresh time.
-      witness = null;
+    accept(raw: unknown, sequence: unknown, generation: unknown, observedAt: unknown): SourceBootstrapReceipt | undefined {
+      const reject = (message: string) => { invalidateWitness(message, integer(sequence) ? sequence : null); baseline = null; rejectedGeneration = lastGeneration; reason = message; };
+      if (!integer(sequence) || !integer(generation) || generation < 1) { reject("Invalid local source sequence/generation."); return; }
+      if (sequence <= lastSequence || generation < lastGeneration) { reject("Stale/replayed local source delivery invalidated carried state."); return; }
+      invalidateWitness("Subsequent source update requires a new certificate; no same-decision renewal contract is verified.", sequence);
       const previous = baseline; baseline = null;
-      const contiguous = sequence === lastSequence + 1 && generation === lastGeneration;
+      const newGeneration = generation !== lastGeneration;
+      const contiguous = sequence === lastSequence + 1 && !newGeneration;
       lastSequence = sequence;
-      if (generation < lastGeneration) return;
       lastGeneration = generation;
-      if (!integer(observedAt) || observedAt > now() || !object(raw) || !object(raw.frame) || JSON.stringify(raw).length > 40_000 || !["registered", "gC", "rup"].includes(raw.event)) return;
-      const data = raw as unknown as UtgProjection;
-      if (data.event === "registered") { baseline = { data: structuredClone(data), generation, sequence }; return; }
-      if (previous && contiguous) {
-        try { witness = firstUtg(previous.data, data, tableId, generation, observedAt); } catch { witness = null; }
+      if (newGeneration) { rejectedGeneration = null; lastObservedAt = -1; registrationSeen = false; }
+      if (!integer(observedAt) || observedAt > now() || observedAt < lastObservedAt) { reject("Invalid or regressing local receive time."); return; }
+      lastObservedAt = observedAt;
+      const valid = object(raw) && object(raw.frame) && JSON.stringify(raw).length <= 40_000 && ["registered", "gC", "rup"].includes(raw.event);
+      const observation: Observation = { sequence, generation, observedAt, projection: valid ? structuredClone(raw) as unknown as UtgProjection : null };
+      observations.push(observation); retainedCharacters += JSON.stringify(observation).length;
+      while (observations.length > 96 || retainedCharacters > 300_000) {
+        retainedCharacters -= JSON.stringify(observations.shift()!).length; droppedObservations++;
       }
+      if (!valid) { reject("Missing, malformed or unbound first-UTG source projection; inventory fields cannot replace source values."); return; }
+      const data = raw as unknown as UtgProjection;
+      const receipt = (kind: SourceBootstrapReceipt["kind"], frame: Record<string, any>): SourceBootstrapReceipt =>
+        ({ kind, sequence, generation, tableId, handId: frame.hI, handNumber: frame.gN, now: frame.now, pre: frame.pre });
+      // Before the first full registration, patches are untrusted and never
+      // inherited. Their absence/gaps say nothing about the new baseline.
+      if (!registrationSeen && data.event !== "registered") {
+        reason = "Discarded pre-registration update; waiting for a validated full registration in this generation.";
+        return;
+      }
+      if (registrationSeen && rejectedGeneration === generation) { baseline = null; return; }
+      try {
+        if (data.event === "registered" && !registrationSeen) {
+          registrationSeen = true; // A failed registration cannot be repaired silently in this generation.
+          if (!token(data.heroId)) throw new Error("Registration has no validated hero ID.");
+          const frame = initializeUtgState(data.frame, tableId, data.heroId);
+          rejectedGeneration = null;
+          baseline = { data: { ...data, frame }, generation, sequence, baselineSequence: sequence };
+          reason = "Validated registration retained; waiting for a supported fresh first-UTG boundary.";
+          return receipt("registration", frame);
+        }
+        if (!previous || !contiguous) throw new Error("No valid registered baseline or consecutive local sequence in this generation.");
+        if (data.heroId !== previous.data.heroId) throw new Error("Conflicting source hero identity.");
+        if (data.event === "rup" && previous.data.event === "registered") {
+          const frame = initializeUtgState(data.frame, tableId, data.heroId!);
+          if (!equivalent(frame, previous.data.frame)) throw new Error("Bootstrap rup differs from the registered projection; no refresh/backfill proof.");
+          baseline = { data: { ...data, frame }, generation, sequence, baselineSequence: previous.baselineSequence };
+          reason = "Equivalent immediate bootstrap rup validated; waiting for linked updates and a fresh hand boundary.";
+          return receipt("equivalent_refresh", frame);
+        }
+        // Only the identical, immediate bootstrap refresh above is supported.
+        if (data.event !== "gC") throw new Error("Full rup/registration refresh invalidates carried continuity; no backfill proof.");
+        const frame = advanceUtgState(previous.data.frame, data.frame, tableId, data.heroId!);
+        witness = firstUtg(previous.data, data, tableId, generation, observedAt);
+        if (witness) lastCertificate = { handId: witness.handId, generation, issuedBySequence: sequence,
+          receivedAt: witness.receivedAt, expiresAt: witness.receivedAt + 10_000, invalidation: null };
+        baseline = { data: { ...data, frame }, generation, sequence, baselineSequence: previous.baselineSequence };
+        reason = witness ? "First-UTG boundary proven from consecutive bounded source state; synchronous DOM and freshness checks still required."
+          : "Validated source state carried forward; this update is not a supported first-UTG boundary.";
+      } catch (error) { reject(error instanceof Error ? error.message : "Unsupported source mutation."); }
     },
-    reset() { witness = null; baseline = null; },
-    snapshot() { return witness && now() >= witness.receivedAt && now() - witness.receivedAt <= 10_000 ? structuredClone(witness) : null; },
+    reset() { invalidateWitness("Source disconnect, reader gap or reset invalidated first-UTG evidence.", null); baseline = null; rejectedGeneration = lastGeneration; reason = "Source disconnect, reader gap or reset invalidated first-UTG evidence."; },
+    snapshot() { return currentProof()?.witness ?? null; },
+    proof: currentProof,
+    diagnostic() {
+      const currentTime = now();
+      const certificate = lastCertificate ? structuredClone(lastCertificate) : null;
+      const status = !certificate ? "not_issued" : currentTime < certificate.receivedAt ? "clock_regression"
+        : certificate.invalidation && certificate.invalidation.at <= certificate.expiresAt ? "invalidated"
+        : currentTime > certificate.expiresAt ? "expired" : certificate.invalidation ? "invalidated" : "fresh";
+      return { scope: "Bounded production projection and validated state reducer. Never proves whole-hand history.",
+        freshness: { scope: "Latest issued source certificate only; diagnostic history is not actionable proof. Other live gates still apply.",
+          status, certificate, ageMs: certificate ? currentTime - certificate.receivedAt : null,
+          remainingMs: certificate && status === "fresh" ? Math.max(0, certificate.expiresAt - currentTime) : 0,
+          sameDecisionRenewalSupported: false as const,
+          missingRenewalEvidence: "No verified fresh server decision snapshot/acknowledgment binds this hand, first-action window and actor to a current request or authoritative decision version. Cached state, cursor continuity and receive time are insufficient." },
+        reason: witness && now() - witness.receivedAt > 10_000 ? "First-UTG witness expired after 10 seconds; original receive time is not renewed." : reason,
+        observations: structuredClone(observations), droppedObservations, retainedCharacters,
+        carriedState: baseline ? { generation: baseline.generation, sequence: baseline.sequence, projection: structuredClone(baseline.data) } : null,
+        limits: { observations: 96, characters: 300_000 }, historyComplete: false as const };
+    },
   };
 }

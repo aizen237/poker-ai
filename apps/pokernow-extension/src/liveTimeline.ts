@@ -30,8 +30,9 @@ export function createTimelineRuntime(options: TimelineRuntimeOptions) {
       if (!message || typeof message !== "object") return;
       const m = message as Record<string, unknown>;
       if (m.channel === TIMELINE_CHANNEL && m.type === "source_metadata" && m.tableId === options.tableId) {
-        sourceMetadata.socket(m.metadata, m.sequence, m.generation, options.now());
-        try { firstUtgSource.accept(m.utgSource, m.sequence, m.generation, m.observedAt); } catch { firstUtgSource.reset(); }
+        let bootstrap: ReturnType<typeof firstUtgSource.accept>;
+        try { bootstrap = firstUtgSource.accept(m.utgSource, m.sequence, m.generation, m.observedAt); } catch { firstUtgSource.reset(); }
+        sourceMetadata.socket(m.metadata, m.sequence, m.generation, options.now(), bootstrap);
         return; // Does not update global history coverage or requests.
       }
       if (m.channel !== TIMELINE_CHANNEL || m.type !== "identity" || m.tableId !== options.tableId ||
@@ -134,12 +135,16 @@ export function createTimelineRuntime(options: TimelineRuntimeOptions) {
       } finally { busy = false; }
     },
     snapshot() {
+      const firstUtgProof = connected ? firstUtgSource.proof() : null;
       return { current: current ?? fallback.current(), snapshotFallback: fallback.current(),
         archivedSnapshotSegments: fallback.archived(),
         archivedHands: [...hands.values()].filter(h => h !== current),
         sourceStatus: { status, connected, busy, lastSuccess, identity,
           sourceMetadata: sourceMetadata.snapshot(),
-          firstUtg: connected ? firstUtgSource.snapshot() : null,
+          firstUtgProof,
+          // Compatibility/display view of the same contract, not another validator.
+          firstUtg: firstUtgProof?.witness ?? null,
+          firstUtgEvidence: firstUtgSource.diagnostic(),
           historyCoverage: (current ?? fallback.current()).coverage,
           coverageScope: "Diagnostic only. Socket frame cursors, timestamp filters and local presentation sequences cannot certify contiguous log coverage or current-decision catch-up.",
           actorSeatMapping: { ...(current ?? fallback.current()).seatMapping,

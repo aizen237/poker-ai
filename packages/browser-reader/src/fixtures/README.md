@@ -1,4 +1,55 @@
-# PokerNow board capture
+# PokerNow live fixtures
+
+## Hand 115 recommendation lifecycle
+
+`evidence/hand-115-diagnostic.json` is the original diagnostic for `oacpsi6ju66i`.
+`hand115Lifecycle.test.ts` sends its 71 retained projections through the real
+MAIN-world bridge and content-script policy/display path with simulated local
+time. It preserves original receive times: sequence 68 occurs 24,025 ms after
+the boundary, already beyond the ten-second proof deadline. Late first display,
+LLM delivery and negative mutations are explicitly simulations; the export
+does not contain historical UI-paint or provider-completion timestamps. The
+saved DOM is a cross-check, not a replacement source certificate.
+
+## Hand 103 reconnect diagnostic
+
+`evidence/hand-103-reconnect-diagnostic.json` is an unchanged copy of the attached
+2026-10-14 diagnostic. It retains bounded production projections, not complete
+raw envelopes. `hand103Replay.test.ts` replays observations 116–211 through the
+live runtime and the MAIN-world bridge, including generation-2 pre-registration
+`gC` 140, registration 141, equivalent `rup` 142 and linked updates to hand 103.
+Reconstructed envelopes contain only retained source values. Saved DOM inputs
+are cross-checks, never a replacement source baseline. Fresh-boundary timing
+and the actual expired export time are tested separately. Mutations are negative
+regression cases, not additional live evidence.
+
+## Reported missing/missed blind wording
+
+`pokernow-missed-blind-report.json` preserves the two action fragments reported
+from the failed preflop smoke test. That original report contains no actor
+identities, source timestamps, socket frames or DOM snapshot. Its synthetic
+tests combine the grammar with the existing hand-53 adapter fixture.
+
+The subsequent original diagnostic is now saved separately at
+`evidence/hand-56-failed-smoke-diagnostic.txt`. `hand56SmokeReplay.test.ts` feeds
+its retained socket metadata and exact current-hand log text/timestamps through
+the production timeline runtime, then rebuilds the current raw DOM assessment,
+preflop context and scoped proofs. Response indexes and unique timestamps
+restore the recorded HTTP row order. Missing raw socket interiors, prior
+responses and proof certificates are not fabricated. All six blind rows now
+parse as posts; the four missing/missed rows retain mapped hero/opponent seats.
+Two join messages and the hero-card announcement now parse as non-action
+metadata; no roster or completeness proof is inferred. Hand 56 stays
+blocked: no certified six-player first-UTG boundary, five source-listed seats
+versus six occupied DOM seats, incomplete reconnect continuity and unresolved
+call contributions. The old parsed actions/proofs are not trusted by the replay.
+
+Only the explicit `posts a missing small blind of X` and `posts a missed big
+blind of X` additions are recognized. Existing normal SB/BB parsing is retained;
+unknown post text remains unparsed. Posts keep reported amount semantics and
+do not prove live/dead-money treatment, a whole-hand ledger or raise legality.
+
+## Board capture
 
 `pokernow-board-live.html` contains the four exact card elements provided by the
 user on 2026-10-05: 6h, Kd, 3h, 9h. Chat escaping before angle brackets was removed;
@@ -148,3 +199,14 @@ original file is not rewritten. Missing-frame/reconnect tests mutate copies and
 are labeled synthetic. The full file strengthens roster/boundary and transition
 evidence; it does not itself certify tB chip semantics, complete action coverage
 or the meaning of candidate legality fields mR/mAVTB.
+
+## Hand 121 occupant replacement
+
+`evidence/hand-121-diagnostic.json` is the unchanged saved diagnostic with 78
+retained production projections. `hand121Replay.test.ts` replays those projections
+through the production projector/timeline adapter, plus the saved DOM cross-check
+and reparsed log rows. Sequence 6 explicitly removes `nQ-ZBcAfge`, supplies
+`L6CP6v3_ST`, and replaces complete card membership without a pC deletion marker.
+Sequence 78 starts hand 121. Tests distinguish a fresh decision from the export
+18.227 seconds later; synthetic negative/alternate-departure cases mutate copies
+only and are not additional live evidence. See `SOCKET_STATE_AUDIT.md` for scope.

@@ -22,7 +22,7 @@ import { calculateEquityForEstimates, estimateOpponentRange } from "@poker-ai/ra
 import { readLiveTable } from "./tableRead.js";
 import { logLiveDiagnostics } from "./diagnostics.js";
 import { decisionFingerprint, decisionRequestKey } from "./requestIdentity.js";
-import { RecommendationSchema } from "@poker-ai/ai-core";
+import { RecommendationSchema, lockedEngineRecommendation, validateReasoningConsistency } from "@poker-ai/ai-core";
 import { startLiveTimeline } from "./liveTimeline.js";
 import { buildLiveDecisionProofs, liveProofRevision, activationLabel } from "./decisionProofs.js";
 console.log("[Poker AI Reader] Content script loaded on:", window.location.href);
@@ -36,7 +36,7 @@ console.log("[Poker AI Reader] Content script loaded on:", window.location.href)
 // underneath it.
 // ---------------------------------------------------------------------
 
-type AIStatus = "idle" | "waiting" | "received" | "blocked" | "error" | "waiting_for_proof" | "unsupported" | "unsafe";
+type AIStatus = "idle" | "waiting" | "received" | "blocked" | "error" | "waiting_for_proof" | "unsupported" | "unsafe" | "evidence_expired";
 
 interface OverlayState {
   street: string;
@@ -103,9 +103,11 @@ const AI_STATUS_COLORS: Record<AIStatus, string> = {
   blocked: "#e05050",
   error: "#e05050",
   waiting_for_proof: "#e0a030", unsupported: "#888888", unsafe: "#e05050",
+  evidence_expired: "#999999",
 };
 
 function renderOverlay() {
+  refreshDisplayLifetime();
   const el = ensureOverlay();
   const s = overlayState;
   const parts: string[] = [];
@@ -126,6 +128,7 @@ function renderOverlay() {
     `<div style="color:${AI_STATUS_COLORS[s.aiStatus]}; font-weight:600;">${escapeHtml(s.aiStatus === "received" ? "RECOMMENDATION AVAILABLE" : s.aiStatus.replaceAll("_", " ").toUpperCase())}</div>`,
   );
   if (s.policyLine) parts.push(`<div>${escapeHtml(s.policyLine)}</div>`);
+  if (s.aiResult && displayLifetime) parts.push(`<div data-proof-countdown>Evidence expires in ${Math.max(0, (displayLifetime.expiresAt - Date.now()) / 1000).toFixed(1)}s</div>`);
   if (s.aiResult) {
     parts.push(`<div style="font-size:16px; font-weight:700; margin:4px 0;">${escapeHtml(s.aiResult.action)}</div>`);
     parts.push(`<div>Confidence: ${(s.aiResult.confidence * 100).toFixed(0)}%</div>`);
@@ -274,7 +277,23 @@ function buildDecisionPacket(input: BuildDecisionPacketInput): DecisionPacket {
  * result either.
  */
 async function requestRecommendation(packet: DecisionPacket, stateDescription: string, requestKey: string) {
+  let policy: ReturnType<typeof evaluateDecisionPolicy> | null = null;
+  let locked: ReturnType<typeof lockedEngineRecommendation> = null;
   try {
+    policy = evaluateDecisionPolicy(packet);
+    locked = lockedEngineRecommendation(policy);
+    if (locked && requestKey === lastRecommendationRequestKey) {
+      bindDisplayLifetime(requestKey);
+      overlayState.aiResult = {
+        ...locked,
+        action: locked.action === "RAISE" && policy.raiseToBB !== null ? `RAISE TO ${policy.raiseToBB} BB`
+          : locked.action + (locked.sizingBB === undefined ? "" : ` ${locked.sizingBB}BB additional`),
+      };
+      overlayState.aiStatus = "received";
+      overlayState.policyLine = `Engine decision (${policy.confidence} confidence); explanation pending`;
+      overlayState.aiWarnings = policy.reasons;
+      renderOverlay(); // Paint the engine selection before starting any provider work.
+    }
     const response = await fetch(RELAY_SERVER_URL, {
       method: "POST",
       signal: AbortSignal.timeout(70_000),
@@ -307,6 +326,24 @@ async function requestRecommendation(packet: DecisionPacket, stateDescription: s
       return;
     }
 
+    if (locked) {
+      // This request may enrich the explanation only. Neither provider action,
+      // size nor confidence may replace the synchronous engine result.
+      if (!response.ok || !data.ok || data.blocked || data.activation?.allowed === false || Array.isArray(data.result)) {
+        throw new Error("Explanation unavailable or relay rejected the response");
+      }
+      const explanation = RecommendationSchema.parse(data.result);
+      if (data.decisionSource !== "engine_policy" || explanation.action !== locked.action || explanation.sizingBB !== locked.sizingBB ||
+          !validateReasoningConsistency(explanation, packet).isConsistent) {
+        throw new Error("Explanation does not match the locked engine action");
+      }
+      if (overlayState.aiResult) overlayState.aiResult.reasoning = explanation.reasoning;
+      overlayState.aiStatus = "received";
+      overlayState.policyLine = `Engine decision (${policy.confidence} confidence)`;
+      overlayState.aiWarnings = [...policy.reasons, ...(data.consistencyWarnings ?? [])];
+      renderOverlay();
+      return;
+    }
     overlayState.policyLine = data.policy
       ? `Decision: ${data.decisionSource}; policy ${data.policy.status} (${data.policy.confidence} confidence)` : null;
     if (data.policy) console.log("[Poker AI Reader] Engine policy evidence:", data.policy);
@@ -343,6 +380,21 @@ async function requestRecommendation(packet: DecisionPacket, stateDescription: s
   } catch (error) {
     console.error(`[Poker AI Reader] Failed to reach relay server (for: ${stateDescription}):`, error);
     if (requestKey === lastRecommendationRequestKey) {
+      // Failure may also arrive between polls; never preserve an expired lock.
+      let fresh = false;
+      try {
+        const latest = readLiveTable();
+        const fingerprint = JSON.stringify([decisionFingerprint(location.origin + location.pathname, latest.raw, latest.context, latest.raiseControl), liveProofRevision(handTimeline.snapshot())]);
+        fresh = requestKey === decisionRequestKey(requestSequence, fingerprint);
+      } catch { /* Failed read invalidates the current display. */ }
+      if (locked && policy && fresh) {
+        overlayState.aiStatus = "received";
+        overlayState.policyLine = `Engine decision (${policy.confidence} confidence); explanation unavailable`;
+        overlayState.aiWarnings = [...policy.reasons, "Relay explanation failed, timed out, or returned an invalid response. Engine action retained."];
+        renderOverlay();
+        return;
+      }
+      if (!fresh) lastRecommendationRequestKey = null;
       overlayState.aiStatus = "error";
       overlayState.aiResult = null;
       overlayState.policyLine = null;
@@ -361,6 +413,78 @@ let previousGameState: GameState | null = null;
 let actionHistory: ActionHistory = emptyActionHistory();
 let currentDiagnosticPacket: DecisionPacket | null = null;
 const handTimeline = startLiveTimeline();
+
+// Display-only deadline: never renews evidence or participates in activation.
+// No old action is retained after expiry or any decision/source change.
+let displayLifetime: { requestKey: string; expiresAt: number; receivedAt: number; dom: string; source: string } | null = null;
+let expiryTimer: number | undefined;
+function displaySourceBinding() {
+  const revision = JSON.parse(liveProofRevision(handTimeline.snapshot()));
+  // Expiry removes the witness; retain only the expired label for this exact
+  // otherwise unchanged decision. Any other revision clears it.
+  delete revision.firstUtg;
+  return JSON.stringify(revision);
+}
+function clearDisplayLifetime() {
+  displayLifetime = null;
+  if (expiryTimer !== undefined) window.clearTimeout(expiryTimer);
+  expiryTimer = undefined;
+}
+function bindDisplayLifetime(requestKey: string) {
+  clearDisplayLifetime();
+  const proof = handTimeline.snapshot().sourceStatus.firstUtgProof;
+  if (!proof || lastDomStateJson === null) return;
+  displayLifetime = { requestKey, receivedAt: proof.witness.receivedAt, expiresAt: proof.expiresAt,
+    dom: lastDomStateJson, source: displaySourceBinding() };
+  expiryTimer = window.setTimeout(refreshFreshnessDisplay, Math.max(0, displayLifetime.expiresAt - Date.now()));
+}
+function refreshDisplayLifetime() {
+  if (!displayLifetime) return;
+  if (displayLifetime.dom !== lastDomStateJson || displayLifetime.source !== displaySourceBinding() || Date.now() < displayLifetime.receivedAt ||
+      Date.now() < displayLifetime.expiresAt && !handTimeline.snapshot().sourceStatus.firstUtgProof) {
+    clearDisplayLifetime();
+    overlayState.aiResult = null;
+    overlayState.policyLine = null;
+    overlayState.aiStatus = "waiting_for_proof";
+    lastRecommendationRequestKey = null;
+    return;
+  }
+  if (Date.now() >= displayLifetime.expiresAt) {
+    lastRecommendationRequestKey = null; // Late explanations cannot restore advice.
+    overlayState.aiResult = null;
+    overlayState.aiStatus = "evidence_expired";
+    overlayState.policyLine = "No current recommendation. Fresh source evidence is required.";
+    overlayState.aiWarnings = [];
+  }
+}
+function refreshFreshnessDisplay() {
+  if (!displayLifetime) return;
+  // Also catch changed cards/actor between ordinary polls. This read can
+  // invalidate a display, but cannot issue or extend a certificate.
+  try {
+    const read = readLiveTable();
+    const dom = decisionFingerprint(location.origin + location.pathname, read.raw, read.context, read.raiseControl);
+    if (dom !== displayLifetime.dom) {
+      clearDisplayLifetime();
+      lastRecommendationRequestKey = null;
+      overlayState.aiResult = null;
+      overlayState.policyLine = null;
+      overlayState.aiStatus = "waiting_for_proof";
+    }
+  } catch {
+    clearDisplayLifetime();
+    lastRecommendationRequestKey = null;
+    overlayState.aiResult = null;
+    overlayState.policyLine = null;
+    overlayState.aiStatus = "blocked";
+  }
+  renderOverlay();
+}
+setInterval(refreshFreshnessDisplay, 250);
+// Browsers may throttle timers in background tabs. Recheck before presenting
+// the panel when the page becomes visible again; never restart the clock.
+document.addEventListener("visibilitychange", refreshFreshnessDisplay);
+window.addEventListener?.("focus", refreshFreshnessDisplay);
 
 setInterval(() => {
   try {
@@ -584,6 +708,7 @@ setInterval(() => {
     currentDiagnosticPacket = null;
     overlayState.aiResult = null;
     overlayState.aiStatus = "blocked";
+    clearDisplayLifetime();
     overlayState.street = "unreadable";
     overlayState.opponentStatsLine = null;
     overlayState.policyLine = null;

@@ -1,4 +1,4 @@
-import type { LiveStateAssessment } from "@poker-ai/browser-reader";
+import { isSourceNonActionMetadata, type LiveStateAssessment } from "@poker-ai/browser-reader";
 import type { LiveTableRead } from "./tableRead.js";
 import type { LiveTimelineDiagnostic } from "./liveTimeline.js";
 
@@ -6,13 +6,15 @@ import type { LiveTimelineDiagnostic } from "./liveTimeline.js";
  * the global hand timeline or certifies any later preflop decision. */
 export function currentFirstUtg(read: LiveTableRead | undefined, assessment: LiveStateAssessment,
   timeline: LiveTimelineDiagnostic | null | undefined) {
-  const source = timeline?.sourceStatus, w = source?.firstUtg;
-  const id = source?.identity, chain = source?.sourceMetadata.socketContinuity;
+  const source = timeline?.sourceStatus, proof = source?.firstUtgProof, w = proof?.witness;
+  const id = source?.identity, chain = proof?.continuity;
   const state = assessment.state;
   if (!read || !timeline || !w || !source?.connected || !id || !state ||
       id.tableId !== w.tableId || id.handId !== w.handId || id.handNumber !== w.handNumber || id.heroPlayerId !== w.heroId || id.frameCursor !== w.cursor ||
       timeline.current.handId !== `${w.tableId}:hand:${w.handId}` || timeline.current.handNumber !== w.handNumber ||
-      chain?.generation !== w.generation || chain.status !== "observed_continuous" || chain.chainGap || id.chainGap ||
+      proof?.scope !== "first_utg_boundary" || proof.version !== 1 || proof.historyComplete !== false ||
+      chain?.generation !== w.generation || chain.status !== "validated_prefix" || chain.tableId !== w.tableId ||
+      chain.handId !== w.handId || chain.cursor !== w.cursor || chain.throughSequence <= chain.baselineSequence || id.chainGap ||
       timeline.current.coverage.issues.some(i => i.code === "metadata_gap" || i.code === "identity_conflict") ||
       timeline.current.seatMapping.status === "invalid" || read.context.readErrors.length ||
       state.street !== "preflop" || state.board.length || assessment.smallBlind !== w.smallBlind || assessment.bigBlind !== w.bigBlind ||
@@ -20,6 +22,7 @@ export function currentFirstUtg(read: LiveTableRead | undefined, assessment: Liv
   // Conflicting log evidence can invalidate this empty voluntary window, even
   // though missing log rows cannot invalidate its independent first-turn proof.
   if (timeline.current.events.some(e => e.source === "pokernow_log_v3" &&
+      !isSourceNonActionMetadata(e) &&
       !["hand_start", "player_stacks", "post"].includes(e.action))) return null;
   if (timeline.current.seatMapping.entries.some(e => !w.players.some(p => p.playerId === e.playerId && p.seat === e.seat))) return null;
   const seats = state.seats.filter(s => s.isOccupied);

@@ -1,4 +1,6 @@
-/** Observational metadata only. Nothing here is consumed by history/policy proofs. */
+/** Observational metadata audit, never full history or first-UTG activation proof.
+ * Scoped activation consumes the bounded reducer's FirstUtgProof contract. */
+import type { SourceBootstrapReceipt } from "./firstUtgSource.js";
 type Scalar = string | number | boolean | null;
 export interface MetadataField { path: string; type: string; value?: Scalar }
 export interface FieldInventory { fields: MetadataField[]; truncated: boolean }
@@ -116,6 +118,7 @@ export interface LogMetadata {
   provesCurrentDecisionCatchUp: false;
 }
 export interface SocketContinuity {
+  baselineSequence?: number;
   generation: number | null;
   status: "unknown" | "observed_continuous" | "incomplete";
   chainGap: boolean;
@@ -141,7 +144,7 @@ export function summarizeSocketStateEvidence(observations: readonly SocketObserv
   return {
     authority: "observational_only" as const,
     provesRoster: false, provesPositions: false, provesActionWindow: false, provesRaiseLegality: false,
-    scope: "Retained socket inventory only. Field names/types are observed; nested structures, values and evolution were discarded before the bridge. Not observed here does not mean absent upstream.",
+    scope: "This inventory retains field names/types only. The separate sourceStatus.firstUtgEvidence contains bounded production proof projections; sourceStatus.firstUtg is the validated witness. rawValueRetained=false here does not describe that separate bridge.",
     fields: [...SOCKET_STATE_CANDIDATES, "currentPlayer"].map(name => {
       const samples = observations.flatMap(observation => {
         const inventories = name === "currentPlayer" ? [{ boundary: "envelope", inventory: observation.metadata.envelope }]
@@ -155,7 +158,7 @@ export function summarizeSocketStateEvidence(observations: readonly SocketObserv
       return { name, availability: samples.length ? "name_and_type_only" : "not_in_retained_inventory",
         rawValueRetained: false, semanticStatus: "unverified", samples };
     }),
-    requiredCapture: "Raw registered.gameState plus consecutive gC/rup payloads from a hand boundary through hero turn, retaining these subtrees and hI/gN/pre/now/r; registered.currentPlayer.id only. Existing inventory JSON cannot recover their discarded values.",
+    requiredCapture: "Inspect sourceStatus.firstUtgEvidence first. Older inventory-only exports cannot recover discarded values; a missing production projection requires source values, never reconstruction from names/types or DOM occupancy.",
   };
 }
 
@@ -174,7 +177,7 @@ export function createSourceMetadataAudit() {
     continuity.status = "incomplete";
   };
   return {
-    socket(raw: unknown, localSequence: unknown, generation: unknown, at: number) {
+    socket(raw: unknown, localSequence: unknown, generation: unknown, at: number, bootstrap?: SourceBootstrapReceipt) {
       if (!Number.isSafeInteger(localSequence) || Number(localSequence) <= lastSequence ||
           !Number.isSafeInteger(generation) || Number(generation) < 1) return;
       const metadata = validateSocketMetadata(raw);
@@ -188,7 +191,18 @@ export function createSourceMetadataAudit() {
       const previous = socket.at(-1);
       const before = previous && previous.localConnectionGeneration === generation ? getField(previous.metadata.frame, "now") : undefined;
       const now = getField(metadata.frame, "now"), pre = getField(metadata.frame, "pre");
-      if (continuity.generation !== generation) {
+      // Internal receipt already validates full values. Revalidating it against
+      // the lossy field inventory creates a competing, weaker source of truth.
+      const validatedBootstrap = bootstrap && bootstrap.sequence === localSequence && bootstrap.generation === generation;
+      if (validatedBootstrap && bootstrap.kind === "registration" && metadata.event === "registered") {
+        continuity = newContinuity(Number(generation));
+        continuity.baselineSequence = Number(localSequence);
+        // The baseline starts here. No claim about the discarded prefix.
+      } else if (validatedBootstrap && bootstrap.kind === "equivalent_refresh" && metadata.event === "rup" &&
+          continuity.generation === generation && !continuity.reasons.length &&
+          Number(localSequence) === oldSequence + 1 && previous?.metadata.event === "registered" && now === before) {
+        // Same complete bounded state/cursor, not a new action or linked update.
+      } else if (continuity.generation !== generation) {
         continuity = newContinuity(Number(generation));
         if (metadata.event !== "registered" || integerKey(now) === null) {
           issue("No valid registration baseline observed in this connection generation.");

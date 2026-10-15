@@ -150,10 +150,10 @@
         return obj[e];
       });
     };
-    util2.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object4) => {
+    util2.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object5) => {
       const keys = [];
-      for (const key in object4) {
-        if (Object.prototype.hasOwnProperty.call(object4, key)) {
+      for (const key in object5) {
+        if (Object.prototype.hasOwnProperty.call(object5, key)) {
           keys.push(key);
         }
       }
@@ -4486,6 +4486,17 @@
     HandCategory2[HandCategory2["FourOfAKind"] = 7] = "FourOfAKind";
     HandCategory2[HandCategory2["StraightFlush"] = 8] = "StraightFlush";
   })(HandCategory || (HandCategory = {}));
+  var HAND_CATEGORY_NAMES = [
+    "High Card",
+    "Pair",
+    "Two Pair",
+    "Three of a Kind",
+    "Straight",
+    "Flush",
+    "Full House",
+    "Four of a Kind",
+    "Straight Flush"
+  ];
 
   // ../../packages/poker-engine/dist/combinatorics.js
   function combinations(items, k) {
@@ -6400,110 +6411,51 @@
     { name: "Four of a Kind", pattern: `four${SEP}of${SEP}a${SEP}kind` },
     { name: "Straight Flush", pattern: `straight${SEP}flush` }
   ];
-
-  // src/firstUtgLive.ts
-  function currentFirstUtg(read, assessment, timeline) {
-    const source = timeline?.sourceStatus, w = source?.firstUtg;
-    const id = source?.identity, chain = source?.sourceMetadata.socketContinuity;
-    const state = assessment.state;
-    if (!read || !timeline || !w || !source?.connected || !id || !state || id.tableId !== w.tableId || id.handId !== w.handId || id.handNumber !== w.handNumber || id.heroPlayerId !== w.heroId || id.frameCursor !== w.cursor || timeline.current.handId !== `${w.tableId}:hand:${w.handId}` || timeline.current.handNumber !== w.handNumber || chain?.generation !== w.generation || chain.status !== "observed_continuous" || chain.chainGap || id.chainGap || timeline.current.coverage.issues.some((i) => i.code === "metadata_gap" || i.code === "identity_conflict") || timeline.current.seatMapping.status === "invalid" || read.context.readErrors.length || state.street !== "preflop" || state.board.length || assessment.smallBlind !== w.smallBlind || assessment.bigBlind !== w.bigBlind || read.context.dealerSeatNumber !== w.players.find((p) => p.position === "BTN")?.seat) return null;
-    if (timeline.current.events.some((e) => e.source === "pokernow_log_v3" && !["hand_start", "player_stacks", "post"].includes(e.action))) return null;
-    if (timeline.current.seatMapping.entries.some((e) => !w.players.some((p) => p.playerId === e.playerId && p.seat === e.seat))) return null;
-    const seats = state.seats.filter((s) => s.isOccupied);
-    if (seats.length !== 6 || new Set(seats.map((s) => s.seatNumber)).size !== 6 || seats.filter((s) => s.isYou).length !== 1 || seats.filter((s) => s.isCurrentToAct).length !== 1) return null;
-    for (const p of w.players) {
-      const s = seats.find((s2) => s2.seatNumber === p.seat);
-      if (!s || s.isFolded || s.isAllIn || s.isOffline || s.isSettling || s.betReadError || s.stack === null || s.stack < 100 * w.bigBlind || s.stack !== p.sourceStack && s.stack !== p.sourceStack - p.contribution || assessment.positions.get(p.seat) !== p.position || (s.currentBet === null ? p.contribution !== 0 : s.currentBet !== p.contribution) || s.isYou !== (p.playerId === w.heroId) || s.isCurrentToAct !== (p.playerId === w.heroId)) return null;
+  var CLAIM_PREFIX = "\\b(?:hero|you|we)(?:['\\u2019]ve)?\\s+(?:(?:only|just|already|now|currently|still|is|are)\\s+)*(?:has|have|had|hold|holds|holding|made|make|makes|flopped|turned|hit|hits|got|own|owns)";
+  var FILLER_WORDS = "only|just|a|an|the|top|middle|bottom|weak|strong|marginal|made|nut|low|high|small|big|solid|decent|current|already|now|still";
+  var NOT_A_MADE_HAND = "draws?|possibilit\\w*|potential|outs?|blockers?|equity";
+  function findHeroClaimedHandCategories(text) {
+    const found = [];
+    for (const { name, pattern } of CATEGORY_PATTERNS) {
+      const claim = new RegExp(`${CLAIM_PREFIX}(?:${SEP}+(?:${FILLER_WORDS})){0,4}${SEP}+(?:${pattern})\\b(?!${SEP}+(?:${NOT_A_MADE_HAND}))`, "i");
+      if (claim.test(text))
+        found.push(name);
     }
-    const hero = seats.find((s) => s.isYou);
-    const ranks = "23456789TJQKA";
-    const cards = hero.holeCards.map((c) => `${ranks[c.rank - 2]}${c.suit}`).sort();
-    if (cards.length !== 2 || JSON.stringify(cards) !== JSON.stringify([...w.heroCards].sort()) || assessment.amountToCall !== null && assessment.amountToCall !== w.bigBlind) return null;
-    return w;
+    return found;
+  }
+  function validateReasoningConsistency(recommendation, packet) {
+    const warnings = [];
+    const allCards = [...packet.hero.holeCards, ...packet.table.board];
+    if (allCards.length >= 5) {
+      const actualCategory = HAND_CATEGORY_NAMES[evaluateBest(allCards).category];
+      const claimed = findHeroClaimedHandCategories(recommendation.reasoning);
+      if (claimed.length > 0 && !claimed.includes(actualCategory)) {
+        warnings.push(`Reasoning claims hero has ${claimed.join("/")} but hero's actual made hand is ${actualCategory}.`);
+      }
+    }
+    return { isConsistent: warnings.length === 0, warnings };
   }
 
-  // src/preflop.ts
-  function buildLivePreflopExecution(read, assessment, sourceWindowKey) {
-    const hero = assessment.state?.seats.find((s) => s.isYou && s.isOccupied);
-    const control = read.raiseControl;
+  // ../../packages/ai-core/dist/policyRecommendation.js
+  function engineExplanation(policy) {
+    if (policy.ruleExplanation)
+      return {
+        action: policy.chosenAction,
+        ...policy.chosenSizeBB === null ? {} : { sizingBB: policy.chosenSizeBB },
+        confidence: 0.65,
+        reasoning: policy.ruleExplanation
+      };
+    const best = policy.actionEVs.find((row) => row.action === policy.chosenAction && (policy.chosenSizeBB === null ? row.investmentBB === 0 : row.investmentBB === policy.chosenSizeBB));
     return {
-      heroIsCurrentToAct: hero?.isCurrentToAct === true && !hero.isFolded && !hero.isSettling,
-      sourceWindowKey,
-      controls: {
-        source: control.selectedRaiseToSource ?? "PokerNow raise control unavailable",
-        formVisible: control.formVisible,
-        raiseSubmitVisible: control.raiseSubmitVisible,
-        raiseSubmitEnabled: control.raiseSubmitEnabled,
-        issues: [...control.issues],
-        selectedRaiseToBB: assessment.bigBlind !== null && assessment.bigBlind > 0 && control.selectedRaiseToChips !== null ? control.selectedRaiseToChips / assessment.bigBlind : null
-      }
+      action: policy.chosenAction,
+      ...policy.chosenSizeBB === null ? {} : { sizingBB: policy.chosenSizeBB },
+      // Compatibility with the old UI's numeric confidence; not a calibrated win probability.
+      confidence: 0.65,
+      reasoning: `${best.action}${best.investmentBB ? `: invest ${best.investmentBB}BB${best.raiseToBB === void 0 ? "" : ` (street total ${best.raiseToBB}BB)`}` : ""}. Estimated EV ${best.evBB.toFixed(2)}BB, sensitivity bounds ${best.lowBB.toFixed(2)} to ${best.highBB.toFixed(2)}BB. Preferred within the supported comparison, conditional on: ${policy.assumptions.join(" ")} Equity: ${policy.equitySource}. Fold equity: ${policy.foldEquitySource}.`
     };
   }
-  function buildLivePreflopContext(assessment, actionHistory2, timeline, read) {
-    const { state, bigBlind, positions, decisionPot, amountToCall } = assessment;
-    if (bigBlind === null || !Number.isFinite(bigBlind) || bigBlind <= 0) return null;
-    const hero = state?.seats.find((s) => s.isYou);
-    try {
-      const first = currentFirstUtg(read, assessment, timeline);
-      if (first) return buildPreflopContext({
-        heroSeat: first.heroSeat,
-        playersDealtIn: 6,
-        players: first.players.map((p) => ({
-          seat: p.seat,
-          position: p.position,
-          remainingStackBB: state.seats.find((s) => s.seatNumber === p.seat).stack / bigBlind,
-          contributionBB: p.contribution / bigBlind,
-          folded: false,
-          allIn: false
-        })),
-        potBB: decisionPot === null ? null : decisionPot / bigBlind,
-        amountToCallBB: 1,
-        contributionMeaning: "street_total",
-        historyCoverage: "complete",
-        openingEvidence: "first_utg_hand_start",
-        actions: [],
-        historyNotes: [],
-        tournamentContext: "chip_ev_only"
-      });
-      const preflop = state?.street === "preflop" && hero?.isOccupied && bigBlind !== null && state.seats.filter((s) => s.isOccupied).length >= 2 ? buildPreflopContext({
-        heroSeat: hero.seatNumber,
-        players: state.seats.filter((s) => s.isOccupied).map((s) => ({
-          seat: s.seatNumber,
-          position: positions.get(s.seatNumber) ?? null,
-          remainingStackBB: s.stack === null ? null : s.stack / bigBlind,
-          contributionBB: s.betReadError || s.currentBet === null ? null : s.currentBet / bigBlind,
-          folded: s.isFolded,
-          allIn: s.isAllIn ?? false
-        })),
-        playersDealtIn: null,
-        potBB: decisionPot === null ? null : decisionPot / bigBlind,
-        amountToCallBB: amountToCall === null ? null : amountToCall / bigBlind,
-        contributionMeaning: assessment.verification.monetary.contributionSemantics.status === "proven" ? "street_total" : "unknown",
-        historyCoverage: "partial",
-        tournamentContext: "unknown",
-        historyNotes: timeline ? ["Source rows do not certify coverage/catch-up of the current decision window."] : actionHistory2.notes,
-        actions: timeline ? timeline.current.events.flatMap((e) => {
-          if (e.source !== "pokernow_log_v3" || e.street !== "preflop" || e.actor?.seat == null || !["post", "check", "call", "bet", "raise", "fold", "all-in"].includes(e.action)) return [];
-          return [{
-            seat: e.actor.seat,
-            action: e.action === "post" ? "post_blind" : e.action,
-            // Only raise-to is verified as a total in the server parser. No call increment conversion.
-            totalContributionBB: e.amountMeaning === "street_total" && e.amount !== null ? e.amount / bigBlind : null,
-            observation: e.sourceTimestamp,
-            wagerAction: e.wagerAction === "post" ? null : e.wagerAction
-          }];
-        }) : [...actionHistory2.records.values()].flat().filter((a) => a.street === "preflop").map((a) => ({
-          seat: a.seat,
-          action: a.action,
-          totalContributionBB: a.amount === null ? null : a.amount / bigBlind,
-          observation: a.observation,
-          wagerAction: a.wagerAction
-        }))
-      }) : null;
-      return preflop;
-    } catch {
-      return null;
-    }
+  function lockedEngineRecommendation(policy) {
+    return policy.status === "selected" && policy.activation?.allowed === true && policy.llmMayChoose === false && policy.chosenAction !== null ? engineExplanation(policy) : null;
   }
 
   // ../../packages/browser-reader/dist/cardParsing.js
@@ -7457,7 +7409,7 @@
     if (!parts.length || parts.length > 10)
       return invalid("Unsupported Player stacks entry count.");
     const entries = [];
-    const seats = /* @__PURE__ */ new Set(), ids = /* @__PURE__ */ new Set();
+    const seats = /* @__PURE__ */ new Set(), ids2 = /* @__PURE__ */ new Set();
     for (const part of parts) {
       const match = /^#([1-9]|10) "([^"\r\n]{1,160}) @ ([A-Za-z0-9_-]{1,160})" \((0|[1-9][0-9]{0,15})(\.[0-9]{1,8})?\)$/.exec(part);
       if (!match || !match[2].trim())
@@ -7465,10 +7417,10 @@
       const seat = Number(match[1]), playerId = match[3], stackText = match[4] + (match[5] ?? "");
       if (!Number.isFinite(Number(stackText)) || Number(stackText) > Number.MAX_SAFE_INTEGER)
         return invalid("Player stacks amount exceeds supported bounds.");
-      if (seats.has(seat) || ids.has(playerId))
+      if (seats.has(seat) || ids2.has(playerId))
         return invalid("Duplicate seat or player ID in Player stacks row.");
       seats.add(seat);
-      ids.add(playerId);
+      ids2.add(playerId);
       entries.push({ seat, name: match[2], playerId, stackText });
     }
     return { kind: "valid", entries };
@@ -7827,9 +7779,14 @@
     if (!t.reasons.includes(reason) && t.reasons.length < 50)
       t.reasons.push(reason);
   }
+  function isSourceNonActionMetadata(event) {
+    return event.source === "pokernow_log_v3" && (event.action === "player_join" || event.action === "hole_cards");
+  }
   function normalizeLogRow(row, observedAt) {
     const text = row.msg;
     const timestamp = timestampKey(row.createdAt);
+    const joined = /^The player "([^"\r\n]{1,160}) @ ([A-Za-z0-9_-]{1,160})" joined the game with a stack of ((?:0|[1-9][0-9]{0,15})(?:\.[0-9]{1,8})?)\.$/.exec(text);
+    const cards = /^Your hand is ((?:[2-9TJQKA]|10)[\u2663\u2666\u2665\u2660]), ((?:[2-9TJQKA]|10)[\u2663\u2666\u2665\u2660])$/.exec(text);
     const returned = /^Uncalled bet of ((?:0|[1-9][0-9]{0,15})(?:\.[0-9]{1,8})?) returned to "([^"\r\n]{1,160}) @ ([A-Za-z0-9_-]{1,160})"$/.exec(text);
     const event = {
       id: `${timestamp}:${text}`,
@@ -7857,6 +7814,11 @@
       event.amount = Number(returned[1]);
       event.amountMeaning = "return_reported";
       event.actor = { seat: null, name: returned[2], playerId: returned[3], isHero: null };
+    } else if (joined && joined[0] === text && joined[1].trim() && Number.isSafeInteger(Number(joined[3].replace(".", "")))) {
+      event.action = "player_join";
+      event.actor = { seat: null, name: joined[1], playerId: joined[2], isHero: null };
+    } else if (cards && cards[0] === text && cards[1].replace("10", "T") !== cards[2].replace("10", "T")) {
+      event.action = "hole_cards";
     } else if (/^-- starting\b/.test(text)) {
       event.action = "hand_start";
       event.street = "preflop";
@@ -7874,10 +7836,16 @@
       if (actor) {
         event.actor = { seat: null, name: actor[1], playerId: actor[2], isHero: null };
         const action2 = actor[3];
+        const missedBlind = /^posts a (?:missing small blind|missed big blind) of ((?:0|[1-9][0-9]{0,15})(?:\.[0-9]{1,8})?)$/.exec(action2);
         const numeric = /^(bets|raises to|calls|posts (?:a |the )?(?:small blind|big blind|ante) of) ([0-9]+(?:\.[0-9]+)?)( and go all in)?$/.exec(action2);
         if (action2 === "checks" || action2 === "folds")
           event.action = action2 === "checks" ? "check" : "fold";
-        else if (numeric && Number.isFinite(Number(numeric[2]))) {
+        else if (missedBlind && actor[0] === text && missedBlind[0] === action2 && Number(missedBlind[1]) > 0 && Number.isSafeInteger(Number(missedBlind[1].replace(".", "")))) {
+          event.action = "post";
+          event.wagerAction = "post";
+          event.amount = Number(missedBlind[1]);
+          event.amountMeaning = "reported_unspecified";
+        } else if (numeric && Number.isFinite(Number(numeric[2]))) {
           event.action = numeric[1] === "bets" ? "bet" : numeric[1] === "raises to" ? "raise" : numeric[1] === "calls" ? "call" : "post";
           event.amount = Number(numeric[2]);
           event.wagerAction = event.action;
@@ -8082,6 +8050,111 @@
         timeline = newHandTimeline(`${sessionId}:segment:${++segment}`);
       }
     };
+  }
+
+  // src/firstUtgLive.ts
+  function currentFirstUtg(read, assessment, timeline) {
+    const source = timeline?.sourceStatus, proof = source?.firstUtgProof, w = proof?.witness;
+    const id = source?.identity, chain = proof?.continuity;
+    const state = assessment.state;
+    if (!read || !timeline || !w || !source?.connected || !id || !state || id.tableId !== w.tableId || id.handId !== w.handId || id.handNumber !== w.handNumber || id.heroPlayerId !== w.heroId || id.frameCursor !== w.cursor || timeline.current.handId !== `${w.tableId}:hand:${w.handId}` || timeline.current.handNumber !== w.handNumber || proof?.scope !== "first_utg_boundary" || proof.version !== 1 || proof.historyComplete !== false || chain?.generation !== w.generation || chain.status !== "validated_prefix" || chain.tableId !== w.tableId || chain.handId !== w.handId || chain.cursor !== w.cursor || chain.throughSequence <= chain.baselineSequence || id.chainGap || timeline.current.coverage.issues.some((i) => i.code === "metadata_gap" || i.code === "identity_conflict") || timeline.current.seatMapping.status === "invalid" || read.context.readErrors.length || state.street !== "preflop" || state.board.length || assessment.smallBlind !== w.smallBlind || assessment.bigBlind !== w.bigBlind || read.context.dealerSeatNumber !== w.players.find((p) => p.position === "BTN")?.seat) return null;
+    if (timeline.current.events.some((e) => e.source === "pokernow_log_v3" && !isSourceNonActionMetadata(e) && !["hand_start", "player_stacks", "post"].includes(e.action))) return null;
+    if (timeline.current.seatMapping.entries.some((e) => !w.players.some((p) => p.playerId === e.playerId && p.seat === e.seat))) return null;
+    const seats = state.seats.filter((s) => s.isOccupied);
+    if (seats.length !== 6 || new Set(seats.map((s) => s.seatNumber)).size !== 6 || seats.filter((s) => s.isYou).length !== 1 || seats.filter((s) => s.isCurrentToAct).length !== 1) return null;
+    for (const p of w.players) {
+      const s = seats.find((s2) => s2.seatNumber === p.seat);
+      if (!s || s.isFolded || s.isAllIn || s.isOffline || s.isSettling || s.betReadError || s.stack === null || s.stack < 100 * w.bigBlind || s.stack !== p.sourceStack && s.stack !== p.sourceStack - p.contribution || assessment.positions.get(p.seat) !== p.position || (s.currentBet === null ? p.contribution !== 0 : s.currentBet !== p.contribution) || s.isYou !== (p.playerId === w.heroId) || s.isCurrentToAct !== (p.playerId === w.heroId)) return null;
+    }
+    const hero = seats.find((s) => s.isYou);
+    const ranks = "23456789TJQKA";
+    const cards = hero.holeCards.map((c) => `${ranks[c.rank - 2]}${c.suit}`).sort();
+    if (cards.length !== 2 || JSON.stringify(cards) !== JSON.stringify([...w.heroCards].sort()) || assessment.amountToCall !== null && assessment.amountToCall !== w.bigBlind) return null;
+    return w;
+  }
+
+  // src/preflop.ts
+  function buildLivePreflopExecution(read, assessment, sourceWindowKey) {
+    const hero = assessment.state?.seats.find((s) => s.isYou && s.isOccupied);
+    const control = read.raiseControl;
+    return {
+      heroIsCurrentToAct: hero?.isCurrentToAct === true && !hero.isFolded && !hero.isSettling,
+      sourceWindowKey,
+      controls: {
+        source: control.selectedRaiseToSource ?? "PokerNow raise control unavailable",
+        formVisible: control.formVisible,
+        raiseSubmitVisible: control.raiseSubmitVisible,
+        raiseSubmitEnabled: control.raiseSubmitEnabled,
+        issues: [...control.issues],
+        selectedRaiseToBB: assessment.bigBlind !== null && assessment.bigBlind > 0 && control.selectedRaiseToChips !== null ? control.selectedRaiseToChips / assessment.bigBlind : null
+      }
+    };
+  }
+  function buildLivePreflopContext(assessment, actionHistory2, timeline, read) {
+    const { state, bigBlind, positions, decisionPot, amountToCall } = assessment;
+    if (bigBlind === null || !Number.isFinite(bigBlind) || bigBlind <= 0) return null;
+    const hero = state?.seats.find((s) => s.isYou);
+    try {
+      const first = currentFirstUtg(read, assessment, timeline);
+      if (first) return buildPreflopContext({
+        heroSeat: first.heroSeat,
+        playersDealtIn: 6,
+        players: first.players.map((p) => ({
+          seat: p.seat,
+          position: p.position,
+          remainingStackBB: state.seats.find((s) => s.seatNumber === p.seat).stack / bigBlind,
+          contributionBB: p.contribution / bigBlind,
+          folded: false,
+          allIn: false
+        })),
+        potBB: decisionPot === null ? null : decisionPot / bigBlind,
+        amountToCallBB: 1,
+        contributionMeaning: "street_total",
+        historyCoverage: "complete",
+        openingEvidence: "first_utg_hand_start",
+        actions: [],
+        historyNotes: [],
+        tournamentContext: "chip_ev_only"
+      });
+      const preflop = state?.street === "preflop" && hero?.isOccupied && bigBlind !== null && state.seats.filter((s) => s.isOccupied).length >= 2 ? buildPreflopContext({
+        heroSeat: hero.seatNumber,
+        players: state.seats.filter((s) => s.isOccupied).map((s) => ({
+          seat: s.seatNumber,
+          position: positions.get(s.seatNumber) ?? null,
+          remainingStackBB: s.stack === null ? null : s.stack / bigBlind,
+          contributionBB: s.betReadError || s.currentBet === null ? null : s.currentBet / bigBlind,
+          folded: s.isFolded,
+          allIn: s.isAllIn ?? false
+        })),
+        playersDealtIn: null,
+        potBB: decisionPot === null ? null : decisionPot / bigBlind,
+        amountToCallBB: amountToCall === null ? null : amountToCall / bigBlind,
+        contributionMeaning: assessment.verification.monetary.contributionSemantics.status === "proven" ? "street_total" : "unknown",
+        historyCoverage: "partial",
+        tournamentContext: "unknown",
+        historyNotes: timeline ? ["Source rows do not certify coverage/catch-up of the current decision window."] : actionHistory2.notes,
+        actions: timeline ? timeline.current.events.flatMap((e) => {
+          if (e.source !== "pokernow_log_v3" || e.street !== "preflop" || e.actor?.seat == null || !["post", "check", "call", "bet", "raise", "fold", "all-in"].includes(e.action)) return [];
+          return [{
+            seat: e.actor.seat,
+            action: e.action === "post" ? "post_blind" : e.action,
+            // Only raise-to is verified as a total in the server parser. No call increment conversion.
+            totalContributionBB: e.amountMeaning === "street_total" && e.amount !== null ? e.amount / bigBlind : null,
+            observation: e.sourceTimestamp,
+            wagerAction: e.wagerAction === "post" ? null : e.wagerAction
+          }];
+        }) : [...actionHistory2.records.values()].flat().filter((a) => a.street === "preflop").map((a) => ({
+          seat: a.seat,
+          action: a.action,
+          totalContributionBB: a.amount === null ? null : a.amount / bigBlind,
+          observation: a.observation,
+          wagerAction: a.wagerAction
+        }))
+      }) : null;
+      return preflop;
+    } catch {
+      return null;
+    }
   }
 
   // src/raiseControlRead.ts
@@ -8321,8 +8394,8 @@
     const dealer = unique(document, TABLE_SELECTORS.dealer, "dealer marker", true);
     const dealerClasses = [...dealer?.classList ?? []];
     const dealerTokens = dealerClasses.filter((cls) => cls.startsWith("dealer-position-"));
-    const token3 = dealerTokens.length === 1 ? dealerTokens[0] : void 0;
-    const dealerSeatNumber = token3 && /^dealer-position-(?:[1-9]|10)$/.test(token3) ? Number(token3.slice("dealer-position-".length)) : null;
+    const token4 = dealerTokens.length === 1 ? dealerTokens[0] : void 0;
+    const dealerSeatNumber = token4 && /^dealer-position-(?:[1-9]|10)$/.test(token4) ? Number(token4.slice("dealer-position-".length)) : null;
     if (dealerSeatNumber === null) readErrors.push("dealer seat number unreadable or ambiguous");
     const raw = {
       seats,
@@ -8376,10 +8449,11 @@
     if (!heroSeatVerified) rosterReasons.push("Registered hero ID is not independently mapped to the current DOM hero seat.");
     const actionReasons = [];
     if (starts.length !== 1) actionReasons.push("Exactly one source hand_start is required.");
-    const disallowed = events.filter((e) => !["hand_start", "player_stacks", "post", "fold"].includes(e.action));
+    const actionEvents = events.filter((e) => !isSourceNonActionMetadata(e));
+    const disallowed = actionEvents.filter((e) => !["hand_start", "player_stacks", "post", "fold"].includes(e.action));
     if (disallowed.length) actionReasons.push(`Observed source action(s) exclude a proven unopened window: ${disallowed.map((e) => e.action).join(", ")}.`);
-    if (events.some((e) => e.order === "ambiguous" || e.action !== "hand_start" && e.street !== "preflop")) actionReasons.push("Timestamp ties or unknown street prevent ordered preflop attribution.");
-    if (events.some((e) => e.actor && (e.actor.seat === null || !e.actorSeatMappingEventId))) actionReasons.push("A source actor has no verified hand-local seat mapping.");
+    if (actionEvents.some((e) => e.order === "ambiguous" || e.action !== "hand_start" && e.street !== "preflop")) actionReasons.push("Timestamp ties or unknown street prevent ordered preflop attribution.");
+    if (actionEvents.some((e) => e.actor && (e.actor.seat === null || !e.actorSeatMappingEventId))) actionReasons.push("A source actor has no verified hand-local seat mapping.");
     if (events.some((e) => e.action === "fold" && e.actor?.playerId === heroId)) actionReasons.push("Hero has already folded in the source window.");
     if (hand?.coverage.issues.length || hand?.droppedEvents) actionReasons.push("Source rejection, omission, gap or retention loss affects this hand.");
     actionReasons.push("No authoritative source prefix/watermark proves all preflop actions through the current hero decision. Timestamp ordering and socket continuity do not establish absence of a delayed/missing action.");
@@ -8537,6 +8611,8 @@
       );
       const first = currentFirstUtg(read, assessment, timeline);
       if (first) {
+        const continuity = source.firstUtgProof.continuity;
+        set("connection", "proven", `Validated first-UTG source prefix: generation ${continuity.generation}, registration ${continuity.baselineSequence} through ${continuity.throughSequence}, cursor ${continuity.cursor}. ${first.provenance} Not whole-hand/log coverage.`);
         set("stack", "proven", `${first.provenance} Numeric remaining DOM stacks independently >=100BB for all six players.`);
         set("callCost", "proven", `${first.provenance} Normal SB=1/BB=2 source totals; UTG contribution zero at first turn. Call gap=2 chips.`);
       }
@@ -8546,7 +8622,7 @@
       decisionEpoch: epoch,
       binding: "diagnostic-only: no packet",
       handId: source?.identity ? timeline.current.handId : null,
-      connectionGeneration: chain?.generation ?? null,
+      connectionGeneration: source?.firstUtgProof?.continuity.generation ?? chain?.generation ?? null,
       proofs
     };
     if (packet) envelope.binding = decisionProofBinding({ ...packet, decisionProofs: envelope }, epoch);
@@ -8568,7 +8644,7 @@
       connected: s.connected,
       identity: s.identity,
       handId: timeline.current.handId,
-      firstUtg: s.firstUtg,
+      firstUtg: s.firstUtgProof ?? null,
       generation: s.sourceMetadata.socketContinuity.generation,
       continuity: s.sourceMetadata.socketContinuity.status,
       gap: s.sourceMetadata.socketContinuity.chainGap,
@@ -8870,7 +8946,7 @@
       provesPositions: false,
       provesActionWindow: false,
       provesRaiseLegality: false,
-      scope: "Retained socket inventory only. Field names/types are observed; nested structures, values and evolution were discarded before the bridge. Not observed here does not mean absent upstream.",
+      scope: "This inventory retains field names/types only. The separate sourceStatus.firstUtgEvidence contains bounded production proof projections; sourceStatus.firstUtg is the validated witness. rawValueRetained=false here does not describe that separate bridge.",
       fields: [...SOCKET_STATE_CANDIDATES, "currentPlayer"].map((name) => {
         const samples = observations.flatMap((observation) => {
           const inventories = name === "currentPlayer" ? [{ boundary: "envelope", inventory: observation.metadata.envelope }] : [
@@ -8893,7 +8969,7 @@
           samples
         };
       }),
-      requiredCapture: "Raw registered.gameState plus consecutive gC/rup payloads from a hand boundary through hero turn, retaining these subtrees and hI/gN/pre/now/r; registered.currentPlayer.id only. Existing inventory JSON cannot recover their discarded values."
+      requiredCapture: "Inspect sourceStatus.firstUtgEvidence first. Older inventory-only exports cannot recover discarded values; a missing production projection requires source values, never reconstruction from names/types or DOM occupancy."
     };
   }
   function createSourceMetadataAudit() {
@@ -8917,7 +8993,7 @@
       continuity.status = "incomplete";
     };
     return {
-      socket(raw, localSequence, generation, at) {
+      socket(raw, localSequence, generation, at, bootstrap) {
         if (!Number.isSafeInteger(localSequence) || Number(localSequence) <= lastSequence || !Number.isSafeInteger(generation) || Number(generation) < 1) return;
         const metadata = validateSocketMetadata(raw);
         if (!metadata) return;
@@ -8930,7 +9006,12 @@
         const previous = socket.at(-1);
         const before = previous && previous.localConnectionGeneration === generation ? getField(previous.metadata.frame, "now") : void 0;
         const now = getField(metadata.frame, "now"), pre = getField(metadata.frame, "pre");
-        if (continuity.generation !== generation) {
+        const validatedBootstrap = bootstrap && bootstrap.sequence === localSequence && bootstrap.generation === generation;
+        if (validatedBootstrap && bootstrap.kind === "registration" && metadata.event === "registered") {
+          continuity = newContinuity(Number(generation));
+          continuity.baselineSequence = Number(localSequence);
+        } else if (validatedBootstrap && bootstrap.kind === "equivalent_refresh" && metadata.event === "rup" && continuity.generation === generation && !continuity.reasons.length && Number(localSequence) === oldSequence + 1 && previous?.metadata.event === "registered" && now === before) {
+        } else if (continuity.generation !== generation) {
           continuity = newContinuity(Number(generation));
           if (metadata.event !== "registered" || integerKey(now) === null) {
             issue("No valid registration baseline observed in this connection generation.");
@@ -9053,22 +9134,133 @@
     };
   }
 
-  // src/firstUtgSource.ts
+  // src/firstUtgState.ts
   var object3 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
-  var token2 = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(v);
+  var token2 = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(v) && !["__proto__", "prototype", "constructor"].includes(v);
   var integer = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+  var chips3 = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= Number.MAX_SAFE_INTEGER;
+  var dictionary = (v) => object3(v) && Object.keys(v).length <= 10 && Object.keys(v).every(token2);
+  var ids = (v) => Array.isArray(v) && v.length <= 10 && v.every(token2) && new Set(v).size === v.length;
+  var allowed = new Set("id hI gN now pre r gT seats iHPI dealerID dealerSeat sBPI bBPI tB pGS cPI pITT smallBlind bigBlind ante deadButton gM mode aD aS cM cR players pC cRPI eventsData rHP rHC oTC gameResult".split(" "));
+  function validateFrame(frame) {
+    if (!object3(frame) || JSON.stringify(frame).length > 4e4) throw new Error("Malformed or oversized source projection.");
+    for (const [k, v] of Object.entries(frame)) {
+      if (!allowed.has(k)) throw new Error(`Unsupported projected field ${k}.`);
+      let valid2 = true;
+      if (["id", "hI", "dealerID", "sBPI", "bBPI"].includes(k)) valid2 = token2(v);
+      if (["cPI", "pITT"].includes(k)) valid2 = v === null || token2(v);
+      if (["gN", "now", "pre"].includes(k)) valid2 = integer(v);
+      if (k === "dealerSeat") valid2 = integer(v) && v >= 1 && v <= 10;
+      if (["smallBlind", "bigBlind"].includes(k)) valid2 = chips3(v) && v > 0;
+      if (k === "ante") valid2 = v === null || chips3(v);
+      if (["r", "deadButton", "aD", "aS", "cM", "cR"].includes(k)) valid2 = typeof v === "boolean";
+      if (["gM", "mode"].includes(k)) valid2 = typeof v === "string" && v.length <= 32;
+      if (k === "gT") valid2 = Array.isArray(v) && v.length === 2 && v.every(integer);
+      if (["iHPI", "cRPI", "rHP"].includes(k)) valid2 = ids(v);
+      if (k === "rHC") valid2 = v === null;
+      if (k === "eventsData") valid2 = Array.isArray(v) && v.length === 0;
+      if (k === "gameResult") valid2 = v === "<D>";
+      if (k === "seats") valid2 = Array.isArray(v) && v.length <= 10 && v.every((s, i) => Array.isArray(s) && s.length === 2 && integer(s[0]) && s[0] >= 1 && s[0] <= 10 && token2(s[1]) && (i === 0 || v[i - 1][0] < s[0])) && new Set(v.map((s) => s[1])).size === v.length;
+      if (k === "oTC") valid2 = object3(v) && Object.keys(v).length === 1 && Array.isArray(v["1"]) && v["1"].length <= 5 && v["1"].every((c) => typeof c === "string" && /^[2-9TJQKA][shdc]$/.test(c));
+      if (k === "tB") valid2 = dictionary(v) && Object.values(v).every((x) => x === "<D>" || chips3(x));
+      if (k === "pGS") valid2 = dictionary(v) && Object.values(v).every((x) => typeof x === "string" && ["inGame", "fold", "allIn", "<D>"].includes(x));
+      if (k === "players") valid2 = dictionary(v) && Object.entries(v).every(([id, p]) => p === "<D>" || object3(p) && Object.entries(p).every(([field, value]) => field === "id" ? value === id : field === "stack" ? chips3(value) : field === "status" ? typeof value === "string" && value.length <= 32 : field === "disconnectedSince" ? integer(value) || value === "<D>" : false));
+      if (k === "pC") valid2 = dictionary(v) && Object.values(v).every((h) => object3(h) && Object.keys(h).length === 1 && Array.isArray(h.cards) && h.cards.length === 2 && h.cards.every((c) => object3(c) && Object.keys(c).every((f) => ["value", "showing"].includes(f)) && typeof c.showing === "boolean" && (c.value === null || typeof c.value === "string" && /^[2-9TJQKA][shdc]$/.test(c.value))));
+      if (!valid2) throw new Error(`Malformed or unsupported source ${k}.`);
+    }
+  }
+  function validateState(state, tableId, heroId) {
+    validateFrame(state);
+    if (state.id !== tableId || !token2(state.hI) || !integer(state.gN) || state.gN < 1 || !integer(state.now) || !Array.isArray(state.seats) || !dictionary(state.players) || !object3(state.pGS) || !Array.isArray(state.gT) || !ids(state.iHPI) || !object3(state.pC) || !Object.hasOwn(state.players, heroId)) throw new Error("Incomplete registered/carried source identity or player state.");
+    for (const [id, p] of Object.entries(state.players)) if (!object3(p) || p.id !== id || !chips3(p.stack) || typeof p.status !== "string") {
+      throw new Error("Incomplete or contradictory source player identity/stack.");
+    }
+    if (state.seats.some((s) => !Object.hasOwn(state.players, s[1]))) throw new Error("Seat references an unavailable source player.");
+    for (const key of ["pGS", "tB", "pC"]) {
+      const missing = object3(state[key]) && Object.keys(state[key]).find((id) => !Object.hasOwn(state.players, id));
+      if (missing) throw new Error(`Player-keyed source ${key}.${missing} references an unavailable player.`);
+    }
+    if (state.dealerID !== void 0 && state.dealerSeat !== void 0 && !state.seats.some((s) => s[0] === state.dealerSeat && s[1] === state.dealerID)) {
+      throw new Error("Contradictory source dealer/seat assignment.");
+    }
+  }
+  function initializeUtgState(frame, tableId, heroId) {
+    validateFrame(frame);
+    const state = structuredClone(frame);
+    validateState(state, tableId, heroId);
+    return state;
+  }
+  function advanceUtgState(previous, patch, tableId, heroId) {
+    validateFrame(patch);
+    if (patch.r === true) throw new Error("Full-refresh/backfill continuity is not supported by the carried proof.");
+    if (!integer(patch.now) || patch.now <= previous.now || patch.pre !== previous.now) throw new Error("Source predecessor mismatch, stale or replayed update.");
+    if (Object.hasOwn(patch, "id") && patch.id !== tableId) throw new Error("Conflicting source table identity.");
+    const changedHand = Object.hasOwn(patch, "hI") && patch.hI !== previous.hI || Object.hasOwn(patch, "gN") && patch.gN !== previous.gN;
+    if (changedHand && (!token2(patch.hI) || patch.hI === previous.hI || patch.gN !== previous.gN + 1 || !Array.isArray(patch.iHPI) || !object3(patch.pC) || !object3(patch.tB) || JSON.stringify(patch.gT) !== "[1,0]")) {
+      throw new Error("Conflicting or incomplete new-hand transition.");
+    }
+    const next = structuredClone(previous);
+    const removed = Object.entries(patch.players ?? {}).filter(([, p]) => p === "<D>").map(([id]) => id);
+    if (removed.length) {
+      const roster = patch.iHPI;
+      if (!Array.isArray(roster) || !Array.isArray(patch.seats) || !object3(patch.pC) || Object.keys(patch.pC).length !== roster.length || patch.seats.length !== roster.length || !roster.every((id) => Object.hasOwn(patch.pC, id) && patch.seats.some((s) => s[1] === id)) || removed.some((id) => id === heroId || !Object.hasOwn(previous.players, id) || roster.includes(id) || patch.pGS?.[id] !== "<D>" || Object.hasOwn(patch.pC, id))) {
+        throw new Error("Player deletion lacks a consistent explicit roster/card snapshot and status deletion.");
+      }
+      next.pC = {};
+    }
+    for (const [key, value] of Object.entries(patch)) {
+      if (["players", "pGS", "tB", "pC"].includes(key)) {
+        if (changedHand && ["tB", "pC"].includes(key)) next[key] = {};
+        next[key] ??= {};
+        for (const [id, entry] of Object.entries(value)) {
+          if (entry === "<D>") {
+            delete next[key][id];
+            continue;
+          }
+          if (key === "players") {
+            next.players[id] = { ...next.players[id], ...structuredClone(entry) };
+            if (next.players[id].disconnectedSince === "<D>") delete next.players[id].disconnectedSince;
+          } else next[key][id] = structuredClone(entry);
+        }
+      } else next[key] = structuredClone(value);
+    }
+    validateState(next, tableId, heroId);
+    if (removed.some((id) => ["dealerID", "sBPI", "bBPI", "cPI", "pITT"].some((key) => next[key] === id) || ["cRPI", "rHP"].some((key) => next[key]?.includes(id)))) {
+      throw new Error("Deleted player remains referenced by source roles or actors.");
+    }
+    if (changedHand && (Object.keys(next.pC).length !== next.iHPI.length || !next.iHPI.every((id) => Object.hasOwn(next.pC, id)))) {
+      throw new Error("Dealt-card membership contradicts the new-hand roster.");
+    }
+    if (changedHand && next.iHPI.length === 6 && next.seats.length === 6) {
+      const dealer = next.seats.findIndex((s) => s[0] === next.dealerSeat && s[1] === next.dealerID);
+      if (dealer < 0 || next.seats[(dealer + 1) % 6][1] !== next.sBPI || next.seats[(dealer + 2) % 6][1] !== next.bBPI) {
+        throw new Error("Contradictory six-player dealer/blind traversal.");
+      }
+    }
+    return next;
+  }
+
+  // src/firstUtgSource.ts
+  var object4 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+  var token3 = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(v);
+  var integer2 = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
   var same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  var equivalent = (a, b) => {
+    if (a === b) return true;
+    if (Array.isArray(a)) return Array.isArray(b) && a.length === b.length && a.every((v, i) => equivalent(v, b[i]));
+    return object4(a) && object4(b) && Object.keys(a).length === Object.keys(b).length && Object.keys(a).every((k) => Object.hasOwn(b, k) && equivalent(a[k], b[k]));
+  };
   function firstUtg(reg, next, tableId, generation, at) {
     const a = reg.frame, b = next.frame, hero = reg.heroId;
-    if (!hero || reg.event !== "registered" || next.event !== "gC" || a.id !== tableId || Object.hasOwn(b, "id") && b.id !== tableId || b.r === true || next.heroId !== hero || !integer(a.now) || !integer(b.now) || b.pre !== a.now || b.now <= a.now || !integer(a.gN) || b.gN !== a.gN + 1 || !token2(a.hI) || !token2(b.hI) || a.hI === b.hI || !same(a.gT, [1, 5]) || !same(b.gT, [1, 0]) || !same(b.oTC, { "1": [] }) || b.gameResult !== "<D>" || b.cPI !== hero || b.pITT !== hero || !same(b.cRPI, []) || !same(b.eventsData, []) || !same(b.players, {}) || !same(b.rHP, []) || b.rHC !== null) return null;
+    if (!hero || next.event !== "gC" || a.id !== tableId || Object.hasOwn(b, "id") && b.id !== tableId || b.r === true || next.heroId !== hero || !integer2(a.now) || !integer2(b.now) || b.pre !== a.now || b.now <= a.now || !integer2(a.gN) || b.gN !== a.gN + 1 || !token3(a.hI) || !token3(b.hI) || a.hI === b.hI || !same(a.gT, [1, 5]) || !same(b.gT, [1, 0]) || !same(b.oTC, { "1": [] }) || b.gameResult !== "<D>" || b.cPI !== hero || b.pITT !== hero || !same(b.cRPI, []) || !same(b.eventsData, []) || !same(b.players, {}) || !same(b.rHP, []) || b.rHC !== null) return null;
     const profile = { smallBlind: 1, bigBlind: 2, ante: null, deadButton: false, gM: "th", mode: "4fun", aD: false, aS: false, cM: false, cR: false };
     for (const [k, value] of Object.entries(profile)) if (!same(a[k], value) || Object.hasOwn(b, k) && !same(b[k], value)) return null;
-    if (!Array.isArray(a.seats) || a.seats.length !== 6 || Object.hasOwn(b, "seats") && !same(a.seats, b.seats) || !Array.isArray(b.iHPI) || b.iHPI.length !== 6 || !object3(a.players) || !object3(b.pC) || !object3(b.tB) || !object3(a.pGS) || !object3(b.pGS)) return null;
+    if (!Array.isArray(a.seats) || a.seats.length !== 6 || Object.hasOwn(b, "seats") && !same(a.seats, b.seats) || !Array.isArray(b.iHPI) || b.iHPI.length !== 6 || !object4(a.players) || !object4(b.pC) || !object4(b.tB) || !object4(a.pGS) || !object4(b.pGS)) return null;
     const seats = a.seats;
-    if (!seats.every((s, i) => Array.isArray(s) && s.length === 2 && integer(s[0]) && s[0] >= 1 && s[0] <= 10 && token2(s[1]) && (i === 0 || seats[i - 1][0] < s[0]))) return null;
+    if (!seats.every((s, i) => Array.isArray(s) && s.length === 2 && integer2(s[0]) && s[0] >= 1 && s[0] <= 10 && token3(s[1]) && (i === 0 || seats[i - 1][0] < s[0]))) return null;
     const rows = seats;
-    const ids = rows.map((s) => s[1]);
-    if (new Set(ids).size !== 6 || new Set(b.iHPI).size !== 6 || Object.keys(b.pC).length !== 6 || !ids.every((id) => b.iHPI.includes(id) && Object.hasOwn(b.pC, id)) || Object.keys(a.players).length !== 6 || Object.keys(b.pGS).some((id) => !ids.includes(id))) return null;
+    const ids2 = rows.map((s) => s[1]);
+    if (new Set(ids2).size !== 6 || new Set(b.iHPI).size !== 6 || Object.keys(b.pC).length !== 6 || !ids2.every((id) => b.iHPI.includes(id) && Object.hasOwn(b.pC, id)) || Object.keys(a.players).length !== 6 || Object.keys(b.pGS).some((id) => !ids2.includes(id))) return null;
     const dealer = rows.findIndex(([seat, id]) => seat === b.dealerSeat && id === b.dealerID);
     if (dealer < 0) return null;
     const cycle = [...rows.slice(dealer), ...rows.slice(0, dealer)];
@@ -9077,7 +9269,7 @@
     const players = [];
     for (let i = 0; i < cycle.length; i++) {
       const [seat, playerId] = cycle[i], p = a.players[playerId], cards = b.pC[playerId]?.cards;
-      if (!object3(p) || p.id !== playerId || !integer(p.stack) || p.stack < 202 || p.status !== "inGame" || Object.hasOwn(p, "disconnectedSince") || (b.pGS[playerId] ?? a.pGS[playerId]) !== "inGame" || !Array.isArray(cards) || cards.length !== 2 || cards.some((c) => !object3(c) || c.showing !== false || (playerId === hero ? typeof c.value !== "string" || !/^[2-9TJQKA][shdc]$/.test(c.value) : c.value !== null))) return null;
+      if (!object4(p) || p.id !== playerId || !integer2(p.stack) || p.stack < 202 || p.status !== "inGame" || Object.hasOwn(p, "disconnectedSince") || (b.pGS[playerId] ?? a.pGS[playerId]) !== "inGame" || !Array.isArray(cards) || cards.length !== 2 || cards.some((c) => !object4(c) || c.showing !== false || (playerId === hero ? typeof c.value !== "string" || !/^[2-9TJQKA][shdc]$/.test(c.value) : c.value !== null))) return null;
       players.push({ seat, playerId, position: roles[i], sourceStack: p.stack, contribution: i === 1 ? 1 : i === 2 ? 2 : 0 });
     }
     const heroCards2 = b.pC[hero].cards.map((c) => c.value);
@@ -9096,49 +9288,170 @@
       smallBlind: 1,
       bigBlind: 2,
       players,
-      provenance: `PokerNow direct hand-start ${a.hI}/${a.gN} -> ${b.hI}/${b.gN}, pre=${b.pre}, now=${b.now}; first UTG turn has no preceding voluntary turn; forced blinds only. Hand-53 observed source profile.`
+      provenance: `PokerNow validated hand-start ${a.hI}/${a.gN} -> ${b.hI}/${b.gN}, pre=${b.pre}, now=${b.now}; first UTG turn has no preceding voluntary turn; forced blinds only. Hand-53 observed source profile; bounded consecutive source state.`
     };
   }
   function createFirstUtgSource(tableId, now) {
     let baseline = null;
     let witness = null;
+    let lastCertificate = null;
+    const invalidateWitness = (reason2, sequence) => {
+      witness = null;
+      if (lastCertificate && (!lastCertificate.invalidation || sequence !== null && lastCertificate.invalidation.sequence === sequence && lastCertificate.invalidation.at === now())) {
+        lastCertificate.invalidation = { at: now(), sequence, reason: reason2 };
+      }
+    };
     let lastSequence = -1;
     let lastGeneration = 0;
+    let rejectedGeneration = null;
+    let lastObservedAt = -1;
+    let registrationSeen = false;
+    const observations = [];
+    let retainedCharacters = 0, droppedObservations = 0;
+    let reason = "No bounded first-UTG source projection received.";
+    const currentProof = () => {
+      if (!witness || !baseline || now() < witness.receivedAt || now() - witness.receivedAt > 1e4 || baseline.generation !== witness.generation || baseline.data.frame.hI !== witness.handId || baseline.data.frame.now !== witness.cursor) return null;
+      return {
+        version: 1,
+        scope: "first_utg_boundary",
+        historyComplete: false,
+        expiresAt: witness.receivedAt + 1e4,
+        continuity: {
+          status: "validated_prefix",
+          baselineSequence: baseline.baselineSequence,
+          throughSequence: baseline.sequence,
+          generation: baseline.generation,
+          tableId,
+          handId: witness.handId,
+          cursor: witness.cursor
+        },
+        witness: structuredClone(witness)
+      };
+    };
     return {
       accept(raw, sequence, generation, observedAt) {
-        if (!integer(sequence) || !integer(generation) || generation < 1) {
-          witness = null;
+        const reject = (message) => {
+          invalidateWitness(message, integer2(sequence) ? sequence : null);
+          baseline = null;
+          rejectedGeneration = lastGeneration;
+          reason = message;
+        };
+        if (!integer2(sequence) || !integer2(generation) || generation < 1) {
+          reject("Invalid local source sequence/generation.");
+          return;
+        }
+        if (sequence <= lastSequence || generation < lastGeneration) {
+          reject("Stale/replayed local source delivery invalidated carried state.");
+          return;
+        }
+        invalidateWitness("Subsequent source update requires a new certificate; no same-decision renewal contract is verified.", sequence);
+        const previous = baseline;
+        baseline = null;
+        const newGeneration = generation !== lastGeneration;
+        const contiguous = sequence === lastSequence + 1 && !newGeneration;
+        lastSequence = sequence;
+        lastGeneration = generation;
+        if (newGeneration) {
+          rejectedGeneration = null;
+          lastObservedAt = -1;
+          registrationSeen = false;
+        }
+        if (!integer2(observedAt) || observedAt > now() || observedAt < lastObservedAt) {
+          reject("Invalid or regressing local receive time.");
+          return;
+        }
+        lastObservedAt = observedAt;
+        const valid2 = object4(raw) && object4(raw.frame) && JSON.stringify(raw).length <= 4e4 && ["registered", "gC", "rup"].includes(raw.event);
+        const observation = { sequence, generation, observedAt, projection: valid2 ? structuredClone(raw) : null };
+        observations.push(observation);
+        retainedCharacters += JSON.stringify(observation).length;
+        while (observations.length > 96 || retainedCharacters > 3e5) {
+          retainedCharacters -= JSON.stringify(observations.shift()).length;
+          droppedObservations++;
+        }
+        if (!valid2) {
+          reject("Missing, malformed or unbound first-UTG source projection; inventory fields cannot replace source values.");
+          return;
+        }
+        const data = raw;
+        const receipt = (kind2, frame) => ({ kind: kind2, sequence, generation, tableId, handId: frame.hI, handNumber: frame.gN, now: frame.now, pre: frame.pre });
+        if (!registrationSeen && data.event !== "registered") {
+          reason = "Discarded pre-registration update; waiting for a validated full registration in this generation.";
+          return;
+        }
+        if (registrationSeen && rejectedGeneration === generation) {
           baseline = null;
           return;
         }
-        if (sequence <= lastSequence) return;
-        witness = null;
-        const previous = baseline;
-        baseline = null;
-        const contiguous = sequence === lastSequence + 1 && generation === lastGeneration;
-        lastSequence = sequence;
-        if (generation < lastGeneration) return;
-        lastGeneration = generation;
-        if (!integer(observedAt) || observedAt > now() || !object3(raw) || !object3(raw.frame) || JSON.stringify(raw).length > 4e4 || !["registered", "gC", "rup"].includes(raw.event)) return;
-        const data = raw;
-        if (data.event === "registered") {
-          baseline = { data: structuredClone(data), generation, sequence };
-          return;
-        }
-        if (previous && contiguous) {
-          try {
-            witness = firstUtg(previous.data, data, tableId, generation, observedAt);
-          } catch {
-            witness = null;
+        try {
+          if (data.event === "registered" && !registrationSeen) {
+            registrationSeen = true;
+            if (!token3(data.heroId)) throw new Error("Registration has no validated hero ID.");
+            const frame2 = initializeUtgState(data.frame, tableId, data.heroId);
+            rejectedGeneration = null;
+            baseline = { data: { ...data, frame: frame2 }, generation, sequence, baselineSequence: sequence };
+            reason = "Validated registration retained; waiting for a supported fresh first-UTG boundary.";
+            return receipt("registration", frame2);
           }
+          if (!previous || !contiguous) throw new Error("No valid registered baseline or consecutive local sequence in this generation.");
+          if (data.heroId !== previous.data.heroId) throw new Error("Conflicting source hero identity.");
+          if (data.event === "rup" && previous.data.event === "registered") {
+            const frame2 = initializeUtgState(data.frame, tableId, data.heroId);
+            if (!equivalent(frame2, previous.data.frame)) throw new Error("Bootstrap rup differs from the registered projection; no refresh/backfill proof.");
+            baseline = { data: { ...data, frame: frame2 }, generation, sequence, baselineSequence: previous.baselineSequence };
+            reason = "Equivalent immediate bootstrap rup validated; waiting for linked updates and a fresh hand boundary.";
+            return receipt("equivalent_refresh", frame2);
+          }
+          if (data.event !== "gC") throw new Error("Full rup/registration refresh invalidates carried continuity; no backfill proof.");
+          const frame = advanceUtgState(previous.data.frame, data.frame, tableId, data.heroId);
+          witness = firstUtg(previous.data, data, tableId, generation, observedAt);
+          if (witness) lastCertificate = {
+            handId: witness.handId,
+            generation,
+            issuedBySequence: sequence,
+            receivedAt: witness.receivedAt,
+            expiresAt: witness.receivedAt + 1e4,
+            invalidation: null
+          };
+          baseline = { data: { ...data, frame }, generation, sequence, baselineSequence: previous.baselineSequence };
+          reason = witness ? "First-UTG boundary proven from consecutive bounded source state; synchronous DOM and freshness checks still required." : "Validated source state carried forward; this update is not a supported first-UTG boundary.";
+        } catch (error) {
+          reject(error instanceof Error ? error.message : "Unsupported source mutation.");
         }
       },
       reset() {
-        witness = null;
+        invalidateWitness("Source disconnect, reader gap or reset invalidated first-UTG evidence.", null);
         baseline = null;
+        rejectedGeneration = lastGeneration;
+        reason = "Source disconnect, reader gap or reset invalidated first-UTG evidence.";
       },
       snapshot() {
-        return witness && now() >= witness.receivedAt && now() - witness.receivedAt <= 1e4 ? structuredClone(witness) : null;
+        return currentProof()?.witness ?? null;
+      },
+      proof: currentProof,
+      diagnostic() {
+        const currentTime = now();
+        const certificate = lastCertificate ? structuredClone(lastCertificate) : null;
+        const status = !certificate ? "not_issued" : currentTime < certificate.receivedAt ? "clock_regression" : certificate.invalidation && certificate.invalidation.at <= certificate.expiresAt ? "invalidated" : currentTime > certificate.expiresAt ? "expired" : certificate.invalidation ? "invalidated" : "fresh";
+        return {
+          scope: "Bounded production projection and validated state reducer. Never proves whole-hand history.",
+          freshness: {
+            scope: "Latest issued source certificate only; diagnostic history is not actionable proof. Other live gates still apply.",
+            status,
+            certificate,
+            ageMs: certificate ? currentTime - certificate.receivedAt : null,
+            remainingMs: certificate && status === "fresh" ? Math.max(0, certificate.expiresAt - currentTime) : 0,
+            sameDecisionRenewalSupported: false,
+            missingRenewalEvidence: "No verified fresh server decision snapshot/acknowledgment binds this hand, first-action window and actor to a current request or authoritative decision version. Cached state, cursor continuity and receive time are insufficient."
+          },
+          reason: witness && now() - witness.receivedAt > 1e4 ? "First-UTG witness expired after 10 seconds; original receive time is not renewed." : reason,
+          observations: structuredClone(observations),
+          droppedObservations,
+          retainedCharacters,
+          carriedState: baseline ? { generation: baseline.generation, sequence: baseline.sequence, projection: structuredClone(baseline.data) } : null,
+          limits: { observations: 96, characters: 3e5 },
+          historyComplete: false
+        };
       }
     };
   }
@@ -9162,12 +9475,13 @@
         if (!message || typeof message !== "object") return;
         const m = message;
         if (m.channel === TIMELINE_CHANNEL && m.type === "source_metadata" && m.tableId === options.tableId) {
-          sourceMetadata.socket(m.metadata, m.sequence, m.generation, options.now());
+          let bootstrap;
           try {
-            firstUtgSource.accept(m.utgSource, m.sequence, m.generation, m.observedAt);
+            bootstrap = firstUtgSource.accept(m.utgSource, m.sequence, m.generation, m.observedAt);
           } catch {
             firstUtgSource.reset();
           }
+          sourceMetadata.socket(m.metadata, m.sequence, m.generation, options.now(), bootstrap);
           return;
         }
         if (m.channel !== TIMELINE_CHANNEL || m.type !== "identity" || m.tableId !== options.tableId || !Number.isSafeInteger(m.sequence) || Number(m.sequence) <= sequence || typeof m.connected !== "boolean" || m.identity !== null && !validHandIdentity(m.identity, options.tableId)) return;
@@ -9290,6 +9604,7 @@
         }
       },
       snapshot() {
+        const firstUtgProof = connected ? firstUtgSource.proof() : null;
         return {
           current: current ?? fallback.current(),
           snapshotFallback: fallback.current(),
@@ -9302,7 +9617,10 @@
             lastSuccess,
             identity: identity3,
             sourceMetadata: sourceMetadata.snapshot(),
-            firstUtg: connected ? firstUtgSource.snapshot() : null,
+            firstUtgProof,
+            // Compatibility/display view of the same contract, not another validator.
+            firstUtg: firstUtgProof?.witness ?? null,
+            firstUtgEvidence: firstUtgSource.diagnostic(),
             historyCoverage: (current ?? fallback.current()).coverage,
             coverageScope: "Diagnostic only. Socket frame cursors, timestamp filters and local presentation sequences cannot certify contiguous log coverage or current-decision catch-up.",
             actorSeatMapping: {
@@ -9394,9 +9712,11 @@
     error: "#e05050",
     waiting_for_proof: "#e0a030",
     unsupported: "#888888",
-    unsafe: "#e05050"
+    unsafe: "#e05050",
+    evidence_expired: "#999999"
   };
   function renderOverlay() {
+    refreshDisplayLifetime();
     const el = ensureOverlay();
     const s = overlayState;
     const parts = [];
@@ -9415,6 +9735,7 @@
       `<div style="color:${AI_STATUS_COLORS[s.aiStatus]}; font-weight:600;">${escapeHtml(s.aiStatus === "received" ? "RECOMMENDATION AVAILABLE" : s.aiStatus.replaceAll("_", " ").toUpperCase())}</div>`
     );
     if (s.policyLine) parts.push(`<div>${escapeHtml(s.policyLine)}</div>`);
+    if (s.aiResult && displayLifetime) parts.push(`<div data-proof-countdown>Evidence expires in ${Math.max(0, (displayLifetime.expiresAt - Date.now()) / 1e3).toFixed(1)}s</div>`);
     if (s.aiResult) {
       parts.push(`<div style="font-size:16px; font-weight:700; margin:4px 0;">${escapeHtml(s.aiResult.action)}</div>`);
       parts.push(`<div>Confidence: ${(s.aiResult.confidence * 100).toFixed(0)}%</div>`);
@@ -9507,7 +9828,22 @@
     };
   }
   async function requestRecommendation(packet, stateDescription, requestKey) {
+    let policy = null;
+    let locked = null;
     try {
+      policy = evaluateDecisionPolicy(packet);
+      locked = lockedEngineRecommendation(policy);
+      if (locked && requestKey === lastRecommendationRequestKey) {
+        bindDisplayLifetime(requestKey);
+        overlayState.aiResult = {
+          ...locked,
+          action: locked.action === "RAISE" && policy.raiseToBB !== null ? `RAISE TO ${policy.raiseToBB} BB` : locked.action + (locked.sizingBB === void 0 ? "" : ` ${locked.sizingBB}BB additional`)
+        };
+        overlayState.aiStatus = "received";
+        overlayState.policyLine = `Engine decision (${policy.confidence} confidence); explanation pending`;
+        overlayState.aiWarnings = policy.reasons;
+        renderOverlay();
+      }
       const response = await fetch(RELAY_SERVER_URL, {
         method: "POST",
         signal: AbortSignal.timeout(7e4),
@@ -9532,6 +9868,21 @@
         overlayState.equityLine = null;
         overlayState.potOddsLine = null;
         overlayState.preflopLine = null;
+        renderOverlay();
+        return;
+      }
+      if (locked) {
+        if (!response.ok || !data.ok || data.blocked || data.activation?.allowed === false || Array.isArray(data.result)) {
+          throw new Error("Explanation unavailable or relay rejected the response");
+        }
+        const explanation = RecommendationSchema.parse(data.result);
+        if (data.decisionSource !== "engine_policy" || explanation.action !== locked.action || explanation.sizingBB !== locked.sizingBB || !validateReasoningConsistency(explanation, packet).isConsistent) {
+          throw new Error("Explanation does not match the locked engine action");
+        }
+        if (overlayState.aiResult) overlayState.aiResult.reasoning = explanation.reasoning;
+        overlayState.aiStatus = "received";
+        overlayState.policyLine = `Engine decision (${policy.confidence} confidence)`;
+        overlayState.aiWarnings = [...policy.reasons, ...data.consistencyWarnings ?? []];
         renderOverlay();
         return;
       }
@@ -9567,6 +9918,21 @@
     } catch (error) {
       console.error(`[Poker AI Reader] Failed to reach relay server (for: ${stateDescription}):`, error);
       if (requestKey === lastRecommendationRequestKey) {
+        let fresh = false;
+        try {
+          const latest = readLiveTable();
+          const fingerprint = JSON.stringify([decisionFingerprint(location.origin + location.pathname, latest.raw, latest.context, latest.raiseControl), liveProofRevision(handTimeline.snapshot())]);
+          fresh = requestKey === decisionRequestKey(requestSequence, fingerprint);
+        } catch {
+        }
+        if (locked && policy && fresh) {
+          overlayState.aiStatus = "received";
+          overlayState.policyLine = `Engine decision (${policy.confidence} confidence); explanation unavailable`;
+          overlayState.aiWarnings = [...policy.reasons, "Relay explanation failed, timed out, or returned an invalid response. Engine action retained."];
+          renderOverlay();
+          return;
+        }
+        if (!fresh) lastRecommendationRequestKey = null;
         overlayState.aiStatus = "error";
         overlayState.aiResult = null;
         overlayState.policyLine = null;
@@ -9584,6 +9950,73 @@
   var actionHistory = emptyActionHistory();
   var currentDiagnosticPacket = null;
   var handTimeline = startLiveTimeline();
+  var displayLifetime = null;
+  var expiryTimer;
+  function displaySourceBinding() {
+    const revision = JSON.parse(liveProofRevision(handTimeline.snapshot()));
+    delete revision.firstUtg;
+    return JSON.stringify(revision);
+  }
+  function clearDisplayLifetime() {
+    displayLifetime = null;
+    if (expiryTimer !== void 0) window.clearTimeout(expiryTimer);
+    expiryTimer = void 0;
+  }
+  function bindDisplayLifetime(requestKey) {
+    clearDisplayLifetime();
+    const proof = handTimeline.snapshot().sourceStatus.firstUtgProof;
+    if (!proof || lastDomStateJson === null) return;
+    displayLifetime = {
+      requestKey,
+      receivedAt: proof.witness.receivedAt,
+      expiresAt: proof.expiresAt,
+      dom: lastDomStateJson,
+      source: displaySourceBinding()
+    };
+    expiryTimer = window.setTimeout(refreshFreshnessDisplay, Math.max(0, displayLifetime.expiresAt - Date.now()));
+  }
+  function refreshDisplayLifetime() {
+    if (!displayLifetime) return;
+    if (displayLifetime.dom !== lastDomStateJson || displayLifetime.source !== displaySourceBinding() || Date.now() < displayLifetime.receivedAt || Date.now() < displayLifetime.expiresAt && !handTimeline.snapshot().sourceStatus.firstUtgProof) {
+      clearDisplayLifetime();
+      overlayState.aiResult = null;
+      overlayState.policyLine = null;
+      overlayState.aiStatus = "waiting_for_proof";
+      lastRecommendationRequestKey = null;
+      return;
+    }
+    if (Date.now() >= displayLifetime.expiresAt) {
+      lastRecommendationRequestKey = null;
+      overlayState.aiResult = null;
+      overlayState.aiStatus = "evidence_expired";
+      overlayState.policyLine = "No current recommendation. Fresh source evidence is required.";
+      overlayState.aiWarnings = [];
+    }
+  }
+  function refreshFreshnessDisplay() {
+    if (!displayLifetime) return;
+    try {
+      const read = readLiveTable();
+      const dom = decisionFingerprint(location.origin + location.pathname, read.raw, read.context, read.raiseControl);
+      if (dom !== displayLifetime.dom) {
+        clearDisplayLifetime();
+        lastRecommendationRequestKey = null;
+        overlayState.aiResult = null;
+        overlayState.policyLine = null;
+        overlayState.aiStatus = "waiting_for_proof";
+      }
+    } catch {
+      clearDisplayLifetime();
+      lastRecommendationRequestKey = null;
+      overlayState.aiResult = null;
+      overlayState.policyLine = null;
+      overlayState.aiStatus = "blocked";
+    }
+    renderOverlay();
+  }
+  setInterval(refreshFreshnessDisplay, 250);
+  document.addEventListener("visibilitychange", refreshFreshnessDisplay);
+  window.addEventListener?.("focus", refreshFreshnessDisplay);
   setInterval(() => {
     try {
       const read = readLiveTable();
@@ -9805,6 +10238,7 @@
       currentDiagnosticPacket = null;
       overlayState.aiResult = null;
       overlayState.aiStatus = "blocked";
+      clearDisplayLifetime();
       overlayState.street = "unreadable";
       overlayState.opponentStatsLine = null;
       overlayState.policyLine = null;

@@ -5,3 +5,4 @@ dist/
 *.log
 # Local opponent observations
 .data/
+/evidence/

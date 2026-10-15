@@ -5,7 +5,7 @@ import { observedHandAccounting, type ObservedHandAccounting } from "./handAccou
 import { emptyHistoryCoverage, observeLogBatch, recordRejectedLogBatch, refreshHistoryCoverage, type HistoryCoverage } from "./historyCoverage.js";
 
 export const TIMELINE_LIMIT = 500;
-export type TimelineAction = "observation_start" | "hand_start" | "hand_end" | "player_stacks" | "street" | "post" | "check" | "bet" | "call" | "raise" | "fold" | "fold_observed" | "all-in" | "uncalled_return" | "showdown" | "settlement" | "arrival" | "departure" | "wager_observed" | "unparsed" | "gap";
+export type TimelineAction = "observation_start" | "hand_start" | "hand_end" | "player_stacks" | "player_join" | "hole_cards" | "street" | "post" | "check" | "bet" | "call" | "raise" | "fold" | "fold_observed" | "all-in" | "uncalled_return" | "showdown" | "settlement" | "arrival" | "departure" | "wager_observed" | "unparsed" | "gap";
 export interface TimelineEvent {
   id: string;
   /** Presentation order, NEVER a server sequence or a completeness certificate. */
@@ -88,10 +88,17 @@ export function timelineReason(t: HandTimeline, reason: string) {
   if (!t.reasons.includes(reason) && t.reasons.length < 50) t.reasons.push(reason);
 }
 
+/** Non-action metadata only; supplies neither dealt-in membership nor coverage. */
+export function isSourceNonActionMetadata(event: TimelineEvent): boolean {
+  return event.source === "pokernow_log_v3" && (event.action === "player_join" || event.action === "hole_cards");
+}
+
 /** Conservative text normalization. Unsupported templates remain raw unparsed events. */
 export function normalizeLogRow(row: LogRow, observedAt: number): TimelineEvent {
   const text = row.msg;
   const timestamp = timestampKey(row.createdAt);
+  const joined = /^The player "([^"\r\n]{1,160}) @ ([A-Za-z0-9_-]{1,160})" joined the game with a stack of ((?:0|[1-9][0-9]{0,15})(?:\.[0-9]{1,8})?)\.$/.exec(text);
+  const cards = /^Your hand is ((?:[2-9TJQKA]|10)[\u2663\u2666\u2665\u2660]), ((?:[2-9TJQKA]|10)[\u2663\u2666\u2665\u2660])$/.exec(text);
   // Only the observed whole-message grammar, with a bounded positive decimal amount.
   // Other return wording stays unparsed; no return is inferred from stack/bet deltas.
   const returned = /^Uncalled bet of ((?:0|[1-9][0-9]{0,15})(?:\.[0-9]{1,8})?) returned to "([^"\r\n]{1,160}) @ ([A-Za-z0-9_-]{1,160})"$/.exec(text);
@@ -106,6 +113,14 @@ export function normalizeLogRow(row: LogRow, observedAt: number): TimelineEvent 
     event.amountMeaning = "return_reported";
     event.actor = { seat: null, name: returned[2]!, playerId: returned[3]!, isHero: null };
   }
+  else if (joined && joined[0] === text && joined[1]!.trim() && Number.isSafeInteger(Number(joined[3]!.replace(".", "")))) {
+    event.action = "player_join";
+    event.actor = { seat: null, name: joined[1]!, playerId: joined[2]!, isHero: null };
+    // Joining stack stays in raw evidence, never a wager or current stack input.
+  }
+  else if (cards && cards[0] === text && cards[1]!.replace("10", "T") !== cards[2]!.replace("10", "T")) {
+    event.action = "hole_cards"; // No actor ID in this row; do not invent one.
+  }
   else if (/^-- starting\b/.test(text)) { event.action = "hand_start"; event.street = "preflop"; }
   else if (/^-- ending\b/.test(text)) event.action = "hand_end";
   else if (parsePlayerStacks(text).kind === "valid") event.action = "player_stacks";
@@ -116,8 +131,18 @@ export function normalizeLogRow(row: LogRow, observedAt: number): TimelineEvent 
     if (actor) {
       event.actor = { seat: null, name: actor[1]!, playerId: actor[2]!, isHero: null };
       const action = actor[3]!;
+      // Explicit live-reported system-post variants only. These are not calls
+      // or raises; their accounting meaning is still reported_unspecified.
+      const missedBlind = /^posts a (?:missing small blind|missed big blind) of ((?:0|[1-9][0-9]{0,15})(?:\.[0-9]{1,8})?)$/.exec(action);
       const numeric = /^(bets|raises to|calls|posts (?:a |the )?(?:small blind|big blind|ante) of) ([0-9]+(?:\.[0-9]+)?)( and go all in)?$/.exec(action);
       if (action === "checks" || action === "folds") event.action = action === "checks" ? "check" : "fold";
+      else if (missedBlind && actor[0] === text && missedBlind[0] === action && Number(missedBlind[1]) > 0 &&
+          Number.isSafeInteger(Number(missedBlind[1]!.replace(".", "")))) {
+        event.action = "post";
+        event.wagerAction = "post";
+        event.amount = Number(missedBlind[1]);
+        event.amountMeaning = "reported_unspecified";
+      }
       else if (numeric && Number.isFinite(Number(numeric[2]))) {
         event.action = numeric[1] === "bets" ? "bet" : numeric[1] === "raises to" ? "raise" : numeric[1] === "calls" ? "call" : "post";
         event.amount = Number(numeric[2]);

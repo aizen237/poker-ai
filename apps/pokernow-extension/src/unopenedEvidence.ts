@@ -1,5 +1,5 @@
 import type { ScopedProof } from "@poker-ai/ai-core";
-import { parsePlayerStacks, type LiveStateAssessment } from "@poker-ai/browser-reader";
+import { isSourceNonActionMetadata, parsePlayerStacks, type LiveStateAssessment } from "@poker-ai/browser-reader";
 import type { LiveTableRead } from "./tableRead.js";
 import type { LiveTimelineDiagnostic } from "./liveTimeline.js";
 import { currentFirstUtg } from "./firstUtgLive.js";
@@ -38,10 +38,11 @@ export function inspectLiveUnopenedEvidence(read: LiveTableRead, assessment: Liv
   if (!heroSeatVerified) rosterReasons.push("Registered hero ID is not independently mapped to the current DOM hero seat.");
   const actionReasons: string[] = [];
   if (starts.length !== 1) actionReasons.push("Exactly one source hand_start is required.");
-  const disallowed = events.filter(e => !["hand_start", "player_stacks", "post", "fold"].includes(e.action));
+  const actionEvents = events.filter(e => !isSourceNonActionMetadata(e));
+  const disallowed = actionEvents.filter(e => !["hand_start", "player_stacks", "post", "fold"].includes(e.action));
   if (disallowed.length) actionReasons.push(`Observed source action(s) exclude a proven unopened window: ${disallowed.map(e => e.action).join(", ")}.`);
-  if (events.some(e => e.order === "ambiguous" || e.action !== "hand_start" && e.street !== "preflop")) actionReasons.push("Timestamp ties or unknown street prevent ordered preflop attribution.");
-  if (events.some(e => e.actor && (e.actor.seat === null || !e.actorSeatMappingEventId))) actionReasons.push("A source actor has no verified hand-local seat mapping.");
+  if (actionEvents.some(e => e.order === "ambiguous" || e.action !== "hand_start" && e.street !== "preflop")) actionReasons.push("Timestamp ties or unknown street prevent ordered preflop attribution.");
+  if (actionEvents.some(e => e.actor && (e.actor.seat === null || !e.actorSeatMappingEventId))) actionReasons.push("A source actor has no verified hand-local seat mapping.");
   if (events.some(e => e.action === "fold" && e.actor?.playerId === heroId)) actionReasons.push("Hero has already folded in the source window.");
   if (hand?.coverage.issues.length || hand?.droppedEvents) actionReasons.push("Source rejection, omission, gap or retention loss affects this hand.");
   actionReasons.push("No authoritative source prefix/watermark proves all preflop actions through the current hero decision. Timestamp ordering and socket continuity do not establish absence of a delayed/missing action.");

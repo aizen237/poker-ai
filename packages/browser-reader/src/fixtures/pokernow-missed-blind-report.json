@@ -1,0 +1,5 @@
+{
+  "provenance": "User-reported live smoke-test action text; no actor, timestamp, full log response or diagnostic snapshot supplied with these fragments.",
+  "actions": ["posts a missing small blind of 1", "posts a missed big blind of 2"],
+  "scope": "Explicit forced-post grammar only. Test actors, timestamps and combinations with hand-53 are synthetic scaffolding, not the failed hand capture."
+}
