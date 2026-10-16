@@ -11,6 +11,19 @@ export const PreflopExecutionSchema = z.object({
   raiseBounds: z.object({ source: z.string().min(1), verified: z.boolean(),
     chipUnitBB: z.number().finite().positive(), minRaiseToBB: z.number().finite().positive(),
   }).optional(),
+  /** Empirical exact-size rule, NOT a general minimum/grid or live server ack. */
+  exactOpeningSize: z.object({
+    rule: z.literal("pokernow-0.1.72-th-4fun-1-2-exact5-v1"),
+    provenance: z.string().min(1).max(2000),
+    tableId: z.string().min(1), handId: z.string().min(1), heroId: z.string().min(1),
+    heroSeat: z.number().int().positive(), generation: z.number().int().positive(),
+    sourceCursor: z.number().int().nonnegative(), decisionEpoch: z.string().min(1),
+    receivedAt: z.number().finite(), expiresAt: z.number().finite(),
+    units: z.literal("chips"), bigBlindChips: z.literal(2), contributionChips: z.literal(0),
+    raiseToChips: z.literal(5), investmentChips: z.literal(5),
+    remainingStackChips: z.number().finite().min(200),
+    controls: z.enum(["panel_closed_unchecked", "selected_amount_matches", "selected_amount_differs"]),
+  }).optional(),
   controls: z.object({
     source: z.string().min(1), formVisible: z.boolean(),
     raiseSubmitVisible: z.boolean(), raiseSubmitEnabled: z.boolean().nullable(),
@@ -106,13 +119,38 @@ export function evaluatePreflopReference(packet: DecisionPacket): {
   const raiseToBB = 2.5, investmentBB = raiseToBB - hero.contributionBB!;
   const controls = execution.controls;
   const legal = execution.raiseBounds;
-  if (!legal?.verified || legal.minRaiseToBB <= 1 ||
+  const exact = execution.exactOpeningSize;
+  if (exact) {
+    // This branch cannot be used for other sizes, positions or response models.
+    // Source provenance is issued by the local reader; the relay does not act
+    // as a second PokerNow observer. Packet binding covers all these facts.
+    const now = Date.now();
+    if (exact.rule !== "pokernow-0.1.72-th-4fun-1-2-exact5-v1" || !firstUtg ||
+        hero.contributionBB !== 0 || context.heroSeat !== exact.heroSeat ||
+        exact.units !== "chips" || exact.bigBlindChips !== 2 || exact.contributionChips !== 0 ||
+        exact.raiseToChips !== 5 || exact.investmentChips !== 5 ||
+        exact.remainingStackChips !== packet.hero.stackBB * 2 || investmentBB >= packet.hero.stackBB ||
+        packet.potEvidence?.bigBlind !== 2 ||
+        packet.decisionProofs?.handId !== `${exact.tableId}:hand:${exact.handId}` ||
+        packet.decisionProofs?.connectionGeneration !== exact.generation ||
+        packet.decisionProofs?.decisionEpoch !== exact.decisionEpoch ||
+        exact.expiresAt !== exact.receivedAt + 10_000 || now < exact.receivedAt || now >= exact.expiresAt)
+      return fail("Exact five-chip opening rule is outside its bound profile, decision, capacity or original freshness window.");
+    if (controls.issues.length || (exact.controls === "panel_closed_unchecked"
+      ? controls.formVisible || controls.raiseSubmitVisible || controls.selectedRaiseToBB !== null
+      : !controls.formVisible || !controls.raiseSubmitVisible || controls.raiseSubmitEnabled !== true ||
+        controls.selectedRaiseToBB === null || controls.selectedRaiseToBB > packet.hero.stackBB ||
+        (exact.controls === "selected_amount_matches" ? controls.selectedRaiseToBB !== 2.5 : controls.selectedRaiseToBB === 2.5)))
+      return fail("Current Raise controls contradict the independently certified exact size.");
+  } else {
+    if (!legal?.verified || legal.minRaiseToBB <= 1 ||
       raiseToBB < legal.minRaiseToBB || investmentBB >= packet.hero.stackBB ||
       !Number.isFinite(legal.chipUnitBB) || legal.chipUnitBB <= 0 ||
       !near(investmentBB / legal.chipUnitBB, Math.round(investmentBB / legal.chipUnitBB)) ||
       !near(raiseToBB / legal.chipUnitBB, Math.round(raiseToBB / legal.chipUnitBB))) return fail("2.5BB opening size is outside independently proven minimum, reopening, chip-unit or capacity bounds.");
-  if (!controls.formVisible || !controls.raiseSubmitVisible || controls.raiseSubmitEnabled !== true ||
+    if (!controls.formVisible || !controls.raiseSubmitVisible || controls.raiseSubmitEnabled !== true ||
       controls.issues.length || controls.selectedRaiseToBB === null || !near(controls.selectedRaiseToBB, raiseToBB)) return fail("Visible enabled PokerNow Raise control must independently match the 2.5BB total; selected amount never proves the minimum.");
+  }
   return { action, raiseToBB, investmentBB, reasons: [], strategySource: RFI_STRATEGY_SOURCE,
-    explanation: `${hand} is inside the ${packet.hero.position} six-max 100BB+ RFI reference. Raise to 2.5BB (${investmentBB}BB additional). Fixed sizing convention, not a solved optimum or EV estimate.` };
+    explanation: `${hand} is inside the ${packet.hero.position} six-max 100BB+ RFI reference. Raise to 2.5BB (${investmentBB}BB additional). Fixed sizing convention, not a solved optimum or EV estimate.${exact ? " Exact 5-chip profile rule supported by historical server acceptance; no live server preflight. Manual action only." : ""}` };
 }

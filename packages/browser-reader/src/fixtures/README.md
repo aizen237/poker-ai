@@ -1,5 +1,18 @@
 # PokerNow live fixtures
 
+## Exact five-chip acceptance and display
+
+`pokernow-exact-five-accepted.json` preserves all 68 incoming frame envelopes
+from the local acceptance capture in order, retaining only relevant fields.
+Player/table/hand identifiers are replaced; names and unrelated fields are
+omitted. Numeric values, timestamps, absent/null distinctions and array order
+are preserved. It includes the actual Q8o hand169 acceptance after expiry.
+`utg-reader-cross-check.json` is a sanitized existing reader-result shape used
+as cross-check scaffolding, not captured hand169 DOM. `exactFiveLive.test.ts`
+explicitly substitutes hand169 stacks and card variants and feeds source
+envelopes through the real MAIN-to-overlay path, without injecting proofs.
+Raw captures remain local under ignored `evidence/`.
+
 ## Hand 115 recommendation lifecycle
 
 `evidence/hand-115-diagnostic.json` is the original diagnostic for `oacpsi6ju66i`.

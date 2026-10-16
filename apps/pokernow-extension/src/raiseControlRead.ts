@@ -34,6 +34,8 @@ export function readRaiseControl(
   if (containers.length > 1) issues.push("Multiple visible raise amount containers");
   const inputs = container ? [...container.querySelectorAll<HTMLInputElement>(RAISE_SELECTORS.input)].filter(isVisible) : [];
   const input = inputs.length === 1 ? inputs[0]! : null;
+  if (input && (input.disabled || input.readOnly || input.hasAttribute("disabled") || input.hasAttribute("readonly") ||
+      input.closest('fieldset[disabled], [inert], [aria-disabled="true"]'))) issues.push("Selected raise-to input is disabled or read-only");
   if (container && inputs.length !== 1) issues.push("Expected exactly one visible selected raise-to input");
   // Read the live value property, not the initial HTML value attribute.
   const selectedRaiseToText = input?.value ?? null;

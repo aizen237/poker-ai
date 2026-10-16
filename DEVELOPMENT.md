@@ -98,7 +98,7 @@ typecheck commands assume dependencies have already been built.
 | Relay via `dev:relay` | Node runs `apps/ai-relay-server/src/server.ts` with `--experimental-strip-types`. It does not run `apps/ai-relay-server/dist/server.js`, although the build also produces that file. |
 | Workspace imports | npm links `node_modules/@poker-ai/<name>` to the workspace. Each package's `main` resolves to `packages/<name>/dist/index.js`, with its relative imports loading other `.js` files in that `dist` directory. This applies to `ai-core`, `browser-reader`, `range-engine`, `poker-engine`, `shared`, and `opponent-db`. TypeScript declarations come from `dist/index.d.ts`. |
 | Relay's current package use | `server.ts` imports compiled `ai-core` and `opponent-db/browser`, and dynamically loads `opponent-db` for SQLite storage. Their transitive workspace dependencies also resolve through `dist`. |
-| Extension build | esbuild bundles `src/contentScript.ts` and `src/eventSource.ts`. Workspace package imports resolve through compiled `dist` entries; the small metadata observer imports only its local transport parser. |
+| Extension build | esbuild bundles `src/contentScript.ts` and `src/eventSource.ts`. Workspace package imports resolve through compiled `dist` entries. The MAIN observer also includes the optional manual diagnostics collector, which reuses the Raise reader. |
 | Chrome | The manifest injects `eventSource.js` in MAIN at document_start, then `contentScript.js` in the isolated world at document_idle. Chrome executes those generated bundles, not `.ts` or separate workspace `dist` files. |
 
 Stale `dist` files can therefore make Node execute old package code even while
@@ -106,3 +106,13 @@ the relay's own TypeScript source is current. They can also make esbuild embed
 old package code in a new bundle. A stale `contentScript.js` makes Chrome run old
 extension code even after `contentScript.ts` changes. Use the guarded commands
 above, restart the relay, and reload the extension and game tabs as appropriate.
+
+For a single local sizing investigation, see [manual RAISE evidence capture](RAISE_EVIDENCE_CAPTURE.md).
+It is disabled by default and does not activate RAISE or perform poker actions.
+
+The independent [Phase 2 exact-five-chip rule](PREFLOP_RAISE_PHASE2.md) now
+supports only a fresh matching six-player first-UTG chart RAISE. Its original
+ten-second source deadline applies with the Raise panel closed or open. Rebuild,
+reload the unpacked extension, refresh the table and restart the relay after
+updating so the reader and compiled packet schema agree. The collector remains
+optional and does not authorize advice.

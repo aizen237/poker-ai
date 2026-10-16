@@ -1,5 +1,28 @@
 # Socket state and unopened-preflop evidence audit
 
+## Exact five-chip opening rule (2026-10-16, current)
+
+See [PREFLOP_RAISE_PHASE2.md](PREFLOP_RAISE_PHASE2.md) for the accepted hand169
+transition, evidence matrix and exact limits. A fresh supported six-player UTG
+chart RAISE can now use the matching 0.1.72/1-2/no-ante/play-money profile's
+empirical five-chip rule. Historical acceptance is not a fresh server preflight.
+Source expiry, strategy, global incomplete history and all other gates remain.
+The original Phase 1 conclusion below describes the evidence before this capture.
+
+## RAISE Phase 1: evidence and interaction design (2026-10-16)
+
+See [PREFLOP_RAISE_PHASE1.md](PREFLOP_RAISE_PHASE1.md) for the field-by-field
+evidence matrix, timing audit, proposed dependent sizing proof, control-readiness
+separation and minimal paired-capture plan. At that audit, neither bounds/denomination nor
+exact-size acceptance was proven for the five-chip UTG opening.
+The archived raise-to-4 in hand53 is on the turn, not a preflop sizing test.
+The Phase 2 update above supersedes that sizing blocker only for its exact profile/size.
+
+The opt-in [manual RAISE evidence collector](RAISE_EVIDENCE_CAPTURE.md) now pairs
+existing raw socket capture with bounded DOM checkpoints and copies of the
+existing timeline diagnostics. Its separate diagnostics channel never feeds
+the source reducer or policy. It cannot certify legality or renew firstUtgProof.
+
 ## Hand 133: live diagnostic / current-runtime mismatch
 
 Replayed `evidence/hand-133-early.json` and `evidence/hand-133-late.json` for

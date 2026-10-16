@@ -107,11 +107,14 @@ export class RawSocketCapture {
   }
 
   status() {
+    const last = this.frames.at(-1);
     return { temporaryDiagnosticsOnly: true, authoritativeOrdering: false, historyCompletenessProof: false,
       active: this.active, stopReason: this.stopReason, frameCount: this.frames.length,
       retainedJsonCharacters: this.characters, rejectedFrames: this.rejectedFrames,
       retainedSourceCharacters: this.sourceCharacters,
       registeredCaptured: this.frames.some(frame => frame.event === "registered"),
+      lastRetainedFrame: last ? { localReceiveSequence: last.localReceiveSequence, localReceivedAt: last.localReceivedAt,
+        connectionGeneration: last.connectionGeneration, event: last.event } : null,
       limits: { ...this.limits } };
   }
 

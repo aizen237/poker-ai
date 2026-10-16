@@ -175,10 +175,10 @@
     return `{${fields.join(",")}}`;
   }
   var RawSocketCapture = class {
-    constructor(enabled, limits = { frames: MAX_FRAMES, characters: MAX_CHARACTERS }) {
+    constructor(enabled2, limits = { frames: MAX_FRAMES, characters: MAX_CHARACTERS }) {
       this.limits = limits;
-      this.active = enabled;
-      this.stopReason = enabled ? null : "not_enabled_before_page_load";
+      this.active = enabled2;
+      this.stopReason = enabled2 ? null : "not_enabled_before_page_load";
     }
     limits;
     frames = [];
@@ -233,6 +233,7 @@
       }
     }
     status() {
+      const last = this.frames.at(-1);
       return {
         temporaryDiagnosticsOnly: true,
         authoritativeOrdering: false,
@@ -244,6 +245,12 @@
         rejectedFrames: this.rejectedFrames,
         retainedSourceCharacters: this.sourceCharacters,
         registeredCaptured: this.frames.some((frame) => frame.event === "registered"),
+        lastRetainedFrame: last ? {
+          localReceiveSequence: last.localReceiveSequence,
+          localReceivedAt: last.localReceivedAt,
+          connectionGeneration: last.connectionGeneration,
+          event: last.event
+        } : null,
         limits: { ...this.limits }
       };
     }
@@ -254,12 +261,12 @@
     }
   };
   function installRawSocketCapture(target) {
-    let enabled = false;
+    let enabled2 = false;
     try {
-      enabled = target.sessionStorage.getItem(RAW_CAPTURE_KEY) === "1";
+      enabled2 = target.sessionStorage.getItem(RAW_CAPTURE_KEY) === "1";
     } catch {
     }
-    const capture = new RawSocketCapture(enabled);
+    const capture = new RawSocketCapture(enabled2);
     const disarm = () => {
       try {
         target.sessionStorage.removeItem(RAW_CAPTURE_KEY);
@@ -281,7 +288,7 @@
   }
 
   // src/firstUtgState.ts
-  var allowed = new Set("id hI gN now pre r gT seats iHPI dealerID dealerSeat sBPI bBPI tB pGS cPI pITT smallBlind bigBlind ante deadButton gM mode aD aS cM cR players pC cRPI eventsData rHP rHC oTC gameResult".split(" "));
+  var allowed = new Set("id hI gN now pre r gT seats iHPI dealerID dealerSeat sBPI bBPI tB pGS cPI pITT smallBlind bigBlind ante deadButton gM mode aD aS cM cR players pC cRPI eventsData rHP rHC oTC gameResult version fV nR mTB rIT sPM".split(" "));
 
   // src/firstUtgSource.ts
   var object3 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
@@ -320,7 +327,13 @@
     "cRPI",
     "rHP",
     "rHC",
-    "eventsData"
+    "eventsData",
+    "version",
+    "fV",
+    "nR",
+    "mTB",
+    "rIT",
+    "sPM"
   ];
   function projectFirstUtgSource(data, knownHero) {
     if (typeof data !== "string" || data.length > 2e6 || !data.startsWith("42[")) return null;
@@ -353,12 +366,346 @@
     }
   }
 
+  // ../../packages/browser-reader/dist/tableInfoParsing.js
+  function parseChipsValueText(normalValueText) {
+    const text = normalValueText.trim();
+    const cleaned = text.replace(/,/g, "");
+    if (cleaned.length === 0) {
+      throw new Error(`Chips value text is empty (expected a number, got an empty string)`);
+    }
+    const value = Number(cleaned);
+    if (!/^(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$/.test(text) || !Number.isFinite(value) || value < 0) {
+      throw new Error(`Unrecognized chips value text: "${normalValueText}"`);
+    }
+    return value;
+  }
+
+  // src/raiseControlRead.ts
+  var RAISE_SELECTORS = {
+    form: "form.raise-controller-form",
+    amount: ".raise-bet-value",
+    input: "input.value",
+    displayedBB: ".bb-value",
+    submit: '.action-buttons input[type="submit"].action-button.bet'
+  };
+  function isControlVisible(element) {
+    for (let node = element; node; node = node.parentElement) {
+      if (node.hasAttribute("hidden")) return false;
+      const style = getComputedStyle(node);
+      if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse") return false;
+    }
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+  function readRaiseControl(root = document, isVisible = isControlVisible) {
+    const issues = [];
+    const forms = [...root.querySelectorAll(RAISE_SELECTORS.form)].filter(isVisible);
+    const form = forms.length === 1 ? forms[0] : null;
+    if (forms.length > 1) issues.push("Multiple visible raise forms");
+    const containers2 = form ? [...form.querySelectorAll(RAISE_SELECTORS.amount)].filter(isVisible) : [];
+    const container = containers2.length === 1 ? containers2[0] : null;
+    if (form && containers2.length === 0) issues.push("Visible raise form has no visible amount container");
+    if (containers2.length > 1) issues.push("Multiple visible raise amount containers");
+    const inputs = container ? [...container.querySelectorAll(RAISE_SELECTORS.input)].filter(isVisible) : [];
+    const input = inputs.length === 1 ? inputs[0] : null;
+    if (input && (input.disabled || input.readOnly || input.hasAttribute("disabled") || input.hasAttribute("readonly") || input.closest('fieldset[disabled], [inert], [aria-disabled="true"]'))) issues.push("Selected raise-to input is disabled or read-only");
+    if (container && inputs.length !== 1) issues.push("Expected exactly one visible selected raise-to input");
+    const selectedRaiseToText = input?.value ?? null;
+    let selectedRaiseToChips = null;
+    if (selectedRaiseToText !== null) {
+      try {
+        selectedRaiseToChips = parseChipsValueText(selectedRaiseToText);
+      } catch {
+        issues.push("Selected raise-to amount is unreadable");
+      }
+    }
+    const bbDisplays = container ? [...container.querySelectorAll(RAISE_SELECTORS.displayedBB)].filter(isVisible) : [];
+    if (bbDisplays.length > 1) issues.push("Multiple visible raise BB displays");
+    const submits = form ? [...form.querySelectorAll(RAISE_SELECTORS.submit)].filter(isVisible) : [];
+    const submit = submits.length === 1 ? submits[0] : null;
+    if (form && submits.length !== 1) issues.push("Expected exactly one visible Raise submit control");
+    const raiseSubmitVisible = submit?.value.trim().toLowerCase() === "raise";
+    if (submit && !raiseSubmitVisible) issues.push("Submit control is not labeled Raise");
+    return {
+      formVisible: forms.length > 0,
+      amountControlVisible: containers2.length > 0,
+      selectedRaiseToText,
+      selectedRaiseToChips,
+      selectedRaiseToSource: selectedRaiseToChips === null ? null : ".raise-bet-value input.value (live value property)",
+      displayedBBText: bbDisplays.length === 1 ? bbDisplays[0].textContent : null,
+      submitText: submit?.value ?? null,
+      raiseSubmitVisible,
+      raiseSubmitEnabled: raiseSubmitVisible && submit !== null ? !submit.disabled && !submit.hasAttribute("disabled") && !submit.closest('fieldset[disabled], [inert], [aria-disabled="true"]') : null,
+      issues
+    };
+  }
+
+  // src/raiseEvidenceCapture.ts
+  var RAISE_CAPTURE_KEY = "poker-ai:raise-evidence-capture";
+  var CHANNEL = "poker-ai:raise-evidence-diagnostics:v1";
+  var CHECKPOINT_LABELS = ["panel_opened", "min_raise_selected", "five_chips_entered"];
+  var LIMITS = { checkpoints: 8, bytes: 128 * 1024 };
+  var bytes = (text) => new TextEncoder().encode(text).byteLength;
+  var enabled = (target) => {
+    try {
+      return target.sessionStorage.getItem(RAISE_CAPTURE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  };
+  function readRaiseCheckpointDOM(root, visible = isControlVisible) {
+    const forms = [...root.querySelectorAll(RAISE_SELECTORS.form)];
+    const node = (element) => ({
+      outerHTML: element.outerHTML,
+      visible: visible(element),
+      disabledAttribute: element.getAttribute("disabled"),
+      ariaDisabled: element.getAttribute("aria-disabled"),
+      blockingAncestors: [...(function* () {
+        for (let p = element; p; p = p.parentElement) {
+          if (p.matches('[hidden], [disabled], [inert], [aria-disabled="true"]')) {
+            yield {
+              tag: p.tagName,
+              class: p.getAttribute("class"),
+              hidden: p.getAttribute("hidden"),
+              disabled: p.getAttribute("disabled"),
+              inert: p.getAttribute("inert"),
+              ariaDisabled: p.getAttribute("aria-disabled")
+            };
+          }
+        }
+      })()]
+    });
+    const input = (element) => ({
+      ...node(element),
+      liveValue: element.value ?? null,
+      valueAttribute: element.getAttribute("value"),
+      type: element.getAttribute("type"),
+      min: element.getAttribute("min"),
+      max: element.getAttribute("max"),
+      step: element.getAttribute("step"),
+      pattern: element.getAttribute("pattern"),
+      inputMode: element.getAttribute("inputmode"),
+      disabled: element.disabled ?? null,
+      readOnly: element.readOnly ?? null,
+      willValidate: element.willValidate ?? null,
+      validity: element.validity ? Object.fromEntries([
+        "valid",
+        "badInput",
+        "customError",
+        "patternMismatch",
+        "rangeOverflow",
+        "rangeUnderflow",
+        "stepMismatch",
+        "tooLong",
+        "tooShort",
+        "typeMismatch",
+        "valueMissing"
+      ].map((key) => [key, element.validity[key]])) : null
+    });
+    return {
+      origin: "manual DOM read; attributes/native validity are observations, not server legality",
+      formCount: forms.length,
+      visibleFormCount: forms.filter(visible).length,
+      selected: readRaiseControl(root, visible),
+      forms: forms.map((form) => ({
+        ...node(form),
+        noValidate: form.noValidate ?? null,
+        inputs: [...form.querySelectorAll(".raise-bet-value input.value")].map(input),
+        bbDisplays: [...form.querySelectorAll(".raise-bet-value .bb-value")].map((e) => ({ ...node(e), text: e.textContent })),
+        submits: [...form.querySelectorAll(RAISE_SELECTORS.submit)].map(input)
+      }))
+    };
+  }
+  var RaiseEvidenceCollector = class {
+    constructor(on, d, limits = LIMITS) {
+      this.d = d;
+      this.limits = limits;
+      this.active = on;
+      this.stopReason = on ? null : "not_enabled_before_page_load";
+    }
+    d;
+    limits;
+    records = [];
+    retainedBytes = 2;
+    // Complete JSON array, including delimiters.
+    busy = false;
+    active;
+    exported = false;
+    refused = 0;
+    stopReason;
+    priorBinding = null;
+    status() {
+      return {
+        developmentOnly: true,
+        authoritative: false,
+        historyComplete: false,
+        active: this.active,
+        busy: this.busy,
+        checkpointCount: this.records.length,
+        retainedBytes: this.retainedBytes,
+        refusedCheckpoints: this.refused,
+        stopReason: this.stopReason,
+        limits: { ...this.limits },
+        rawRecorder: this.d.raw.status()
+      };
+    }
+    refuse(reason) {
+      this.refused++;
+      return { accepted: false, reason };
+    }
+    stop(reason = "manually_disabled") {
+      this.active = false;
+      this.stopReason = reason;
+      this.d.raw.stop();
+      this.d.disarm();
+    }
+    async checkpoint(label) {
+      if (!this.active) return this.refuse(this.stopReason ?? "inactive");
+      if (this.busy) return this.refuse("checkpoint_already_pending");
+      if (!CHECKPOINT_LABELS.includes(label)) return this.refuse("unrecognized_manual_label");
+      if (this.records.length >= this.limits.checkpoints) {
+        this.stop("checkpoint_limit");
+        return this.refuse("checkpoint_limit");
+      }
+      this.busy = true;
+      try {
+        const at = this.d.now(), performanceTime = this.d.monotonic(), tableUrl = this.d.tableUrl();
+        const rawBefore = this.d.raw.status(), dom = this.d.dom();
+        const reply = await this.d.source();
+        if (!this.active) return this.refuse("capture_stopped_while_checkpoint_pending");
+        const completedAt = this.d.now(), rawAfter = this.d.raw.status(), source = reply.source;
+        const missing = ["Independent minimum, denomination and five-chip server legality are not certified by this collector."], contradictions = [];
+        if (reply.error) missing.push(reply.error);
+        if (!source) missing.push("No isolated-world source snapshot; source identity/proof unavailable.");
+        if (source && !source.connected) missing.push("Source disconnected.");
+        if (source && (source.capturedAt < at || source.capturedAt > completedAt)) contradictions.push("Source snapshot time is outside the checkpoint interval; stale or clock-inconsistent observation.");
+        if (!source?.identity) missing.push("Hand/player identity unavailable.");
+        if (!source?.sourceState) missing.push("Carried source actor/generation/cursor unavailable.");
+        if (!source?.firstUtgProof) missing.push("No current firstUtgProof. " + (source?.reason ?? ""));
+        const expiry = source?.firstUtgProof?.expiresAt ?? source?.freshness.certificate?.expiresAt;
+        if (expiry !== void 0 && completedAt >= expiry) missing.push("Original source proof expired; checkpoint cannot renew it.");
+        if (source?.firstUtgProof && source.firstUtgProof.witness.receivedAt > at) contradictions.push("Source witness arrived after DOM checkpoint; not simultaneous evidence.");
+        if (!rawBefore.active || !rawAfter.active || rawAfter.rejectedFrames || !rawAfter.registeredCaptured) missing.push("Raw recorder inactive, incomplete, rejected frames, or registration missing; inspect recorder status.");
+        if (rawBefore.frameCount !== rawAfter.frameCount) contradictions.push("Incoming frames changed during checkpoint; source and DOM are not an atomic snapshot.");
+        if (source?.sourceState && rawAfter.lastRetainedFrame && source.sourceState.generation !== rawAfter.lastRetainedFrame.connectionGeneration) {
+          contradictions.push("Raw recorder and source snapshot report different connection generations.");
+        }
+        if (this.d.tableUrl() !== tableUrl) contradictions.push("Table URL changed during checkpoint.");
+        if (completedAt < at) contradictions.push("Local clock regressed during checkpoint.");
+        if (!dom.selected.formVisible) missing.push("No visible Raise form.");
+        if (dom.selected.selectedRaiseToChips === null) missing.push("Selected chip amount unreadable or missing.");
+        if (!dom.selected.raiseSubmitVisible || dom.selected.raiseSubmitEnabled !== true) missing.push("Raise submit absent, hidden or disabled.");
+        contradictions.push(...dom.selected.issues);
+        if (label === "five_chips_entered" && dom.selected.selectedRaiseToChips !== 5) contradictions.push("Manual five-chip label does not match the observed selected amount.");
+        const bb = source?.firstUtgProof?.witness.bigBlind;
+        const display = dom.selected.displayedBBText?.match(/^\s*(\d+(?:\.\d+)?)\s*BB\s*$/i);
+        if (bb && display && dom.selected.selectedRaiseToChips !== null && Math.abs(Number(display[1]) * bb - dom.selected.selectedRaiseToChips) > 1e-8) {
+          contradictions.push("Selected chips and displayed BB disagree under the copied source-proof big blind.");
+        }
+        const fields = source?.sourceState?.fields;
+        if (fields && Object.hasOwn(fields, "cPI") && Object.hasOwn(fields, "pITT") && fields.cPI !== fields.pITT) contradictions.push("Source cPI/pITT differ; do not infer a single current actor.");
+        const binding = JSON.stringify([tableUrl, source?.identity, source?.sourceState]);
+        if (this.priorBinding !== null && this.priorBinding !== binding) contradictions.push("Source/table/actor binding differs from previous checkpoint; records are separate observations, not merged proof.");
+        const record = {
+          label,
+          labelOrigin: "user-declared operation; not verified or performed by collector",
+          capturedAt: at,
+          completedAt,
+          performanceTime,
+          tableUrl,
+          source,
+          dom,
+          rawRecorderBefore: rawBefore,
+          rawRecorderAfter: rawAfter,
+          correlation: "Local timestamps/frame counts only; raw capture sequence is not bridge/source sequence. No atomic or authoritative association claimed.",
+          missingEvidence: missing,
+          contradictions,
+          legalityCertified: false,
+          historyComplete: false
+        };
+        const json = JSON.stringify(record);
+        const size = this.retainedBytes + bytes(json) + (this.records.length ? 1 : 0);
+        if (size > this.limits.bytes) {
+          this.stop("checkpoint_byte_limit");
+          return this.refuse("checkpoint_byte_limit; whole checkpoint rejected, no truncation");
+        }
+        this.records.push(json);
+        this.retainedBytes = size;
+        this.priorBinding = binding;
+        if (this.records.length === this.limits.checkpoints) this.stop("checkpoint_limit");
+        return { accepted: true, checkpoint: this.records.length, missingEvidence: missing, contradictions };
+      } catch {
+        return this.refuse("checkpoint_read_failed; no partial record retained");
+      } finally {
+        this.busy = false;
+      }
+    }
+    exportJSON() {
+      if (this.busy) throw new Error("Wait for the pending checkpoint before export.");
+      if (this.exported) throw new Error("Evidence already exported; reload for a new capture.");
+      if (this.stopReason === "not_enabled_before_page_load") throw new Error("Collector was not enabled.");
+      this.exported = true;
+      if (this.active) this.stop("exported");
+      return `{"version":1,"origin":"temporary local RAISE diagnostics; never legality proof","exportedAt":${this.d.now()},"capture":${JSON.stringify(this.status())},"checkpoints":[${this.records.join(",")}],"rawSocket":${this.d.raw.exportJSON()}}`;
+    }
+  };
+  function installRaiseEvidenceCollector(target, raw) {
+    const collector = new RaiseEvidenceCollector(enabled(target), {
+      raw,
+      dom: () => readRaiseCheckpointDOM(target.document),
+      tableUrl: () => target.location.origin + target.location.pathname,
+      now: () => Date.now(),
+      monotonic: () => target.performance.now(),
+      disarm: () => {
+        try {
+          target.sessionStorage.removeItem(RAISE_CAPTURE_KEY);
+          target.sessionStorage.removeItem(RAW_CAPTURE_KEY);
+        } catch {
+        }
+      },
+      source: () => new Promise((resolve) => {
+        const requestId = crypto.randomUUID();
+        const finish = (result) => {
+          target.clearTimeout(timer);
+          target.removeEventListener("message", receive);
+          resolve(result);
+        };
+        const receive = (event) => {
+          if (event.source !== target || event.origin !== target.location.origin || event.data?.channel !== CHANNEL || event.data.type !== "checkpoint_source_result" || event.data.requestId !== requestId) return;
+          try {
+            if (bytes(JSON.stringify(event.data)) > 34 * 1024) {
+              finish({ source: null, error: "Source reply exceeds diagnostic limit." });
+              return;
+            }
+            finish({ source: event.data.source ?? null, error: event.data.error ?? null });
+          } catch {
+            finish({ source: null, error: "Unreadable diagnostic source reply." });
+          }
+        };
+        const timer = target.setTimeout(() => finish({ source: null, error: "Source diagnostic response timed out; no cached proof substituted." }), 750);
+        target.addEventListener("message", receive);
+        target.postMessage({ channel: CHANNEL, type: "checkpoint_source", requestId }, target.location.origin);
+      })
+    });
+    Object.defineProperty(target, "pokerAIRaiseCapture", { configurable: true, value: Object.freeze({
+      status: () => collector.status(),
+      checkpoint: (label) => collector.checkpoint(label),
+      exportJSON: () => collector.exportJSON(),
+      stop: () => collector.stop()
+    }) });
+    return collector;
+  }
+
   // src/eventSource.ts
   var tableId = tableIdFromPath(location.pathname);
   if (tableId && typeof window.WebSocket === "function") {
     let rawCapture;
     try {
       rawCapture = installRawSocketCapture(window);
+    } catch {
+    }
+    try {
+      if (rawCapture) installRaiseEvidenceCollector(window, rawCapture);
     } catch {
     }
     let identity = null;

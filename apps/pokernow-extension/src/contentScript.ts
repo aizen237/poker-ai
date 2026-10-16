@@ -24,6 +24,7 @@ import { logLiveDiagnostics } from "./diagnostics.js";
 import { decisionFingerprint, decisionRequestKey } from "./requestIdentity.js";
 import { RecommendationSchema, lockedEngineRecommendation, validateReasoningConsistency } from "@poker-ai/ai-core";
 import { startLiveTimeline } from "./liveTimeline.js";
+import { installRaiseEvidenceResponder } from "./raiseEvidenceCapture.js";
 import { buildLiveDecisionProofs, liveProofRevision, activationLabel } from "./decisionProofs.js";
 console.log("[Poker AI Reader] Content script loaded on:", window.location.href);
 
@@ -264,6 +265,13 @@ function buildDecisionPacket(input: BuildDecisionPacketInput): DecisionPacket {
   };
 }
 
+function openingControlNote(packet: DecisionPacket): string {
+  const state = packet.preflopExecution?.exactOpeningSize?.controls;
+  return state === "panel_closed_unchecked" ? "; Raise panel closed: controls not checked"
+    : state === "selected_amount_differs" ? "; Selected amount differs: manually set 5 chips before acting"
+    : state === "selected_amount_matches" ? "; Selected total matches 5 chips; manual action only" : "";
+}
+
 /**
  * requestKey is the value lastRecommendationRequestKey held at the
  * moment THIS request was sent. Fixes a real race: the existing dedup
@@ -286,11 +294,12 @@ async function requestRecommendation(packet: DecisionPacket, stateDescription: s
       bindDisplayLifetime(requestKey);
       overlayState.aiResult = {
         ...locked,
-        action: locked.action === "RAISE" && policy.raiseToBB !== null ? `RAISE TO ${policy.raiseToBB} BB`
+        action: locked.action === "RAISE" && packet.preflopExecution?.exactOpeningSize ? "RAISE TO 5 CHIPS (2.5 BB)"
+          : locked.action === "RAISE" && policy.raiseToBB !== null ? `RAISE TO ${policy.raiseToBB} BB`
           : locked.action + (locked.sizingBB === undefined ? "" : ` ${locked.sizingBB}BB additional`),
       };
       overlayState.aiStatus = "received";
-      overlayState.policyLine = `Engine decision (${policy.confidence} confidence); explanation pending`;
+      overlayState.policyLine = `Engine decision (${policy.confidence} confidence); explanation pending` + (locked.action === "RAISE" ? openingControlNote(packet) : "");
       overlayState.aiWarnings = policy.reasons;
       renderOverlay(); // Paint the engine selection before starting any provider work.
     }
@@ -339,7 +348,7 @@ async function requestRecommendation(packet: DecisionPacket, stateDescription: s
       }
       if (overlayState.aiResult) overlayState.aiResult.reasoning = explanation.reasoning;
       overlayState.aiStatus = "received";
-      overlayState.policyLine = `Engine decision (${policy.confidence} confidence)`;
+      overlayState.policyLine = `Engine decision (${policy.confidence} confidence)` + (locked.action === "RAISE" ? openingControlNote(packet) : "");
       overlayState.aiWarnings = [...policy.reasons, ...(data.consistencyWarnings ?? [])];
       renderOverlay();
       return;
@@ -389,7 +398,7 @@ async function requestRecommendation(packet: DecisionPacket, stateDescription: s
       } catch { /* Failed read invalidates the current display. */ }
       if (locked && policy && fresh) {
         overlayState.aiStatus = "received";
-        overlayState.policyLine = `Engine decision (${policy.confidence} confidence); explanation unavailable`;
+        overlayState.policyLine = `Engine decision (${policy.confidence} confidence); explanation unavailable` + (locked.action === "RAISE" ? openingControlNote(packet) : "");
         overlayState.aiWarnings = [...policy.reasons, "Relay explanation failed, timed out, or returned an invalid response. Engine action retained."];
         renderOverlay();
         return;
@@ -413,6 +422,7 @@ let previousGameState: GameState | null = null;
 let actionHistory: ActionHistory = emptyActionHistory();
 let currentDiagnosticPacket: DecisionPacket | null = null;
 const handTimeline = startLiveTimeline();
+try { installRaiseEvidenceResponder(window, () => handTimeline.snapshot()); } catch { /* Optional diagnostics only. */ }
 
 // Display-only deadline: never renews evidence or participates in activation.
 // No old action is retained after expiry or any decision/source change.
@@ -579,7 +589,7 @@ setInterval(() => {
         table: { potBB: decisionPot === null ? null : decisionPot / bigBlind, board: [], street: "preflop", numOpponentsRemaining: preflop.activeOpponents },
         facingAction: { type: facing, ...(amountToCall > 0 ? { amountBB: amountToCall / bigBlind } : {}) },
         candidateActions: deriveCandidateActions(facing), engineCalculations: {}, dataConfidence: confidence.level, preflop,
-        preflopExecution: buildLivePreflopExecution(read, assessment, liveProofRevision(timelineSnapshot)),
+        preflopExecution: buildLivePreflopExecution(read, assessment, liveProofRevision(timelineSnapshot), scoped.openingSize ?? undefined),
         potEvidence: { ...assessment.pot, bigBlind },
         opponentContext: { opponents: state.seats.filter(s=>s.isOccupied&&!s.isYou&&!s.isFolded).map(s=>({seat:s.seatNumber,position:positions.get(s.seatNumber)??null,rangeBasis:"Preflop context remains uncertain",rangeConfidence:"low",rangeStatus:"prior_only",...(opponentStats.profile(s.playerName)??{})})) },
       };

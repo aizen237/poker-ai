@@ -21,7 +21,7 @@ export interface SourceBootstrapReceipt {
 }
 const keys = ["id", "hI", "gN", "now", "pre", "r", "gT", "seats", "iHPI", "dealerID", "dealerSeat", "sBPI", "bBPI",
   "tB", "pGS", "cPI", "pITT", "smallBlind", "bigBlind", "ante", "deadButton", "gM", "mode", "oTC", "gameResult",
-  "aD", "aS", "cM", "cR", "cRPI", "rHP", "rHC", "eventsData"];
+  "aD", "aS", "cM", "cR", "cRPI", "rHP", "rHC", "eventsData", "version", "fV", "nR", "mTB", "rIT", "sPM"];
 export interface UtgProjection { event: "registered" | "gC" | "rup"; heroId: string | null; frame: Record<string, any> }
 
 /** Separate bounded projection; no names, credentials, stats or opponent cards. */
@@ -63,6 +63,8 @@ export interface FirstUtgWitness {
   receivedAt: number; heroId: string; heroSeat: number; heroCards: string[]; smallBlind: number; bigBlind: number;
   players: Array<{ playerId: string; seat: number; position: "UTG" | "HJ" | "CO" | "BTN" | "SB" | "BB"; sourceStack: number; contribution: number }>;
   provenance: string;
+  /** Exact observed profile fingerprint, not decoded min/max/grid fields. */
+  openingSizeProfile?: "pokernow-0.1.72-th-4fun-1-2-exact5-v1";
 }
 
 /** The sole continuity authority for this decision class. Minted inside the
@@ -120,6 +122,12 @@ function firstUtg(reg: UtgProjection, next: UtgProjection, tableId: string, gene
   if (new Set(heroCards).size !== 2) return null;
   return { tableId, handId: b.hI, handNumber: b.gN, generation, cursor: b.now, previousCursor: a.now, receivedAt: at,
     heroId: hero, heroSeat: cycle[3]![0], heroCards, smallBlind: 1, bigBlind: 2, players,
+    ...(a.version === "0.1.72" && b.fV === "0.1.72" &&
+      (b.version ?? a.version) === "0.1.72" && same(b.nR, [1]) &&
+      (Object.hasOwn(b, "mTB") ? b.mTB : a.mTB) === null &&
+      (Object.hasOwn(b, "rIT") ? b.rIT : a.rIT) === "no" &&
+      (Object.hasOwn(b, "sPM") ? b.sPM : a.sPM) === false
+      ? { openingSizeProfile: "pokernow-0.1.72-th-4fun-1-2-exact5-v1" as const } : {}),
     provenance: `PokerNow validated hand-start ${a.hI}/${a.gN} -> ${b.hI}/${b.gN}, pre=${b.pre}, now=${b.now}; first UTG turn has no preceding voluntary turn; forced blinds only. Hand-53 observed source profile; bounded consecutive source state.` };
 }
 

@@ -142,7 +142,7 @@ describe("hand 68 production source -> policy -> content-script overlay", () => 
   it("renders a selected RAISE with the engine total, independently of an explanation", async () => {
     mocks.raiseDisplayOnly = true;
     const f = await fixture();
-    expect(f.action()).toBe("RAISE TO 2.5 BB");
+    expect(f.action()).toBe("RAISE TO 5 CHIPS (2.5 BB)");
     expect(f.text()).toContain("explanation pending");
   });
 });

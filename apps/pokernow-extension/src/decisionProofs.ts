@@ -5,6 +5,7 @@ import type { LiveTableRead } from "./tableRead.js";
 import type { LiveTimelineDiagnostic } from "./liveTimeline.js";
 import { inspectLiveUnopenedEvidence } from "./unopenedEvidence.js";
 import { currentFirstUtg } from "./firstUtgLive.js";
+import { openingSizeEvidence } from "./openingSizeEvidence.js";
 
 /** Translate existing evidence only; socket chronology and observed log rows are never certified as a complete window. */
 export function buildLiveDecisionProofs(read: LiveTableRead, assessment: LiveStateAssessment,
@@ -87,6 +88,14 @@ export function buildLiveDecisionProofs(read: LiveTableRead, assessment: LiveSta
       set("callCost", "proven", `${first.provenance} Normal SB=1/BB=2 source totals; UTG contribution zero at first turn. Call gap=2 chips.`);
     }
   }
+  const opening = openingSizeEvidence(read, assessment, timeline, epoch);
+  // Both pre-packet activation and engine sizing consume this same result.
+  // FOLD does not require or consume this scope.
+  if (unopened?.firstUtgBoundary) proofs[PROOF_SCOPES.indexOf("raiseLegality")] = opening.proof;
+  if (packet?.preflopExecution?.exactOpeningSize &&
+      JSON.stringify(packet.preflopExecution.exactOpeningSize) !== JSON.stringify(opening.size)) {
+    set("raiseLegality", "contradicted", "Dependent sizing/packet cross-check", ["Sizing belongs to a different source, control or epoch."]);
+  }
   const envelope: DecisionProofs = { version: 1, decisionEpoch: epoch,
     binding: "diagnostic-only: no packet",
     handId: source?.identity ? timeline!.current.handId : null, connectionGeneration: source?.firstUtgProof?.continuity.generation ?? chain?.generation ?? null, proofs };
@@ -99,7 +108,7 @@ export function buildLiveDecisionProofs(read: LiveTableRead, assessment: LiveSta
     : assessDecisionProofs({ street: state?.street ?? null, opponents: assessment.activeOpponents, amountToCall: assessment.amountToCall,
       preflopSituation: preflop?.situation ?? null, preflopRfiCandidate: unopened?.candidate ?? false,
       preflopAction: chartAction, aggressionPossible: assessment.legality.aggressionReopened }, proofs);
-  return { evidence: envelope, activation, unopened };
+  return { evidence: envelope, activation, unopened, openingSize: opening.size };
 }
 
 /** Proof refreshes must invalidate pending recommendations even if DOM values did not change. */

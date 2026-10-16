@@ -7,7 +7,7 @@ const integer = (v: unknown): v is number => typeof v === "number" && Number.isS
 const chips = (v: unknown) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= Number.MAX_SAFE_INTEGER;
 const dictionary = (v: unknown): v is Record<string, any> => object(v) && Object.keys(v).length <= 10 && Object.keys(v).every(token);
 const ids = (v: unknown): v is string[] => Array.isArray(v) && v.length <= 10 && v.every(token) && new Set(v).size === v.length;
-const allowed = new Set("id hI gN now pre r gT seats iHPI dealerID dealerSeat sBPI bBPI tB pGS cPI pITT smallBlind bigBlind ante deadButton gM mode aD aS cM cR players pC cRPI eventsData rHP rHC oTC gameResult".split(" "));
+const allowed = new Set("id hI gN now pre r gT seats iHPI dealerID dealerSeat sBPI bBPI tB pGS cPI pITT smallBlind bigBlind ante deadButton gM mode aD aS cM cR players pC cRPI eventsData rHP rHC oTC gameResult version fV nR mTB rIT sPM".split(" "));
 export type BoundedUtgState = Record<string, any>;
 
 function validateFrame(frame: unknown): asserts frame is BoundedUtgState {
@@ -23,6 +23,13 @@ function validateFrame(frame: unknown): asserts frame is BoundedUtgState {
     if (k === "ante") valid = v === null || chips(v);
     if (["r", "deadButton", "aD", "aS", "cM", "cR"].includes(k)) valid = typeof v === "boolean";
     if (["gM", "mode"].includes(k)) valid = typeof v === "string" && v.length <= 32;
+    // Opaque profile discriminators only. In particular nR is not a chip grid,
+    // and mTB is not interpreted as a maximum. Unknown values cannot mint the
+    // exact-size profile. mR is deliberately not retained (unproven reset).
+    if (["version", "fV", "rIT"].includes(k)) valid = typeof v === "string" && v.length <= 32;
+    if (k === "sPM") valid = typeof v === "boolean";
+    if (k === "mTB") valid = v === null || chips(v);
+    if (k === "nR") valid = Array.isArray(v) && v.length <= 10 && v.every(integer);
     if (k === "gT") valid = Array.isArray(v) && v.length === 2 && v.every(integer);
     if (["iHPI", "cRPI", "rHP"].includes(k)) valid = ids(v);
     if (k === "rHC") valid = v === null; // Runout variants remain unsupported.

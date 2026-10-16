@@ -5595,6 +5595,27 @@
       chipUnitBB: external_exports.number().finite().positive(),
       minRaiseToBB: external_exports.number().finite().positive()
     }).optional(),
+    /** Empirical exact-size rule, NOT a general minimum/grid or live server ack. */
+    exactOpeningSize: external_exports.object({
+      rule: external_exports.literal("pokernow-0.1.72-th-4fun-1-2-exact5-v1"),
+      provenance: external_exports.string().min(1).max(2e3),
+      tableId: external_exports.string().min(1),
+      handId: external_exports.string().min(1),
+      heroId: external_exports.string().min(1),
+      heroSeat: external_exports.number().int().positive(),
+      generation: external_exports.number().int().positive(),
+      sourceCursor: external_exports.number().int().nonnegative(),
+      decisionEpoch: external_exports.string().min(1),
+      receivedAt: external_exports.number().finite(),
+      expiresAt: external_exports.number().finite(),
+      units: external_exports.literal("chips"),
+      bigBlindChips: external_exports.literal(2),
+      contributionChips: external_exports.literal(0),
+      raiseToChips: external_exports.literal(5),
+      investmentChips: external_exports.literal(5),
+      remainingStackChips: external_exports.number().finite().min(200),
+      controls: external_exports.enum(["panel_closed_unchecked", "selected_amount_matches", "selected_amount_differs"])
+    }).optional(),
     controls: external_exports.object({
       source: external_exports.string().min(1),
       formVisible: external_exports.boolean(),
@@ -5723,17 +5744,26 @@
     const raiseToBB = 2.5, investmentBB = raiseToBB - hero.contributionBB;
     const controls = execution.controls;
     const legal = execution.raiseBounds;
-    if (!legal?.verified || legal.minRaiseToBB <= 1 || raiseToBB < legal.minRaiseToBB || investmentBB >= packet.hero.stackBB || !Number.isFinite(legal.chipUnitBB) || legal.chipUnitBB <= 0 || !near(investmentBB / legal.chipUnitBB, Math.round(investmentBB / legal.chipUnitBB)) || !near(raiseToBB / legal.chipUnitBB, Math.round(raiseToBB / legal.chipUnitBB)))
-      return fail("2.5BB opening size is outside independently proven minimum, reopening, chip-unit or capacity bounds.");
-    if (!controls.formVisible || !controls.raiseSubmitVisible || controls.raiseSubmitEnabled !== true || controls.issues.length || controls.selectedRaiseToBB === null || !near(controls.selectedRaiseToBB, raiseToBB))
-      return fail("Visible enabled PokerNow Raise control must independently match the 2.5BB total; selected amount never proves the minimum.");
+    const exact = execution.exactOpeningSize;
+    if (exact) {
+      const now = Date.now();
+      if (exact.rule !== "pokernow-0.1.72-th-4fun-1-2-exact5-v1" || !firstUtg2 || hero.contributionBB !== 0 || context.heroSeat !== exact.heroSeat || exact.units !== "chips" || exact.bigBlindChips !== 2 || exact.contributionChips !== 0 || exact.raiseToChips !== 5 || exact.investmentChips !== 5 || exact.remainingStackChips !== packet.hero.stackBB * 2 || investmentBB >= packet.hero.stackBB || packet.potEvidence?.bigBlind !== 2 || packet.decisionProofs?.handId !== `${exact.tableId}:hand:${exact.handId}` || packet.decisionProofs?.connectionGeneration !== exact.generation || packet.decisionProofs?.decisionEpoch !== exact.decisionEpoch || exact.expiresAt !== exact.receivedAt + 1e4 || now < exact.receivedAt || now >= exact.expiresAt)
+        return fail("Exact five-chip opening rule is outside its bound profile, decision, capacity or original freshness window.");
+      if (controls.issues.length || (exact.controls === "panel_closed_unchecked" ? controls.formVisible || controls.raiseSubmitVisible || controls.selectedRaiseToBB !== null : !controls.formVisible || !controls.raiseSubmitVisible || controls.raiseSubmitEnabled !== true || controls.selectedRaiseToBB === null || controls.selectedRaiseToBB > packet.hero.stackBB || (exact.controls === "selected_amount_matches" ? controls.selectedRaiseToBB !== 2.5 : controls.selectedRaiseToBB === 2.5)))
+        return fail("Current Raise controls contradict the independently certified exact size.");
+    } else {
+      if (!legal?.verified || legal.minRaiseToBB <= 1 || raiseToBB < legal.minRaiseToBB || investmentBB >= packet.hero.stackBB || !Number.isFinite(legal.chipUnitBB) || legal.chipUnitBB <= 0 || !near(investmentBB / legal.chipUnitBB, Math.round(investmentBB / legal.chipUnitBB)) || !near(raiseToBB / legal.chipUnitBB, Math.round(raiseToBB / legal.chipUnitBB)))
+        return fail("2.5BB opening size is outside independently proven minimum, reopening, chip-unit or capacity bounds.");
+      if (!controls.formVisible || !controls.raiseSubmitVisible || controls.raiseSubmitEnabled !== true || controls.issues.length || controls.selectedRaiseToBB === null || !near(controls.selectedRaiseToBB, raiseToBB))
+        return fail("Visible enabled PokerNow Raise control must independently match the 2.5BB total; selected amount never proves the minimum.");
+    }
     return {
       action: action2,
       raiseToBB,
       investmentBB,
       reasons: [],
       strategySource: RFI_STRATEGY_SOURCE,
-      explanation: `${hand} is inside the ${packet.hero.position} six-max 100BB+ RFI reference. Raise to 2.5BB (${investmentBB}BB additional). Fixed sizing convention, not a solved optimum or EV estimate.`
+      explanation: `${hand} is inside the ${packet.hero.position} six-max 100BB+ RFI reference. Raise to 2.5BB (${investmentBB}BB additional). Fixed sizing convention, not a solved optimum or EV estimate.${exact ? " Exact 5-chip profile rule supported by historical server acceptance; no live server preflight. Manual action only." : ""}`
     };
   }
 
@@ -8074,11 +8104,12 @@
   }
 
   // src/preflop.ts
-  function buildLivePreflopExecution(read, assessment, sourceWindowKey) {
+  function buildLivePreflopExecution(read, assessment, sourceWindowKey, exactOpeningSize) {
     const hero = assessment.state?.seats.find((s) => s.isYou && s.isOccupied);
     const control = read.raiseControl;
     return {
       heroIsCurrentToAct: hero?.isCurrentToAct === true && !hero.isFolded && !hero.isSettling,
+      ...exactOpeningSize ? { exactOpeningSize } : {},
       sourceWindowKey,
       controls: {
         source: control.selectedRaiseToSource ?? "PokerNow raise control unavailable",
@@ -8185,6 +8216,7 @@
     if (containers2.length > 1) issues.push("Multiple visible raise amount containers");
     const inputs = container ? [...container.querySelectorAll(RAISE_SELECTORS.input)].filter(isVisible) : [];
     const input = inputs.length === 1 ? inputs[0] : null;
+    if (input && (input.disabled || input.readOnly || input.hasAttribute("disabled") || input.hasAttribute("readonly") || input.closest('fieldset[disabled], [inert], [aria-disabled="true"]'))) issues.push("Selected raise-to input is disabled or read-only");
     if (container && inputs.length !== 1) issues.push("Expected exactly one visible selected raise-to input");
     const selectedRaiseToText = input?.value ?? null;
     let selectedRaiseToChips = null;
@@ -8509,6 +8541,66 @@
     };
   }
 
+  // src/openingSizeEvidence.ts
+  function openingSizeEvidence(read, assessment, timeline, epoch) {
+    const fail = (reason, contradicted = false) => ({
+      size: null,
+      proof: {
+        scope: "raiseLegality",
+        status: contradicted ? "contradicted" : "insufficient",
+        confidence: "low",
+        provenance: ["Dependent first-UTG exact five-chip opening rule"],
+        reasons: [reason]
+      }
+    });
+    const first = currentFirstUtg(read, assessment, timeline), proof = timeline?.sourceStatus.firstUtgProof;
+    if (!first || !proof || Date.now() < first.receivedAt || Date.now() >= proof.expiresAt || proof.expiresAt !== first.receivedAt + 1e4)
+      return fail("No fresh cross-checked first-UTG proof; sizing cannot renew source evidence.");
+    if (first.openingSizeProfile !== "pokernow-0.1.72-th-4fun-1-2-exact5-v1")
+      return fail("Unknown or changed PokerNow exact-five-chip rule profile/version.");
+    const hero = assessment.state.seats.find((s) => s.isYou);
+    const sourceHero = first.players.find((p) => p.playerId === first.heroId);
+    if (!epoch || first.bigBlind !== 2 || sourceHero.contribution !== 0 || hero.stack === null || hero.stack < 200 || hero.stack <= 5)
+      return fail("Exact five-chip rule requires zero UTG contribution and proven deep remaining capacity.");
+    const c = read.raiseControl;
+    if (c.issues.length) return fail(`Contradictory Raise controls: ${c.issues.join("; ")}`, true);
+    if (c.formVisible && (!c.amountControlVisible || !c.raiseSubmitVisible || c.raiseSubmitEnabled !== true))
+      return fail("Open Raise panel lacks a usable selected input or enabled Raise submit.");
+    const bbMatch = c.displayedBBText?.trim().match(/^(\d+(?:\.\d+)?)\s*BB$/);
+    if (c.formVisible && (c.selectedRaiseToChips === null || c.selectedRaiseToChips > hero.stack || !bbMatch || Number(bbMatch[1]) * 2 !== c.selectedRaiseToChips))
+      return fail("Visible selected amount/BB display/capacity observations contradict each other.", true);
+    if (!c.formVisible && (c.amountControlVisible || c.raiseSubmitVisible || c.selectedRaiseToChips !== null))
+      return fail("Raise-control visibility/amount observations contradict a closed panel.", true);
+    const provenance = "Exact-size empirical rule: hand169 first-UTG server acceptance (frame66 tB[hero]=5, cHB=5, frame67 next actor), matching 0.1.72 normal no-ante 1/2 play-money Hold'em profile. Not a live server acknowledgment, generic minimum, maximum or chip grid. Original firstUtgProof deadline applies.";
+    const size = {
+      rule: first.openingSizeProfile,
+      provenance,
+      tableId: first.tableId,
+      handId: first.handId,
+      heroId: first.heroId,
+      heroSeat: first.heroSeat,
+      generation: first.generation,
+      sourceCursor: first.cursor,
+      decisionEpoch: epoch,
+      receivedAt: first.receivedAt,
+      expiresAt: proof.expiresAt,
+      units: "chips",
+      bigBlindChips: 2,
+      contributionChips: 0,
+      raiseToChips: 5,
+      investmentChips: 5,
+      remainingStackChips: hero.stack,
+      controls: !c.formVisible ? "panel_closed_unchecked" : c.selectedRaiseToChips === 5 ? "selected_amount_matches" : "selected_amount_differs"
+    };
+    return { size, proof: {
+      scope: "raiseLegality",
+      status: "proven",
+      confidence: "high",
+      provenance: [provenance, `Table ${first.tableId}, hand ${first.handId}, actor ${first.heroId}, generation ${first.generation}, cursor ${first.cursor}, epoch ${epoch}, expiry ${proof.expiresAt}.`],
+      reasons: []
+    } };
+  }
+
   // src/decisionProofs.ts
   function buildLiveDecisionProofs(read, assessment, timeline, preflop, epoch, packet = null) {
     const proofs = PROOF_SCOPES.map((scope) => ({
@@ -8617,6 +8709,11 @@
         set("callCost", "proven", `${first.provenance} Normal SB=1/BB=2 source totals; UTG contribution zero at first turn. Call gap=2 chips.`);
       }
     }
+    const opening = openingSizeEvidence(read, assessment, timeline, epoch);
+    if (unopened?.firstUtgBoundary) proofs[PROOF_SCOPES.indexOf("raiseLegality")] = opening.proof;
+    if (packet?.preflopExecution?.exactOpeningSize && JSON.stringify(packet.preflopExecution.exactOpeningSize) !== JSON.stringify(opening.size)) {
+      set("raiseLegality", "contradicted", "Dependent sizing/packet cross-check", ["Sizing belongs to a different source, control or epoch."]);
+    }
     const envelope = {
       version: 1,
       decisionEpoch: epoch,
@@ -8636,7 +8733,7 @@
       preflopAction: chartAction,
       aggressionPossible: assessment.legality.aggressionReopened
     }, proofs);
-    return { evidence: envelope, activation, unopened };
+    return { evidence: envelope, activation, unopened, openingSize: opening.size };
   }
   function liveProofRevision(timeline) {
     const s = timeline.sourceStatus;
@@ -9141,7 +9238,7 @@
   var chips3 = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= Number.MAX_SAFE_INTEGER;
   var dictionary = (v) => object3(v) && Object.keys(v).length <= 10 && Object.keys(v).every(token2);
   var ids = (v) => Array.isArray(v) && v.length <= 10 && v.every(token2) && new Set(v).size === v.length;
-  var allowed = new Set("id hI gN now pre r gT seats iHPI dealerID dealerSeat sBPI bBPI tB pGS cPI pITT smallBlind bigBlind ante deadButton gM mode aD aS cM cR players pC cRPI eventsData rHP rHC oTC gameResult".split(" "));
+  var allowed = new Set("id hI gN now pre r gT seats iHPI dealerID dealerSeat sBPI bBPI tB pGS cPI pITT smallBlind bigBlind ante deadButton gM mode aD aS cM cR players pC cRPI eventsData rHP rHC oTC gameResult version fV nR mTB rIT sPM".split(" "));
   function validateFrame(frame) {
     if (!object3(frame) || JSON.stringify(frame).length > 4e4) throw new Error("Malformed or oversized source projection.");
     for (const [k, v] of Object.entries(frame)) {
@@ -9155,6 +9252,10 @@
       if (k === "ante") valid2 = v === null || chips3(v);
       if (["r", "deadButton", "aD", "aS", "cM", "cR"].includes(k)) valid2 = typeof v === "boolean";
       if (["gM", "mode"].includes(k)) valid2 = typeof v === "string" && v.length <= 32;
+      if (["version", "fV", "rIT"].includes(k)) valid2 = typeof v === "string" && v.length <= 32;
+      if (k === "sPM") valid2 = typeof v === "boolean";
+      if (k === "mTB") valid2 = v === null || chips3(v);
+      if (k === "nR") valid2 = Array.isArray(v) && v.length <= 10 && v.every(integer);
       if (k === "gT") valid2 = Array.isArray(v) && v.length === 2 && v.every(integer);
       if (["iHPI", "cRPI", "rHP"].includes(k)) valid2 = ids(v);
       if (k === "rHC") valid2 = v === null;
@@ -9288,6 +9389,7 @@
       smallBlind: 1,
       bigBlind: 2,
       players,
+      ...a.version === "0.1.72" && b.fV === "0.1.72" && (b.version ?? a.version) === "0.1.72" && same(b.nR, [1]) && (Object.hasOwn(b, "mTB") ? b.mTB : a.mTB) === null && (Object.hasOwn(b, "rIT") ? b.rIT : a.rIT) === "no" && (Object.hasOwn(b, "sPM") ? b.sPM : a.sPM) === false ? { openingSizeProfile: "pokernow-0.1.72-th-4fun-1-2-exact5-v1" } : {},
       provenance: `PokerNow validated hand-start ${a.hI}/${a.gN} -> ${b.hI}/${b.gN}, pre=${b.pre}, now=${b.now}; first UTG turn has no preceding voluntary turn; forced blinds only. Hand-53 observed source profile; bounded consecutive source state.`
     };
   }
@@ -9661,6 +9763,62 @@
     } };
   }
 
+  // src/rawSocketCapture.ts
+  var MAX_CHARACTERS = 4 * 1024 * 1024;
+
+  // src/raiseEvidenceCapture.ts
+  var RAISE_CAPTURE_KEY = "poker-ai:raise-evidence-capture";
+  var CHANNEL = "poker-ai:raise-evidence-diagnostics:v1";
+  var LIMITS = { checkpoints: 8, bytes: 128 * 1024 };
+  var bytes = (text) => new TextEncoder().encode(text).byteLength;
+  var enabled = (target) => {
+    try {
+      return target.sessionStorage.getItem(RAISE_CAPTURE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  };
+  function raiseSourceObservation(snapshot, at) {
+    const s = snapshot.sourceStatus, carried = s.firstUtgEvidence.carriedState;
+    const frame = carried?.projection.frame;
+    return {
+      origin: "isolated-world existing liveTimeline.snapshot; observational copy, not a new proof",
+      capturedAt: at,
+      connected: s.connected,
+      identity: s.identity,
+      currentHand: { handId: snapshot.current.handId, handNumber: snapshot.current.handNumber },
+      sourceState: carried ? {
+        generation: carried.generation,
+        localBridgeSequence: carried.sequence,
+        // Only present fields are copied: missing differs from explicit null.
+        fields: Object.fromEntries(["id", "hI", "gN", "now", "pre", "cPI", "pITT"].filter((k) => Object.hasOwn(frame, k)).map((k) => [k, frame[k]]))
+      } : null,
+      firstUtgProof: s.firstUtgProof,
+      freshness: s.firstUtgEvidence.freshness,
+      reason: s.firstUtgEvidence.reason,
+      historyComplete: false
+    };
+  }
+  function installRaiseEvidenceResponder(target, snapshot) {
+    if (!enabled(target)) return;
+    let remainingRequests = 8;
+    target.addEventListener("message", (event) => {
+      if (!enabled(target) || remainingRequests <= 0 || event.source !== target || event.origin !== target.location.origin || event.data?.channel !== CHANNEL || event.data.type !== "checkpoint_source" || typeof event.data.requestId !== "string" || event.data.requestId.length > 100) return;
+      remainingRequests--;
+      let source = null, error = null;
+      try {
+        source = raiseSourceObservation(snapshot(), Date.now());
+        if (bytes(JSON.stringify(source)) > 32 * 1024) {
+          source = null;
+          error = "Source observation exceeds 32KiB; rejected without truncation.";
+        }
+      } catch {
+        error = "Source observation unavailable.";
+      }
+      target.postMessage({ channel: CHANNEL, type: "checkpoint_source_result", requestId: event.data.requestId, source, error }, target.location.origin);
+    });
+  }
+
   // src/contentScript.ts
   console.log("[Poker AI Reader] Content script loaded on:", window.location.href);
   var overlayState = {
@@ -9827,6 +9985,10 @@
       dataConfidence: confidence.level
     };
   }
+  function openingControlNote(packet) {
+    const state = packet.preflopExecution?.exactOpeningSize?.controls;
+    return state === "panel_closed_unchecked" ? "; Raise panel closed: controls not checked" : state === "selected_amount_differs" ? "; Selected amount differs: manually set 5 chips before acting" : state === "selected_amount_matches" ? "; Selected total matches 5 chips; manual action only" : "";
+  }
   async function requestRecommendation(packet, stateDescription, requestKey) {
     let policy = null;
     let locked = null;
@@ -9837,10 +9999,10 @@
         bindDisplayLifetime(requestKey);
         overlayState.aiResult = {
           ...locked,
-          action: locked.action === "RAISE" && policy.raiseToBB !== null ? `RAISE TO ${policy.raiseToBB} BB` : locked.action + (locked.sizingBB === void 0 ? "" : ` ${locked.sizingBB}BB additional`)
+          action: locked.action === "RAISE" && packet.preflopExecution?.exactOpeningSize ? "RAISE TO 5 CHIPS (2.5 BB)" : locked.action === "RAISE" && policy.raiseToBB !== null ? `RAISE TO ${policy.raiseToBB} BB` : locked.action + (locked.sizingBB === void 0 ? "" : ` ${locked.sizingBB}BB additional`)
         };
         overlayState.aiStatus = "received";
-        overlayState.policyLine = `Engine decision (${policy.confidence} confidence); explanation pending`;
+        overlayState.policyLine = `Engine decision (${policy.confidence} confidence); explanation pending` + (locked.action === "RAISE" ? openingControlNote(packet) : "");
         overlayState.aiWarnings = policy.reasons;
         renderOverlay();
       }
@@ -9881,7 +10043,7 @@
         }
         if (overlayState.aiResult) overlayState.aiResult.reasoning = explanation.reasoning;
         overlayState.aiStatus = "received";
-        overlayState.policyLine = `Engine decision (${policy.confidence} confidence)`;
+        overlayState.policyLine = `Engine decision (${policy.confidence} confidence)` + (locked.action === "RAISE" ? openingControlNote(packet) : "");
         overlayState.aiWarnings = [...policy.reasons, ...data.consistencyWarnings ?? []];
         renderOverlay();
         return;
@@ -9927,7 +10089,7 @@
         }
         if (locked && policy && fresh) {
           overlayState.aiStatus = "received";
-          overlayState.policyLine = `Engine decision (${policy.confidence} confidence); explanation unavailable`;
+          overlayState.policyLine = `Engine decision (${policy.confidence} confidence); explanation unavailable` + (locked.action === "RAISE" ? openingControlNote(packet) : "");
           overlayState.aiWarnings = [...policy.reasons, "Relay explanation failed, timed out, or returned an invalid response. Engine action retained."];
           renderOverlay();
           return;
@@ -9950,6 +10112,10 @@
   var actionHistory = emptyActionHistory();
   var currentDiagnosticPacket = null;
   var handTimeline = startLiveTimeline();
+  try {
+    installRaiseEvidenceResponder(window, () => handTimeline.snapshot());
+  } catch {
+  }
   var displayLifetime = null;
   var expiryTimer;
   function displaySourceBinding() {
@@ -10106,7 +10272,7 @@
             engineCalculations: {},
             dataConfidence: confidence.level,
             preflop,
-            preflopExecution: buildLivePreflopExecution(read, assessment, liveProofRevision(timelineSnapshot)),
+            preflopExecution: buildLivePreflopExecution(read, assessment, liveProofRevision(timelineSnapshot), scoped.openingSize ?? void 0),
             potEvidence: { ...assessment.pot, bigBlind },
             opponentContext: { opponents: state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded).map((s) => ({ seat: s.seatNumber, position: positions.get(s.seatNumber) ?? null, rangeBasis: "Preflop context remains uncertain", rangeConfidence: "low", rangeStatus: "prior_only", ...opponentStats.profile(s.playerName) ?? {} })) }
           };

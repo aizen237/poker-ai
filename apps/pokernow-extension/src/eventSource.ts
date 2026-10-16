@@ -2,6 +2,7 @@ import { identityFromSocketPacket, tableIdFromPath, TIMELINE_CHANNEL, type HandI
 import { inspectSocketMetadata } from "./sourceMetadata.js";
 import { installRawSocketCapture, type RawSocketCapture } from "./rawSocketCapture.js";
 import { projectFirstUtgSource } from "./firstUtgSource.js";
+import { installRaiseEvidenceCollector } from "./raiseEvidenceCapture.js";
 
 // Runs in MAIN at document_start. Observe existing incoming traffic only;
 // never open a connection, call send(), emit actions, or patch page state.
@@ -9,6 +10,7 @@ const tableId = tableIdFromPath(location.pathname);
 if (tableId && typeof window.WebSocket === "function") {
   let rawCapture: RawSocketCapture | undefined;
   try { rawCapture = installRawSocketCapture(window); } catch { /* Optional diagnostics must not disrupt observation. */ }
+  try { if (rawCapture) installRaiseEvidenceCollector(window, rawCapture); } catch { /* Diagnostics never affect socket observation. */ }
   let identity: HandIdentityEvidence | null = null;
   let connected = false;
   let generation = 0;

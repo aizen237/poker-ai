@@ -6,10 +6,11 @@ import { currentFirstUtg } from "./firstUtgLive.js";
 
 /** Current observations only. This neither certifies the source window nor supplies legal minima. */
 export function buildLivePreflopExecution(read: LiveTableRead, assessment: LiveStateAssessment,
-  sourceWindowKey: string): DecisionPacket["preflopExecution"] {
+  sourceWindowKey: string, exactOpeningSize?: NonNullable<DecisionPacket["preflopExecution"]>["exactOpeningSize"]): DecisionPacket["preflopExecution"] {
   const hero = assessment.state?.seats.find(s => s.isYou && s.isOccupied);
   const control = read.raiseControl;
   return { heroIsCurrentToAct: hero?.isCurrentToAct === true && !hero.isFolded && !hero.isSettling,
+    ...(exactOpeningSize ? { exactOpeningSize } : {}),
     sourceWindowKey, controls: { source: control.selectedRaiseToSource ?? "PokerNow raise control unavailable",
       formVisible: control.formVisible, raiseSubmitVisible: control.raiseSubmitVisible,
       raiseSubmitEnabled: control.raiseSubmitEnabled, issues: [...control.issues],
