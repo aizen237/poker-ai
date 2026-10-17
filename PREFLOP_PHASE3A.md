@@ -1,5 +1,9 @@
 # Phase 3A: source-verified unopened HJ FOLD
 
+Status update: the user has live-verified this HJ FOLD path. The later
+[Phase 3B](PREFLOP_PHASE3B.md) extends its matching exact-five profile to HJ
+RAISE. The FOLD-only statements below describe the original Phase 3A scope.
+
 This implements only an out-of-chart FOLD on hero's first HJ turn following an
 explicit UTG fold, in the existing six-dealt-in, 1/2-chip, no-ante play-money
 Hold'em profile. UTG FOLD/RAISE and the opening charts are unchanged. HJ RAISE,

@@ -130,7 +130,7 @@ function firstUtg(reg: UtgProjection, next: UtgProjection, tableId: string, gene
   if (new Set(heroCards).size !== 2) return null;
   return { tableId, handId: b.hI, handNumber: b.gN, generation, cursor: b.now, previousCursor: a.now, receivedAt: at,
     heroId: hero, heroSeat: cycle[heroIndex]![0], heroCards, smallBlind: 1, bigBlind: 2, players,
-    ...(role === "UTG" && a.version === "0.1.72" && b.fV === "0.1.72" &&
+    ...(a.version === "0.1.72" && b.fV === "0.1.72" &&
       (b.version ?? a.version) === "0.1.72" && same(b.nR, [1]) &&
       (Object.hasOwn(b, "mTB") ? b.mTB : a.mTB) === null &&
       (Object.hasOwn(b, "rIT") ? b.rIT : a.rIT) === "no" &&

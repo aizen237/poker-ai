@@ -92,7 +92,7 @@ export function buildLiveDecisionProofs(read: LiveTableRead, assessment: LiveSta
   const opening = openingSizeEvidence(read, assessment, timeline, epoch);
   // Both pre-packet activation and engine sizing consume this same result.
   // FOLD does not require or consume this scope.
-  if (unopened?.firstUtgBoundary) proofs[PROOF_SCOPES.indexOf("raiseLegality")] = opening.proof;
+  if (unopened?.firstUtgBoundary || unopened?.hjWindow) proofs[PROOF_SCOPES.indexOf("raiseLegality")] = opening.proof;
   if (packet?.preflopExecution?.exactOpeningSize &&
       JSON.stringify(packet.preflopExecution.exactOpeningSize) !== JSON.stringify(opening.size)) {
     set("raiseLegality", "contradicted", "Dependent sizing/packet cross-check", ["Sizing belongs to a different source, control or epoch."]);

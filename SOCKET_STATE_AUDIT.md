@@ -1,5 +1,17 @@
 # Socket state and unopened-preflop evidence audit
 
+## Phase 3B: first HJ exact-five RAISE
+
+The user reports Phase 3A HJ FOLD live verified. The same existing exact-five
+producer now supports a matching fresh hjProof: normal 1/2 unopened wagers,
+explicit zero-contribution UTG fold, immediate first HJ turn and unchanged
+verified profile. Original captured hand168 QQ replays to RAISE TO 5 CHIPS.
+See [PREFLOP_PHASE3B.md](PREFLOP_PHASE3B.md) for the legality equivalence,
+scope/epoch/deadline binding, tests and optional live display check. This is
+historical rule evidence plus a new verified decision, not live server preflight.
+The earlier FOLD-only limitation below is superseded only in that narrow scope.
+No source grammar, global history, proof expiry or chart was relaxed.
+
 ## Phase 3A: first HJ after explicit UTG fold
 
 The existing reducer now also issues a dependent `sourceStatus.hjProof` for the

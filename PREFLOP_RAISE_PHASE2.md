@@ -1,5 +1,9 @@
 # Exact five-chip UTG opening rule
 
+Scope update: [Phase 3B](PREFLOP_PHASE3B.md) reuses this same producer for
+the equivalent source-verified unopened HJ window after UTG folds. The
+UTG-only statements below record the original Phase 2 implementation.
+
 2026-10-16. Phase 2 implements one empirical, profile-scoped sizing contract.
 It does not implement a generic raise-permission API or a poker rules solver.
 The existing chart is unchanged. Raw evidence remains local in `evidence/`.

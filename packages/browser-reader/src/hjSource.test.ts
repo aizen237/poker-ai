@@ -30,7 +30,7 @@ describe("HJ dependent window under the existing bounded source authority", () =
         receivedAt: turn.localReceivedAt, heroCards: hand === 168 ? ["Qs", "Qd"] : ["8d", "6h"] } });
     expect(p.witness.players).toHaveLength(6);
     expect(p.witness.players.find(p => p.playerId === "PLAYER_1")!.position).toBe("HJ");
-    expect(p.witness.openingSizeProfile).toBeUndefined();
+    expect(p.witness.openingSizeProfile).toBe("pokernow-0.1.72-th-4fun-1-2-exact5-v1");
     expect(f.source.proof()).toBeNull();
     expect(f.source.diagnostic().historyComplete).toBe(false);
     // Consumers cannot mutate the authoritative frozen source state.

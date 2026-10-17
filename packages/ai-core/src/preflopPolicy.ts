@@ -14,6 +14,8 @@ export const PreflopExecutionSchema = z.object({
   /** Empirical exact-size rule, NOT a general minimum/grid or live server ack. */
   exactOpeningSize: z.object({
     rule: z.literal("pokernow-0.1.72-th-4fun-1-2-exact5-v1"),
+    /** Legacy absence is UTG-only; HJ requires an explicit bound window. */
+    decisionWindow: z.enum(["first_utg_boundary", "hj_after_utg_fold"]).optional(),
     provenance: z.string().min(1).max(2000),
     tableId: z.string().min(1), handId: z.string().min(1), heroId: z.string().min(1),
     heroSeat: z.number().int().positive(), generation: z.number().int().positive(),
@@ -119,17 +121,19 @@ export function evaluatePreflopReference(packet: DecisionPacket): {
   if (!packet.candidateActions.includes(action)) return fail("Reference action is absent from the proven legal action set.");
   if (action === "FOLD") return { action, raiseToBB: null, investmentBB: null, reasons: [], strategySource: RFI_STRATEGY_SOURCE,
     explanation: `${hand} is outside the ${packet.hero.position} six-max 100BB+ RFI reference. Fold; no limp strategy is modeled.` };
-  if (firstHj) return fail("HJ RAISE is not certified by the HJ FOLD-only source contract; no substitution with FOLD.");
   const raiseToBB = 2.5, investmentBB = raiseToBB - hero.contributionBB!;
   const controls = execution.controls;
   const legal = execution.raiseBounds;
   const exact = execution.exactOpeningSize;
+  if (firstHj && !exact) return fail("HJ RAISE requires its dependent exact-five-chip sizing certificate; no substitution with FOLD.");
   if (exact) {
     // This branch cannot be used for other sizes, positions or response models.
     // Source provenance is issued by the local reader; the relay does not act
     // as a second PokerNow observer. Packet binding covers all these facts.
     const now = Date.now();
-    if (exact.rule !== "pokernow-0.1.72-th-4fun-1-2-exact5-v1" || !firstUtg ||
+    if (exact.rule !== "pokernow-0.1.72-th-4fun-1-2-exact5-v1" ||
+        !(firstUtg && (exact.decisionWindow === undefined || exact.decisionWindow === "first_utg_boundary") ||
+          firstHj && exact.decisionWindow === "hj_after_utg_fold") ||
         hero.contributionBB !== 0 || context.heroSeat !== exact.heroSeat ||
         exact.units !== "chips" || exact.bigBlindChips !== 2 || exact.contributionChips !== 0 ||
         exact.raiseToChips !== 5 || exact.investmentChips !== 5 ||

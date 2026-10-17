@@ -112,7 +112,7 @@ async function live(options: { hand?: 150 | 168; cards?: string[]; control?: str
     text: () => document.getElementById("poker-ai-reader-overlay")!.textContent! };
 }
 
-describe("source-verified HJ FOLD through MAIN, live adapter, policy and overlay", () => {
+describe("source-verified HJ decisions through MAIN, live adapter, policy and overlay", () => {
   it("replays original hand150 86o as HJ FOLD with six frozen positions and four active opponents", async () => {
     const f = await live({ hand: 150 });
     expect(f.action(), f.text()).toBe("FOLD");
@@ -122,23 +122,86 @@ describe("source-verified HJ FOLD through MAIN, live adapter, policy and overlay
     expect(p.preflop.players.find((p: any) => p.position === "UTG")).toMatchObject({ seat: 10, folded: true });
     expect(p.preflop.actions).toEqual([{ seat: 10, action: "fold", totalContributionBB: 0, observation: 97, wagerAction: null }]);
     expect(p.facingAction.amountBB).toBe(1);
-    expect(p.preflopExecution.exactOpeningSize).toBeUndefined();
+    expect(p.preflopExecution.exactOpeningSize.decisionWindow).toBe("hj_after_utg_fold");
     expect(evaluateDecisionPolicy(validateDecisionPacket(p))).toMatchObject({ status: "selected", chosenAction: "FOLD", llmMayChoose: false,
       activation: { allowed: true, state: "proof_ready" } });
     expect(f.text()).toContain("explanation pending");
     expect(f.socket.send).not.toHaveBeenCalled();
   });
-  it("keeps the real hand168 QQ blocked rather than substituting FOLD for an unsupported RAISE", async () => {
-    const f = await live(); expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
-    expect(f.text()).toContain("WAITING FOR PROOF");
+  it("replays captured hand168 QQ as immediate exact-five HJ RAISE with panel closed", async () => {
+    const f = await live();
+    expect(f.action(), f.text()).toBe("RAISE TO 5 CHIPS (2.5 BB)");
+    const p = f.requests[0]!.packet, exact = p.preflopExecution.exactOpeningSize;
+    expect(exact).toMatchObject({ decisionWindow: "hj_after_utg_fold", raiseToChips: 5, investmentChips: 5,
+      contributionChips: 0, bigBlindChips: 2, controls: "panel_closed_unchecked",
+      receivedAt: f.turn.localReceivedAt, expiresAt: f.turn.localReceivedAt + 10000 });
+    expect(p.decisionProofs.proofs.find((p: any) => p.scope === "raiseLegality").status).toBe("proven");
+    expect(evaluateDecisionPolicy(validateDecisionPacket(p))).toMatchObject({ status: "selected", chosenAction: "RAISE",
+      llmMayChoose: false, activation: { allowed: true, state: "proof_ready" } });
+    expect(f.text()).toContain("explanation pending");
+    expect(f.socket.send).not.toHaveBeenCalled();
   });
   it("uses an explicitly synthetic 72o variant of hand168 for immediate FOLD", async () => {
     const f = await live({ cards: ["7h", "2d"] }); expect(f.action(), f.text()).toBe("FOLD");
     expect(f.text()).toContain("9.0s");
   });
+  it.each(["ready", "different-selection"])("certifies five independently of panel selection: %s", async control => {
+    const f = await live({ control });
+    expect(f.action()).toBe("RAISE TO 5 CHIPS (2.5 BB)");
+    expect(f.requests[0]!.packet.preflopExecution.exactOpeningSize.controls).toBe(
+      control === "ready" ? "selected_amount_matches" : "selected_amount_differs");
+    expect(f.socket.send).not.toHaveBeenCalled();
+  });
+  it.each(["wrong-size", "wrong-bb", "disabled", "input-disabled", "input-readonly", "missing-input",
+    "missing-submit", "hidden-submit", "duplicate"])("blocks RAISE for contradictory/unavailable controls: %s", async control => {
+    const f = await live({ control });
+    expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
+  });
+  it.each(["unknown-rule", "version", "ante", "mode", "dead-button", "small-blind", "different-capacity"])(
+    "blocks RAISE on profile or capacity mismatch: %s", async variant => {
+      const f = await live({ mutate: (frames, read) => {
+        const start = frames.at(-3).payload;
+        if (variant === "unknown-rule") delete start.nR;
+        if (variant === "version") start.fV = "0.1.73";
+        if (variant === "ante") start.ante = 1;
+        if (variant === "mode") start.mode = "unknown";
+        if (variant === "dead-button") start.deadButton = true;
+        if (variant === "small-blind") start.smallBlind = 2;
+        if (variant === "different-capacity") read.raw.seats[0].stackText = "1000";
+      } });
+      expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
+    });
+  it.each(["unknown-rule", "disabled-control"])("FOLD remains independent of sizing: %s", async variant => {
+    const f = await live({ hand: 150, control: variant === "disabled-control" ? "disabled" : "closed",
+      mutate: frames => { if (variant === "unknown-rule") delete frames.at(-3).payload.nR; } });
+    expect(f.action()).toBe("FOLD");
+    expect(f.requests[0]!.packet.preflopExecution.exactOpeningSize).toBeUndefined();
+  });
+  it.each(["missing-scope", "utg-scope", "CO", "BTN", "SB", "BB", "limped", "facing_open", "epoch", "hand", "generation", "expiry"])(
+    "engine rejects transplanted or stale HJ sizing: %s", async variant => {
+      const f = await live(), p = structuredClone(f.requests[0]!.packet), size = p.preflopExecution.exactOpeningSize;
+      if (variant === "missing-scope") delete size.decisionWindow;
+      if (variant === "utg-scope") size.decisionWindow = "first_utg_boundary";
+      if (["CO", "BTN", "SB", "BB"].includes(variant)) p.hero.position = p.preflop.heroPosition = variant;
+      if (["limped", "facing_open"].includes(variant)) p.preflop.situation = variant;
+      if (variant === "epoch") size.decisionEpoch += "-other";
+      if (variant === "hand") size.handId = "OTHER_HAND";
+      if (variant === "generation") size.generation++;
+      if (variant === "expiry") f.atAge(10000);
+      p.decisionProofs.binding = decisionProofBinding(p, p.decisionProofs.decisionEpoch);
+      expect(evaluateDecisionPolicy(p)).toMatchObject({ chosenAction: null, llmMayChoose: false });
+    });
+  it("a provider cannot replace the selected RAISE while its proof is fresh", async () => {
+    const f = await live();
+    f.requests[0]!.resolve({ ok: true, json: async () => ({ ok: true, decisionSource: "engine_policy", result: {
+      action: "FOLD", confidence: 1, reasoning: "Provider attempts to choose another action" } }) });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(f.action()).toBe("RAISE TO 5 CHIPS (2.5 BB)");
+  });
   it("engine does not turn an HJ chart RAISE into FOLD even with rebound generic sizing labels", async () => {
     const f = await live({ hand: 150 });
     const p = structuredClone(f.requests[0]!.packet);
+    delete p.preflopExecution.exactOpeningSize;
     p.hero.holeCards = [{ rank: 12, suit: "s" }, { rank: 12, suit: "d" }];
     p.preflopExecution.raiseBounds = { verified: true, source: "negative-test input", minRaiseToBB: 2, chipUnitBB: 0.5 };
     const raise = p.decisionProofs.proofs.find((p: any) => p.scope === "raiseLegality");
@@ -146,20 +209,24 @@ describe("source-verified HJ FOLD through MAIN, live adapter, policy and overlay
     p.decisionProofs.binding = decisionProofBinding(p, p.decisionProofs.decisionEpoch);
     expect(evaluateDecisionPolicy(p)).toMatchObject({ chosenAction: null, llmMayChoose: false });
   });
-  it("creates a new deadline from genuine HJ activation more than ten seconds after hand start", async () => {
-    const f = await live({ hand: 150, delayTurn: 20_000 });
+  it.each([150, 168] as const)("hand%i gets its deadline from genuine HJ activation, not the older anchor", async hand => {
+    const f = await live({ hand, delayTurn: 20_000 });
+    const action = hand === 150 ? "FOLD" : "RAISE TO 5 CHIPS (2.5 BB)";
     expect(f.now() - f.boundary.localReceivedAt).toBeGreaterThan(10_000);
-    expect(f.action()).toBe("FOLD"); expect(f.text()).toContain("9.0s");
-    f.atAge(9999); f.refresh(); expect(f.action()).toBe("FOLD");
+    expect(f.action()).toBe(action); expect(f.text()).toContain("9.0s");
+    f.atAge(9999); f.refresh(); expect(f.action()).toBe(action);
     f.atAge(10000); f.refresh(); expect(f.action()).toBeNull(); expect(f.text()).toContain("EVIDENCE EXPIRED");
     f.poll(); expect(f.action()).toBeNull();
   });
-  it("does not renew from controls, unchanged polls or provider failure", async () => {
-    const f = await live({ hand: 150 });
-    f.atAge(4000); f.read.raiseControl = controls("ready"); f.poll(); expect(f.action()).toBe("FOLD");
+  it.each([150, 168] as const)("hand%i does not renew from controls, unchanged polls or provider failure", async hand => {
+    const f = await live({ hand });
+    const action = hand === 150 ? "FOLD" : "RAISE TO 5 CHIPS (2.5 BB)";
+    f.atAge(4000); f.read.raiseControl = controls("ready"); f.poll(); expect(f.action()).toBe(action);
+    expect(f.requests.at(-1)!.packet.preflopExecution.exactOpeningSize).toMatchObject({
+      controls: "selected_amount_matches", expiresAt: f.turn.localReceivedAt + 10000 });
     expect(f.text()).toContain("6.0s");
     f.requests.at(-1)!.reject(new Error("relay offline")); await new Promise(resolve => setTimeout(resolve, 0));
-    expect(f.action()).toBe("FOLD");
+    expect(f.action()).toBe(action);
     f.atAge(10000); f.refresh(); expect(f.action()).toBeNull();
   });
   it("allows the corroborating UTG fold and normal blinds without requiring log coverage", async () => {
@@ -175,13 +242,14 @@ describe("source-verified HJ FOLD through MAIN, live adapter, policy and overlay
     const f = await live({ hand: 150, logActions: ['"UTG @ PLAYER_10" folds'], mutate: frames => { delete frames.at(-2).payload.pGS; } });
     expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
   });
-  it.each(["no-fold", "wrong-fold", "limp", "raise", "all-in", "combined", "unknown-field", "extra-update", "missing-update", "predecessor", "stale-cursor", "replay", "reconnect", "replacement", "changed-hand", "blind", "short-source", "short-dom", "wrong-actor", "wrong-dom-actor", "wrong-dom-fold", "stale-cards", "bb-walk"])("rejects %s without fabricating advice", async variant => {
-    const f = await live({ hand: 150, mutate: (frames, read) => {
+  it.each(([150, 168] as const).flatMap(hand => ["no-fold", "wrong-fold", "limp", "raise", "all-in", "extra-post", "combined", "unknown-field", "extra-update", "missing-update", "predecessor", "stale-cursor", "replay", "reconnect", "replacement", "changed-hand", "blind", "short-source", "short-dom", "wrong-actor", "wrong-dom-actor", "wrong-dom-fold", "stale-cards", "bb-walk"].map(variant => ({ hand, variant }))))("hand$hand rejects $variant without fabricating advice", async ({ hand, variant }) => {
+    const f = await live({ hand, mutate: (frames, read) => {
       const start = frames.at(-3).payload, fold = frames.at(-2).payload, turn = frames.at(-1).payload;
       if (variant === "no-fold") delete fold.pGS;
       if (variant === "wrong-fold") fold.pGS = { PLAYER_2: "fold" };
       if (variant === "limp") fold.tB = { PLAYER_10: 2 };
       if (variant === "raise") fold.tB = { PLAYER_10: 5 };
+      if (variant === "extra-post") fold.tB = { PLAYER_2: 1 };
       if (variant === "all-in") fold.pGS.PLAYER_10 = "allIn";
       if (variant === "combined") fold.cPI = "PLAYER_1";
       if (variant === "unknown-field") fold.unrecognizedAction = "call";
@@ -207,8 +275,8 @@ describe("source-verified HJ FOLD through MAIN, live adapter, policy and overlay
     } });
     expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
   });
-  it.each(["expiry", "actor", "reconnect", "source-update"])("rejects late explanations after %s", async variant => {
-    const f = await live({ hand: 150 }); expect(f.action()).toBe("FOLD");
+  it.each(([150, 168] as const).flatMap(hand => ["expiry", "actor", "reconnect", "source-update"].map(variant => ({ hand, variant }))))("hand$hand rejects late explanations after $variant", async ({ hand, variant }) => {
+    const f = await live({ hand }); expect(f.action()).toBe(hand === 150 ? "FOLD" : "RAISE TO 5 CHIPS (2.5 BB)");
     if (variant === "expiry") f.atAge(10000);
     if (variant === "actor") f.read.raw.seats[0].statusClasses = ["table-player", "you-player"];
     if (variant === "reconnect") f.socket.dispatchEvent(new Event("close"));
