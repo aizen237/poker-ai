@@ -143,22 +143,22 @@
     }
     return text.length;
   }
-  function members(object4) {
+  function members(object5) {
     const result = [];
     let i = 1;
-    while (i < object4.length) {
-      while (/\s|,/.test(object4[i] ?? "") && i < object4.length) i++;
-      if (object4[i] === "}") break;
+    while (i < object5.length) {
+      while (/\s|,/.test(object5[i] ?? "") && i < object5.length) i++;
+      if (object5[i] === "}") break;
       const keyStart = i++;
-      while (i < object4.length) {
-        if (object4[i] === "\\") i += 2;
-        else if (object4[i++] === '"') break;
+      while (i < object5.length) {
+        if (object5[i] === "\\") i += 2;
+        else if (object5[i++] === '"') break;
       }
-      const key = JSON.parse(object4.slice(keyStart, i));
-      while (object4[i] !== ":" && i < object4.length) i++;
+      const key = JSON.parse(object5.slice(keyStart, i));
+      while (object5[i] !== ":" && i < object5.length) i++;
       i++;
-      const end = endOfValue(object4, i);
-      result.push({ key, raw: object4.slice(i, end).trim() });
+      const end = endOfValue(object5, i);
+      result.push({ key, raw: object5.slice(i, end).trim() });
       i = end;
     }
     return result;
@@ -290,9 +290,22 @@
   // src/firstUtgState.ts
   var allowed = new Set("id hI gN now pre r gT seats iHPI dealerID dealerSeat sBPI bBPI tB pGS cPI pITT smallBlind bigBlind ante deadButton gM mode aD aS cM cR players pC cRPI eventsData rHP rHC oTC gameResult version fV nR mTB rIT sPM".split(" "));
 
-  // src/firstUtgSource.ts
+  // src/hjWindow.ts
   var object3 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+  var integer = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
   var token2 = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(v);
+  var common = ["now", "pre", "eventsData", "mEV", "fV", "sN"];
+  function hjPatchKind(raw) {
+    if (!object3(raw) || !integer(raw.now) || !integer(raw.pre) || raw.now <= raw.pre || !integer(raw.sN) || raw.mEV !== 0 || raw.fV !== "0.1.72" || !Array.isArray(raw.eventsData) || raw.eventsData.length) return null;
+    const exact = (fields) => Object.keys(raw).length === fields.length && fields.every((k) => Object.hasOwn(raw, k));
+    if (exact([...common, "pGS", "sNA", "pITT", "sNAA", "wBACPI"]) && object3(raw.pGS) && Object.keys(raw.pGS).length === 1 && token2(Object.keys(raw.pGS)[0]) && Object.values(raw.pGS)[0] === "fold" && raw.sNA === "NSAF" && raw.pITT === null && integer(raw.sNAA) && Array.isArray(raw.wBACPI) && raw.wBACPI.length === 1 && token2(raw.wBACPI[0])) return "fold";
+    if (exact([...common, "cPI", "pITT", "sNA", "pASA", "sNAA", "mAVTB"]) && token2(raw.cPI) && raw.pITT === raw.cPI && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now && integer(raw.mAVTB)) return "turn";
+    return null;
+  }
+
+  // src/firstUtgSource.ts
+  var object4 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+  var token3 = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(v);
   var same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   var keys = [
     "id",
@@ -339,27 +352,32 @@
     if (typeof data !== "string" || data.length > 2e6 || !data.startsWith("42[")) return null;
     try {
       const p = JSON.parse(data.slice(2));
-      if (!Array.isArray(p) || p.length !== 2 || !["registered", "gC", "rup"].includes(p[0]) || !object3(p[1])) return null;
+      if (!Array.isArray(p) || p.length !== 2 || !["registered", "gC", "rup"].includes(p[0]) || !object4(p[1])) return null;
       const raw = p[0] === "registered" ? p[1].gameState : p[1];
-      if (!object3(raw)) return null;
+      if (!object4(raw)) return null;
       if (Object.hasOwn(raw, "eventsData") && !same(raw.eventsData, [])) return null;
       const heroId = p[0] === "registered" ? p[1].currentPlayer?.id : knownHero;
       const frame = {};
       for (const key of keys) if (Object.hasOwn(raw, key)) frame[key] = raw[key];
       if (p[0] === "registered" || frame.gameResult !== "<D>") delete frame.gameResult;
       if (Object.hasOwn(raw, "players")) {
-        if (!object3(raw.players) || Object.keys(raw.players).length > 10) return null;
-        frame.players = Object.fromEntries(Object.entries(raw.players).map(([id, player]) => [id, object3(player) ? Object.fromEntries(["id", "stack", "status", "disconnectedSince"].filter((k) => Object.hasOwn(player, k)).map((k) => [k, player[k]])) : player]));
+        if (!object4(raw.players) || Object.keys(raw.players).length > 10) return null;
+        frame.players = Object.fromEntries(Object.entries(raw.players).map(([id, player]) => [id, object4(player) ? Object.fromEntries(["id", "stack", "status", "disconnectedSince"].filter((k) => Object.hasOwn(player, k)).map((k) => [k, player[k]])) : player]));
       }
       if (Object.hasOwn(raw, "pC")) {
-        if (!object3(raw.pC) || Object.keys(raw.pC).length > 10) return null;
-        if (Object.values(raw.pC).some((hand) => !object3(hand) || !Array.isArray(hand.cards) || hand.cards.length > 2 || hand.cards.some((c) => !object3(c) || !(c.value === null || typeof c.value === "string") || typeof c.showing !== "boolean"))) return null;
+        if (!object4(raw.pC) || Object.keys(raw.pC).length > 10) return null;
+        if (Object.values(raw.pC).some((hand) => !object4(hand) || !Array.isArray(hand.cards) || hand.cards.length > 2 || hand.cards.some((c) => !object4(c) || !(c.value === null || typeof c.value === "string") || typeof c.showing !== "boolean"))) return null;
         frame.pC = Object.fromEntries(Object.entries(raw.pC).map(([id, hand]) => [
           id,
           { cards: hand.cards.map((c) => ({ value: id === heroId ? c.value : null, showing: c.showing })) }
         ]));
       }
-      const result = { event: p[0], heroId: token2(heroId) ? heroId : null, frame };
+      const result = {
+        event: p[0],
+        heroId: token3(heroId) ? heroId : null,
+        frame,
+        ...p[0] === "gC" && hjPatchKind(raw) ? { hjPatch: raw } : {}
+      };
       return JSON.stringify(result).length <= 4e4 ? result : null;
     } catch {
       return null;

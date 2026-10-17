@@ -150,10 +150,10 @@
         return obj[e];
       });
     };
-    util2.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object5) => {
+    util2.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object6) => {
       const keys = [];
-      for (const key in object5) {
-        if (Object.prototype.hasOwnProperty.call(object5, key)) {
+      for (const key in object6) {
+        if (Object.prototype.hasOwnProperty.call(object6, key)) {
           keys.push(key);
         }
       }
@@ -5455,8 +5455,8 @@
     amountToCallBB: chips.nullable(),
     contributionMeaning: external_exports.enum(["street_total", "increment", "unknown"]),
     historyCoverage: external_exports.enum(["complete", "partial"]),
-    /** Decision-local empty voluntary window at an independently proven first UTG turn. */
-    openingEvidence: external_exports.literal("first_utg_hand_start").optional(),
+    /** Independently proven decision-local window, never whole-hand coverage. */
+    openingEvidence: external_exports.enum(["first_utg_hand_start", "hj_after_utg_fold"]).optional(),
     actions: external_exports.array(action),
     historyNotes: external_exports.array(external_exports.string()),
     tournamentContext: external_exports.enum(["chip_ev_only", "unknown"])
@@ -5696,9 +5696,12 @@
       return fail("Blind/action ordering is ambiguous.");
     const posts = events.filter((a2) => a2.action === "post_blind");
     const firstUtg2 = context.openingEvidence === "first_utg_hand_start";
+    const firstHj = context.openingEvidence === "hj_after_utg_fold";
     if (firstUtg2 && (context.heroPosition !== "UTG" || events.length !== 0))
       return fail("First UTG boundary evidence cannot certify a later turn or prior voluntary action.");
-    if (!firstUtg2 && (posts.length !== 2 || posts.some((a2) => {
+    if (firstHj && (context.heroPosition !== "HJ" || events.length !== 1 || posts.length))
+      return fail("HJ fold-prefix evidence supports exactly one prior UTG fold and boundary blind totals.");
+    if (!firstUtg2 && !firstHj && (posts.length !== 2 || posts.some((a2) => {
       const position2 = context.players.find((p) => p.seat === a2.seat)?.position;
       return a2.totalContributionBB !== (position2 === "SB" ? 0.5 : position2 === "BB" ? 1 : -1);
     }) || new Set(posts.map((a2) => a2.seat)).size !== 2 || events.slice(0, 2).some((a2) => a2.action !== "post_blind")))
@@ -5741,6 +5744,8 @@
         strategySource: RFI_STRATEGY_SOURCE,
         explanation: `${hand} is outside the ${packet.hero.position} six-max 100BB+ RFI reference. Fold; no limp strategy is modeled.`
       };
+    if (firstHj)
+      return fail("HJ RAISE is not certified by the HJ FOLD-only source contract; no substitution with FOLD.");
     const raiseToBB = 2.5, investmentBB = raiseToBB - hero.contributionBB;
     const controls = execution.controls;
     const legal = execution.raiseBounds;
@@ -8084,17 +8089,33 @@
 
   // src/firstUtgLive.ts
   function currentFirstUtg(read, assessment, timeline) {
-    const source = timeline?.sourceStatus, proof = source?.firstUtgProof, w = proof?.witness;
+    return currentOpeningWindow(read, assessment, timeline, "UTG");
+  }
+  function currentHj(read, assessment, timeline) {
+    return currentOpeningWindow(read, assessment, timeline, "HJ");
+  }
+  function currentOpeningWindow(read, assessment, timeline, role) {
+    const source = timeline?.sourceStatus, proof = role === "UTG" ? source?.firstUtgProof : source?.hjProof, w = proof?.witness;
     const id = source?.identity, chain = proof?.continuity;
+    const utg = w?.players.find((p) => p.position === "UTG");
     const state = assessment.state;
-    if (!read || !timeline || !w || !source?.connected || !id || !state || id.tableId !== w.tableId || id.handId !== w.handId || id.handNumber !== w.handNumber || id.heroPlayerId !== w.heroId || id.frameCursor !== w.cursor || timeline.current.handId !== `${w.tableId}:hand:${w.handId}` || timeline.current.handNumber !== w.handNumber || proof?.scope !== "first_utg_boundary" || proof.version !== 1 || proof.historyComplete !== false || chain?.generation !== w.generation || chain.status !== "validated_prefix" || chain.tableId !== w.tableId || chain.handId !== w.handId || chain.cursor !== w.cursor || chain.throughSequence <= chain.baselineSequence || id.chainGap || timeline.current.coverage.issues.some((i) => i.code === "metadata_gap" || i.code === "identity_conflict") || timeline.current.seatMapping.status === "invalid" || read.context.readErrors.length || state.street !== "preflop" || state.board.length || assessment.smallBlind !== w.smallBlind || assessment.bigBlind !== w.bigBlind || read.context.dealerSeatNumber !== w.players.find((p) => p.position === "BTN")?.seat) return null;
-    if (timeline.current.events.some((e) => e.source === "pokernow_log_v3" && !isSourceNonActionMetadata(e) && !["hand_start", "player_stacks", "post"].includes(e.action))) return null;
+    if (!read || !timeline || !w || !source?.connected || !id || !state || id.tableId !== w.tableId || id.handId !== w.handId || id.handNumber !== w.handNumber || id.heroPlayerId !== w.heroId || (role === "UTG" ? id.frameCursor !== w.cursor : id.frameCursor !== source?.hjProof?.anchor.cursor) || timeline.current.handId !== `${w.tableId}:hand:${w.handId}` || timeline.current.handNumber !== w.handNumber || proof?.scope !== (role === "UTG" ? "first_utg_boundary" : "hj_after_utg_fold") || proof.version !== 1 || proof.historyComplete !== false || role === "HJ" && (Date.now() < w.receivedAt || Date.now() >= proof.expiresAt || w.players.find((p) => p.playerId === w.heroId)?.position !== "HJ") || chain?.generation !== w.generation || chain.status !== "validated_prefix" || chain.tableId !== w.tableId || chain.handId !== w.handId || chain.cursor !== w.cursor || chain.throughSequence <= chain.baselineSequence || id.chainGap || timeline.current.coverage.issues.some((i) => i.code === "metadata_gap" || i.code === "identity_conflict") || timeline.current.seatMapping.status === "invalid" || read.context.readErrors.length || state.street !== "preflop" || state.board.length || assessment.smallBlind !== w.smallBlind || assessment.bigBlind !== w.bigBlind || read.context.dealerSeatNumber !== w.players.find((p) => p.position === "BTN")?.seat) return null;
+    if (timeline.current.events.some((e) => e.source === "pokernow_log_v3" && !isSourceNonActionMetadata(e) && !["hand_start", "player_stacks", "post"].includes(e.action) && !(role === "HJ" && e.action === "fold" && e.actor?.playerId === utg?.playerId && e.street === "preflop"))) return null;
+    if (role === "HJ" && timeline.current.events.filter((e) => e.source === "pokernow_log_v3" && e.action === "fold").length > 1) return null;
+    if (role === "HJ") {
+      const posts = timeline.current.events.filter((e) => e.source === "pokernow_log_v3" && e.action === "post");
+      if (posts.length > 2 || new Set(posts.map((e) => e.actor?.playerId)).size !== posts.length || posts.some((e) => {
+        const player2 = w.players.find((p) => p.playerId === e.actor?.playerId);
+        const blind = player2?.position === "SB" ? "small" : player2?.position === "BB" ? "big" : null;
+        return !blind || e.street !== "preflop" || e.amount !== player2.contribution || !new RegExp(` posts a ${blind} blind of ${player2.contribution}$`).test(e.evidence);
+      })) return null;
+    }
     if (timeline.current.seatMapping.entries.some((e) => !w.players.some((p) => p.playerId === e.playerId && p.seat === e.seat))) return null;
     const seats = state.seats.filter((s) => s.isOccupied);
     if (seats.length !== 6 || new Set(seats.map((s) => s.seatNumber)).size !== 6 || seats.filter((s) => s.isYou).length !== 1 || seats.filter((s) => s.isCurrentToAct).length !== 1) return null;
     for (const p of w.players) {
       const s = seats.find((s2) => s2.seatNumber === p.seat);
-      if (!s || s.isFolded || s.isAllIn || s.isOffline || s.isSettling || s.betReadError || s.stack === null || s.stack < 100 * w.bigBlind || s.stack !== p.sourceStack && s.stack !== p.sourceStack - p.contribution || assessment.positions.get(p.seat) !== p.position || (s.currentBet === null ? p.contribution !== 0 : s.currentBet !== p.contribution) || s.isYou !== (p.playerId === w.heroId) || s.isCurrentToAct !== (p.playerId === w.heroId)) return null;
+      if (!s || s.isFolded !== (role === "HJ" && p.position === "UTG") || s.isAllIn || s.isOffline || s.isSettling || s.betReadError || s.stack === null || s.stack < 100 * w.bigBlind || s.stack !== p.sourceStack && s.stack !== p.sourceStack - p.contribution || assessment.positions.get(p.seat) !== p.position || (s.currentBet === null ? p.contribution !== 0 : s.currentBet !== p.contribution) || s.isYou !== (p.playerId === w.heroId) || s.isCurrentToAct !== (p.playerId === w.heroId)) return null;
     }
     const hero = seats.find((s) => s.isYou);
     const ranks = "23456789TJQKA";
@@ -8126,7 +8147,8 @@
     if (bigBlind === null || !Number.isFinite(bigBlind) || bigBlind <= 0) return null;
     const hero = state?.seats.find((s) => s.isYou);
     try {
-      const first = currentFirstUtg(read, assessment, timeline);
+      const hj = currentHj(read, assessment, timeline);
+      const first = currentFirstUtg(read, assessment, timeline) ?? hj;
       if (first) return buildPreflopContext({
         heroSeat: first.heroSeat,
         playersDealtIn: 6,
@@ -8135,15 +8157,21 @@
           position: p.position,
           remainingStackBB: state.seats.find((s) => s.seatNumber === p.seat).stack / bigBlind,
           contributionBB: p.contribution / bigBlind,
-          folded: false,
+          folded: !!hj && p.position === "UTG",
           allIn: false
         })),
         potBB: decisionPot === null ? null : decisionPot / bigBlind,
         amountToCallBB: 1,
         contributionMeaning: "street_total",
         historyCoverage: "complete",
-        openingEvidence: "first_utg_hand_start",
-        actions: [],
+        openingEvidence: hj ? "hj_after_utg_fold" : "first_utg_hand_start",
+        actions: hj ? [{
+          seat: hj.players.find((p) => p.position === "UTG").seat,
+          action: "fold",
+          totalContributionBB: 0,
+          observation: timeline.sourceStatus.hjProof.fold.sequence,
+          wagerAction: null
+        }] : [],
         historyNotes: [],
         tournamentContext: "chip_ev_only"
       });
@@ -8426,8 +8454,8 @@
     const dealer = unique(document, TABLE_SELECTORS.dealer, "dealer marker", true);
     const dealerClasses = [...dealer?.classList ?? []];
     const dealerTokens = dealerClasses.filter((cls) => cls.startsWith("dealer-position-"));
-    const token4 = dealerTokens.length === 1 ? dealerTokens[0] : void 0;
-    const dealerSeatNumber = token4 && /^dealer-position-(?:[1-9]|10)$/.test(token4) ? Number(token4.slice("dealer-position-".length)) : null;
+    const token5 = dealerTokens.length === 1 ? dealerTokens[0] : void 0;
+    const dealerSeatNumber = token5 && /^dealer-position-(?:[1-9]|10)$/.test(token5) ? Number(token5.slice("dealer-position-".length)) : null;
     if (dealerSeatNumber === null) readErrors.push("dealer seat number unreadable or ambiguous");
     const raw = {
       seats,
@@ -8457,7 +8485,9 @@
   // src/unopenedEvidence.ts
   function inspectLiveUnopenedEvidence(read, assessment, timeline) {
     const hand = timeline?.current, source = timeline?.sourceStatus;
-    const first = currentFirstUtg(read, assessment, timeline);
+    const utg = currentFirstUtg(read, assessment, timeline);
+    const hj = currentHj(read, assessment, timeline);
+    const first = utg ?? hj;
     const mapping = hand?.seatMapping;
     const events = hand?.events.filter((e) => e.source === "pokernow_log_v3") ?? [];
     const starts = events.filter((e) => e.action === "hand_start");
@@ -8499,7 +8529,8 @@
     return {
       socketStateEvidence: source?.sourceMetadata.socketStateEvidence ?? null,
       candidate: !!first || assessment.state?.street === "preflop" && disallowed.length === 0,
-      firstUtgBoundary: first,
+      firstUtgBoundary: utg,
+      hjWindow: hj,
       heroSeat: {
         status: first || heroSeatVerified ? "proven" : identityConflict ? "contradicted" : "insufficient",
         seat: first?.heroSeat ?? (heroSeatVerified ? entry.seat : null),
@@ -8525,7 +8556,7 @@
         scope,
         status: "proven",
         confidence: "high",
-        provenance: [first.provenance, "Six explicit dealt-card entries/iHPI IDs; inherited seats cross-checked against dealer/SB/BB and current DOM; first UTG only."],
+        provenance: [first.provenance, `Six explicit dealt-card entries/iHPI IDs; frozen seats cross-checked against dealer/SB/BB and current DOM; ${hj ? "one explicit UTG fold then first HJ turn" : "first UTG only"}.`],
         reasons: []
       })) : [
         proof("roster", rosterReasons, identityConflict || membershipChanged),
@@ -8701,12 +8732,13 @@
         "Numeric remaining stacks + explicit current street contributions; 100BB+ RFI scope",
         deepEnough && !settling ? [] : ["Hero and every active opponent must have proven 100BB+ hand-start effective capacity."]
       );
-      const first = currentFirstUtg(read, assessment, timeline);
+      const hj = currentHj(read, assessment, timeline);
+      const first = currentFirstUtg(read, assessment, timeline) ?? hj;
       if (first) {
-        const continuity = source.firstUtgProof.continuity;
-        set("connection", "proven", `Validated first-UTG source prefix: generation ${continuity.generation}, registration ${continuity.baselineSequence} through ${continuity.throughSequence}, cursor ${continuity.cursor}. ${first.provenance} Not whole-hand/log coverage.`);
+        const continuity = (hj ? source.hjProof : source.firstUtgProof).continuity;
+        set("connection", "proven", `Validated ${hj ? "HJ" : "first-UTG"} source prefix: generation ${continuity.generation}, registration ${continuity.baselineSequence} through ${continuity.throughSequence}, cursor ${continuity.cursor}. ${first.provenance} Not whole-hand/log coverage.`);
         set("stack", "proven", `${first.provenance} Numeric remaining DOM stacks independently >=100BB for all six players.`);
-        set("callCost", "proven", `${first.provenance} Normal SB=1/BB=2 source totals; UTG contribution zero at first turn. Call gap=2 chips.`);
+        set("callCost", "proven", `${first.provenance} Normal SB=1/BB=2 source totals; hero contribution zero, no intervening wagers. Call gap=2 chips.`);
       }
     }
     const opening = openingSizeEvidence(read, assessment, timeline, epoch);
@@ -8719,7 +8751,7 @@
       decisionEpoch: epoch,
       binding: "diagnostic-only: no packet",
       handId: source?.identity ? timeline.current.handId : null,
-      connectionGeneration: source?.firstUtgProof?.continuity.generation ?? chain?.generation ?? null,
+      connectionGeneration: source?.firstUtgProof?.continuity.generation ?? source?.hjProof?.continuity.generation ?? chain?.generation ?? null,
       proofs
     };
     if (packet) envelope.binding = decisionProofBinding({ ...packet, decisionProofs: envelope }, epoch);
@@ -8742,6 +8774,7 @@
       identity: s.identity,
       handId: timeline.current.handId,
       firstUtg: s.firstUtgProof ?? null,
+      ...s.hjProof ? { hj: s.hjProof } : {},
       generation: s.sourceMetadata.socketContinuity.generation,
       continuity: s.sourceMetadata.socketContinuity.status,
       gap: s.sourceMetadata.socketContinuity.chainGap,
@@ -9341,36 +9374,88 @@
     return next;
   }
 
-  // src/firstUtgSource.ts
+  // src/hjWindow.ts
   var object4 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
-  var token3 = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(v);
   var integer2 = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+  var token3 = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(v);
+  var common = ["now", "pre", "eventsData", "mEV", "fV", "sN"];
+  function hjPatchKind(raw) {
+    if (!object4(raw) || !integer2(raw.now) || !integer2(raw.pre) || raw.now <= raw.pre || !integer2(raw.sN) || raw.mEV !== 0 || raw.fV !== "0.1.72" || !Array.isArray(raw.eventsData) || raw.eventsData.length) return null;
+    const exact = (fields) => Object.keys(raw).length === fields.length && fields.every((k) => Object.hasOwn(raw, k));
+    if (exact([...common, "pGS", "sNA", "pITT", "sNAA", "wBACPI"]) && object4(raw.pGS) && Object.keys(raw.pGS).length === 1 && token3(Object.keys(raw.pGS)[0]) && Object.values(raw.pGS)[0] === "fold" && raw.sNA === "NSAF" && raw.pITT === null && integer2(raw.sNAA) && Array.isArray(raw.wBACPI) && raw.wBACPI.length === 1 && token3(raw.wBACPI[0])) return "fold";
+    if (exact([...common, "cPI", "pITT", "sNA", "pASA", "sNAA", "mAVTB"]) && token3(raw.cPI) && raw.pITT === raw.cPI && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now && integer2(raw.mAVTB)) return "turn";
+    return null;
+  }
+  function advanceHjWindow(pending, data, sequence, at) {
+    const raw = data.hjPatch, kind2 = hjPatchKind(raw), w = pending.witness;
+    const projectedKeys = ["now", "pre", "eventsData", "fV", "pITT", kind2 === "fold" ? "pGS" : "cPI"];
+    if (!raw || !kind2 || data.event !== "gC" || data.heroId !== w.heroId || Object.keys(data.frame).length !== projectedKeys.length || !projectedKeys.every((k) => Object.hasOwn(data.frame, k)) || Object.entries(data.frame).some(([k, v]) => JSON.stringify(raw[k]) !== JSON.stringify(v))) return null;
+    const utg = w.players.find((p) => p.position === "UTG"), bb = w.players.find((p) => p.position === "BB");
+    if (!pending.fold) {
+      if (kind2 !== "fold" || sequence !== pending.anchor.sequence + 1 || raw.pre !== pending.anchor.cursor || Object.keys(raw.pGS)[0] !== utg.playerId || raw.wBACPI[0] !== bb.playerId) return null;
+      return { pending: { ...pending, fold: {
+        sequence,
+        cursor: raw.now,
+        previousCursor: raw.pre,
+        receivedAt: at,
+        playerId: utg.playerId,
+        seat: utg.seat,
+        sourcePatch: structuredClone(raw)
+      } } };
+    }
+    if (kind2 !== "turn" || sequence !== pending.fold.sequence + 1 || raw.pre !== pending.fold.cursor || raw.cPI !== w.heroId) return null;
+    const witness = {
+      ...w,
+      cursor: raw.now,
+      previousCursor: raw.pre,
+      receivedAt: at,
+      provenance: `${w.provenance} Explicit UTG fold at ${pending.fold.cursor}; immediately linked first HJ activation at ${raw.now}. Closed hands-150/168 patch contract; no generic action coverage.`
+    };
+    return { pending, proof: {
+      version: 1,
+      scope: "hj_after_utg_fold",
+      historyComplete: false,
+      expiresAt: at + 1e4,
+      witness,
+      anchor: structuredClone(pending.anchor),
+      fold: structuredClone(pending.fold),
+      activation: { sequence, sourcePatch: structuredClone(raw) }
+    } };
+  }
+
+  // src/firstUtgSource.ts
+  var object5 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+  var token4 = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(v);
+  var integer3 = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
   var same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   var equivalent = (a, b) => {
     if (a === b) return true;
     if (Array.isArray(a)) return Array.isArray(b) && a.length === b.length && a.every((v, i) => equivalent(v, b[i]));
-    return object4(a) && object4(b) && Object.keys(a).length === Object.keys(b).length && Object.keys(a).every((k) => Object.hasOwn(b, k) && equivalent(a[k], b[k]));
+    return object5(a) && object5(b) && Object.keys(a).length === Object.keys(b).length && Object.keys(a).every((k) => Object.hasOwn(b, k) && equivalent(a[k], b[k]));
   };
-  function firstUtg(reg, next, tableId, generation, at) {
+  function firstUtg(reg, next, tableId, generation, at, role = "UTG") {
     const a = reg.frame, b = next.frame, hero = reg.heroId;
-    if (!hero || next.event !== "gC" || a.id !== tableId || Object.hasOwn(b, "id") && b.id !== tableId || b.r === true || next.heroId !== hero || !integer2(a.now) || !integer2(b.now) || b.pre !== a.now || b.now <= a.now || !integer2(a.gN) || b.gN !== a.gN + 1 || !token3(a.hI) || !token3(b.hI) || a.hI === b.hI || !same(a.gT, [1, 5]) || !same(b.gT, [1, 0]) || !same(b.oTC, { "1": [] }) || b.gameResult !== "<D>" || b.cPI !== hero || b.pITT !== hero || !same(b.cRPI, []) || !same(b.eventsData, []) || !same(b.players, {}) || !same(b.rHP, []) || b.rHC !== null) return null;
+    const firstActor = role === "UTG" ? hero : b.cPI;
+    if (role === "HJ" && (a.version !== "0.1.72" || (b.version ?? a.version) !== "0.1.72" || b.fV !== "0.1.72")) return null;
+    if (!hero || next.event !== "gC" || a.id !== tableId || Object.hasOwn(b, "id") && b.id !== tableId || b.r === true || next.heroId !== hero || !integer3(a.now) || !integer3(b.now) || b.pre !== a.now || b.now <= a.now || !integer3(a.gN) || b.gN !== a.gN + 1 || !token4(a.hI) || !token4(b.hI) || a.hI === b.hI || !same(a.gT, [1, 5]) || !same(b.gT, [1, 0]) || !same(b.oTC, { "1": [] }) || b.gameResult !== "<D>" || b.cPI !== firstActor || b.pITT !== firstActor || !same(b.cRPI, []) || !same(b.eventsData, []) || !same(b.players, {}) || !same(b.rHP, []) || b.rHC !== null) return null;
     const profile = { smallBlind: 1, bigBlind: 2, ante: null, deadButton: false, gM: "th", mode: "4fun", aD: false, aS: false, cM: false, cR: false };
     for (const [k, value] of Object.entries(profile)) if (!same(a[k], value) || Object.hasOwn(b, k) && !same(b[k], value)) return null;
-    if (!Array.isArray(a.seats) || a.seats.length !== 6 || Object.hasOwn(b, "seats") && !same(a.seats, b.seats) || !Array.isArray(b.iHPI) || b.iHPI.length !== 6 || !object4(a.players) || !object4(b.pC) || !object4(b.tB) || !object4(a.pGS) || !object4(b.pGS)) return null;
+    if (!Array.isArray(a.seats) || a.seats.length !== 6 || Object.hasOwn(b, "seats") && !same(a.seats, b.seats) || !Array.isArray(b.iHPI) || b.iHPI.length !== 6 || !object5(a.players) || !object5(b.pC) || !object5(b.tB) || !object5(a.pGS) || !object5(b.pGS)) return null;
     const seats = a.seats;
-    if (!seats.every((s, i) => Array.isArray(s) && s.length === 2 && integer2(s[0]) && s[0] >= 1 && s[0] <= 10 && token3(s[1]) && (i === 0 || seats[i - 1][0] < s[0]))) return null;
+    if (!seats.every((s, i) => Array.isArray(s) && s.length === 2 && integer3(s[0]) && s[0] >= 1 && s[0] <= 10 && token4(s[1]) && (i === 0 || seats[i - 1][0] < s[0]))) return null;
     const rows = seats;
     const ids2 = rows.map((s) => s[1]);
     if (new Set(ids2).size !== 6 || new Set(b.iHPI).size !== 6 || Object.keys(b.pC).length !== 6 || !ids2.every((id) => b.iHPI.includes(id) && Object.hasOwn(b.pC, id)) || Object.keys(a.players).length !== 6 || Object.keys(b.pGS).some((id) => !ids2.includes(id))) return null;
     const dealer = rows.findIndex(([seat, id]) => seat === b.dealerSeat && id === b.dealerID);
     if (dealer < 0) return null;
     const cycle = [...rows.slice(dealer), ...rows.slice(0, dealer)];
-    if (cycle[1][1] !== b.sBPI || cycle[2][1] !== b.bBPI || cycle[3][1] !== hero || Object.keys(b.tB).length !== 2 || b.tB[b.sBPI] !== 1 || b.tB[b.bBPI] !== 2) return null;
+    const heroIndex = role === "UTG" ? 3 : 4;
+    if (cycle[1][1] !== b.sBPI || cycle[2][1] !== b.bBPI || cycle[3][1] !== firstActor || cycle[heroIndex][1] !== hero || Object.keys(b.tB).length !== 2 || b.tB[b.sBPI] !== 1 || b.tB[b.bBPI] !== 2) return null;
     const roles = ["BTN", "SB", "BB", "UTG", "HJ", "CO"];
     const players = [];
     for (let i = 0; i < cycle.length; i++) {
       const [seat, playerId] = cycle[i], p = a.players[playerId], cards = b.pC[playerId]?.cards;
-      if (!object4(p) || p.id !== playerId || !integer2(p.stack) || p.stack < 202 || p.status !== "inGame" || Object.hasOwn(p, "disconnectedSince") || (b.pGS[playerId] ?? a.pGS[playerId]) !== "inGame" || !Array.isArray(cards) || cards.length !== 2 || cards.some((c) => !object4(c) || c.showing !== false || (playerId === hero ? typeof c.value !== "string" || !/^[2-9TJQKA][shdc]$/.test(c.value) : c.value !== null))) return null;
+      if (!object5(p) || p.id !== playerId || !integer3(p.stack) || p.stack < 202 || p.status !== "inGame" || Object.hasOwn(p, "disconnectedSince") || (b.pGS[playerId] ?? a.pGS[playerId]) !== "inGame" || !Array.isArray(cards) || cards.length !== 2 || cards.some((c) => !object5(c) || c.showing !== false || (playerId === hero ? typeof c.value !== "string" || !/^[2-9TJQKA][shdc]$/.test(c.value) : c.value !== null))) return null;
       players.push({ seat, playerId, position: roles[i], sourceStack: p.stack, contribution: i === 1 ? 1 : i === 2 ? 2 : 0 });
     }
     const heroCards2 = b.pC[hero].cards.map((c) => c.value);
@@ -9384,21 +9469,25 @@
       previousCursor: a.now,
       receivedAt: at,
       heroId: hero,
-      heroSeat: cycle[3][0],
+      heroSeat: cycle[heroIndex][0],
       heroCards: heroCards2,
       smallBlind: 1,
       bigBlind: 2,
       players,
-      ...a.version === "0.1.72" && b.fV === "0.1.72" && (b.version ?? a.version) === "0.1.72" && same(b.nR, [1]) && (Object.hasOwn(b, "mTB") ? b.mTB : a.mTB) === null && (Object.hasOwn(b, "rIT") ? b.rIT : a.rIT) === "no" && (Object.hasOwn(b, "sPM") ? b.sPM : a.sPM) === false ? { openingSizeProfile: "pokernow-0.1.72-th-4fun-1-2-exact5-v1" } : {},
-      provenance: `PokerNow validated hand-start ${a.hI}/${a.gN} -> ${b.hI}/${b.gN}, pre=${b.pre}, now=${b.now}; first UTG turn has no preceding voluntary turn; forced blinds only. Hand-53 observed source profile; bounded consecutive source state.`
+      ...role === "UTG" && a.version === "0.1.72" && b.fV === "0.1.72" && (b.version ?? a.version) === "0.1.72" && same(b.nR, [1]) && (Object.hasOwn(b, "mTB") ? b.mTB : a.mTB) === null && (Object.hasOwn(b, "rIT") ? b.rIT : a.rIT) === "no" && (Object.hasOwn(b, "sPM") ? b.sPM : a.sPM) === false ? { openingSizeProfile: "pokernow-0.1.72-th-4fun-1-2-exact5-v1" } : {},
+      provenance: `PokerNow validated hand-start ${a.hI}/${a.gN} -> ${b.hI}/${b.gN}, pre=${b.pre}, now=${b.now}; first UTG turn has no preceding voluntary turn; forced blinds only. Hand-53 observed source profile; bounded consecutive source state.${role === "HJ" ? " Frozen HJ anchor only; not yet an actionable decision." : ""}`
     };
   }
   function createFirstUtgSource(tableId, now) {
     let baseline = null;
     let witness = null;
+    let hjPending = null;
+    let hjProof = null;
+    let hjReason = "No supported HJ boundary/fold/turn sequence observed.";
     let lastCertificate = null;
     const invalidateWitness = (reason2, sequence) => {
       witness = null;
+      hjProof = null;
       if (lastCertificate && (!lastCertificate.invalidation || sequence !== null && lastCertificate.invalidation.sequence === sequence && lastCertificate.invalidation.at === now())) {
         lastCertificate.invalidation = { at: now(), sequence, reason: reason2 };
       }
@@ -9433,12 +9522,14 @@
     return {
       accept(raw, sequence, generation, observedAt) {
         const reject = (message) => {
-          invalidateWitness(message, integer2(sequence) ? sequence : null);
+          invalidateWitness(message, integer3(sequence) ? sequence : null);
+          hjPending = null;
+          hjReason = message;
           baseline = null;
           rejectedGeneration = lastGeneration;
           reason = message;
         };
-        if (!integer2(sequence) || !integer2(generation) || generation < 1) {
+        if (!integer3(sequence) || !integer3(generation) || generation < 1) {
           reject("Invalid local source sequence/generation.");
           return;
         }
@@ -9454,16 +9545,17 @@
         lastSequence = sequence;
         lastGeneration = generation;
         if (newGeneration) {
+          hjPending = null;
           rejectedGeneration = null;
           lastObservedAt = -1;
           registrationSeen = false;
         }
-        if (!integer2(observedAt) || observedAt > now() || observedAt < lastObservedAt) {
+        if (!integer3(observedAt) || observedAt > now() || observedAt < lastObservedAt) {
           reject("Invalid or regressing local receive time.");
           return;
         }
         lastObservedAt = observedAt;
-        const valid2 = object4(raw) && object4(raw.frame) && JSON.stringify(raw).length <= 4e4 && ["registered", "gC", "rup"].includes(raw.event);
+        const valid2 = object5(raw) && object5(raw.frame) && JSON.stringify(raw).length <= 4e4 && ["registered", "gC", "rup"].includes(raw.event);
         const observation = { sequence, generation, observedAt, projection: valid2 ? structuredClone(raw) : null };
         observations.push(observation);
         retainedCharacters += JSON.stringify(observation).length;
@@ -9488,7 +9580,7 @@
         try {
           if (data.event === "registered" && !registrationSeen) {
             registrationSeen = true;
-            if (!token3(data.heroId)) throw new Error("Registration has no validated hero ID.");
+            if (!token4(data.heroId)) throw new Error("Registration has no validated hero ID.");
             const frame2 = initializeUtgState(data.frame, tableId, data.heroId);
             rejectedGeneration = null;
             baseline = { data: { ...data, frame: frame2 }, generation, sequence, baselineSequence: sequence };
@@ -9506,6 +9598,28 @@
           }
           if (data.event !== "gC") throw new Error("Full rup/registration refresh invalidates carried continuity; no backfill proof.");
           const frame = advanceUtgState(previous.data.frame, data.frame, tableId, data.heroId);
+          const anchor = firstUtg(previous.data, data, tableId, generation, observedAt, "HJ");
+          const advanced = hjPending ? advanceHjWindow(hjPending, data, sequence, observedAt) : null;
+          hjPending = anchor ? { witness: anchor, anchor: {
+            sequence,
+            cursor: anchor.cursor,
+            receivedAt: observedAt,
+            firstActorId: anchor.players.find((p) => p.position === "UTG").playerId
+          } } : advanced?.pending ?? null;
+          hjProof = advanced?.proof ? {
+            ...advanced.proof,
+            continuity: {
+              status: "validated_prefix",
+              baselineSequence: previous.baselineSequence,
+              throughSequence: sequence,
+              generation,
+              tableId,
+              handId: frame.hI,
+              cursor: frame.now
+            }
+          } : null;
+          if (hjProof) hjPending = null;
+          hjReason = hjProof ? "Explicit UTG fold and immediately linked HJ first turn proven; live cross-checks still required." : anchor ? "Frozen six-player HJ hand anchor; waiting for the next explicit UTG fold." : advanced ? "Explicit UTG fold accepted; waiting for the immediately linked HJ activation." : "No supported consecutive boundary -> UTG fold -> HJ turn; unsupported updates invalidate this window.";
           witness = firstUtg(previous.data, data, tableId, generation, observedAt);
           if (witness) lastCertificate = {
             handId: witness.handId,
@@ -9523,6 +9637,8 @@
       },
       reset() {
         invalidateWitness("Source disconnect, reader gap or reset invalidated first-UTG evidence.", null);
+        hjPending = null;
+        hjReason = "Source disconnected/reset.";
         baseline = null;
         rejectedGeneration = lastGeneration;
         reason = "Source disconnect, reader gap or reset invalidated first-UTG evidence.";
@@ -9531,6 +9647,9 @@
         return currentProof()?.witness ?? null;
       },
       proof: currentProof,
+      hjProof() {
+        return hjProof && baseline && now() >= hjProof.witness.receivedAt && now() < hjProof.expiresAt && baseline.generation === hjProof.witness.generation && baseline.data.frame.hI === hjProof.witness.handId && baseline.data.frame.now === hjProof.witness.cursor ? structuredClone(hjProof) : null;
+      },
       diagnostic() {
         const currentTime = now();
         const certificate = lastCertificate ? structuredClone(lastCertificate) : null;
@@ -9545,6 +9664,11 @@
             remainingMs: certificate && status === "fresh" ? Math.max(0, certificate.expiresAt - currentTime) : 0,
             sameDecisionRenewalSupported: false,
             missingRenewalEvidence: "No verified fresh server decision snapshot/acknowledgment binds this hand, first-action window and actor to a current request or authoritative decision version. Cached state, cursor continuity and receive time are insufficient."
+          },
+          hjWindow: {
+            reason: hjProof && now() >= hjProof.expiresAt ? "HJ proof expired at its original activation deadline." : hjReason,
+            anchor: hjPending?.anchor ?? hjProof?.anchor ?? null,
+            expiresAt: hjProof?.expiresAt ?? null
           },
           reason: witness && now() - witness.receivedAt > 1e4 ? "First-UTG witness expired after 10 seconds; original receive time is not renewed." : reason,
           observations: structuredClone(observations),
@@ -9720,6 +9844,7 @@
             identity: identity3,
             sourceMetadata: sourceMetadata.snapshot(),
             firstUtgProof,
+            hjProof: connected ? firstUtgSource.hjProof() : null,
             // Compatibility/display view of the same contract, not another validator.
             firstUtg: firstUtgProof?.witness ?? null,
             firstUtgEvidence: firstUtgSource.diagnostic(),
@@ -10121,6 +10246,7 @@
   function displaySourceBinding() {
     const revision = JSON.parse(liveProofRevision(handTimeline.snapshot()));
     delete revision.firstUtg;
+    delete revision.hj;
     return JSON.stringify(revision);
   }
   function clearDisplayLifetime() {
@@ -10130,7 +10256,8 @@
   }
   function bindDisplayLifetime(requestKey) {
     clearDisplayLifetime();
-    const proof = handTimeline.snapshot().sourceStatus.firstUtgProof;
+    const source = handTimeline.snapshot().sourceStatus;
+    const proof = source.firstUtgProof ?? source.hjProof;
     if (!proof || lastDomStateJson === null) return;
     displayLifetime = {
       requestKey,
@@ -10143,7 +10270,7 @@
   }
   function refreshDisplayLifetime() {
     if (!displayLifetime) return;
-    if (displayLifetime.dom !== lastDomStateJson || displayLifetime.source !== displaySourceBinding() || Date.now() < displayLifetime.receivedAt || Date.now() < displayLifetime.expiresAt && !handTimeline.snapshot().sourceStatus.firstUtgProof) {
+    if (displayLifetime.dom !== lastDomStateJson || displayLifetime.source !== displaySourceBinding() || Date.now() < displayLifetime.receivedAt || Date.now() < displayLifetime.expiresAt && !(handTimeline.snapshot().sourceStatus.firstUtgProof ?? handTimeline.snapshot().sourceStatus.hjProof)) {
       clearDisplayLifetime();
       overlayState.aiResult = null;
       overlayState.policyLine = null;
@@ -10219,7 +10346,7 @@
         lastRecommendationRequestKey = null;
         requestSequence++;
         const { state, confidence, bigBlind, amountToCall: parsedAmountToCall, positions, decisionPot } = assessment;
-        const amountToCall = preflop?.openingEvidence === "first_utg_hand_start" && bigBlind !== null ? preflop.amountToCallBB * bigBlind : parsedAmountToCall;
+        const amountToCall = (preflop?.openingEvidence === "first_utg_hand_start" || preflop?.openingEvidence === "hj_after_utg_fold") && bigBlind !== null ? preflop.amountToCallBB * bigBlind : parsedAmountToCall;
         overlayState.street = state?.street ?? "unreadable";
         overlayState.opponentStatsLine = state ? state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded).map((s) => {
           const evidence = opponentStats.profile(s.playerName);

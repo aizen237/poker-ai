@@ -2,7 +2,7 @@ import { buildPreflopContext, type DecisionPacket } from "@poker-ai/ai-core";
 import type { LiveStateAssessment, ActionHistory } from "@poker-ai/browser-reader";
 import type { LiveTableRead } from "./tableRead.js";
 import type { LiveTimelineDiagnostic } from "./liveTimeline.js";
-import { currentFirstUtg } from "./firstUtgLive.js";
+import { currentFirstUtg, currentHj } from "./firstUtgLive.js";
 
 /** Current observations only. This neither certifies the source window nor supplies legal minima. */
 export function buildLivePreflopExecution(read: LiveTableRead, assessment: LiveStateAssessment,
@@ -18,22 +18,26 @@ export function buildLivePreflopExecution(read: LiveTableRead, assessment: LiveS
         ? control.selectedRaiseToChips / assessment.bigBlind : null } };
 }
 
-/** Polling remains partial. Only the independently validated source first-UTG
- * boundary supplies a complete *decision-local* empty voluntary window. */
+/** Polling remains partial. The source authority supplies only first UTG or
+ * the exact first-HJ-after-UTG-fold *decision-local* window. */
 export function buildLivePreflopContext(assessment: LiveStateAssessment, actionHistory: ActionHistory, timeline?: LiveTimelineDiagnostic | null, read?: LiveTableRead) {
   const { state, bigBlind, positions, decisionPot, amountToCall } = assessment;
   if (bigBlind === null || !Number.isFinite(bigBlind) || bigBlind <= 0) return null;
   const hero = state?.seats.find(s => s.isYou);
   try {
-    const first = currentFirstUtg(read, assessment, timeline);
+    const hj = currentHj(read, assessment, timeline);
+    const first = currentFirstUtg(read, assessment, timeline) ?? hj;
     if (first) return buildPreflopContext({
       heroSeat: first.heroSeat, playersDealtIn: 6,
       players: first.players.map(p => ({ seat: p.seat, position: p.position,
         remainingStackBB: state!.seats.find(s => s.seatNumber === p.seat)!.stack! / bigBlind,
-        contributionBB: p.contribution / bigBlind, folded: false, allIn: false })),
+        contributionBB: p.contribution / bigBlind, folded: !!hj && p.position === "UTG", allIn: false })),
       potBB: decisionPot === null ? null : decisionPot / bigBlind, amountToCallBB: 1,
       contributionMeaning: "street_total", historyCoverage: "complete",
-      openingEvidence: "first_utg_hand_start", actions: [], historyNotes: [], tournamentContext: "chip_ev_only",
+      openingEvidence: hj ? "hj_after_utg_fold" : "first_utg_hand_start",
+      actions: hj ? [{ seat: hj.players.find(p => p.position === "UTG")!.seat, action: "fold",
+        totalContributionBB: 0, observation: timeline!.sourceStatus.hjProof!.fold.sequence, wagerAction: null }] : [],
+      historyNotes: [], tournamentContext: "chip_ev_only",
     });
     const preflop = state?.street === "preflop" && hero?.isOccupied && bigBlind !== null && state.seats.filter(s => s.isOccupied).length >= 2 ? buildPreflopContext({
         heroSeat: hero.seatNumber,

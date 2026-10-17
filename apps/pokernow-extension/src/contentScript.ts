@@ -433,6 +433,7 @@ function displaySourceBinding() {
   // Expiry removes the witness; retain only the expired label for this exact
   // otherwise unchanged decision. Any other revision clears it.
   delete revision.firstUtg;
+  delete revision.hj;
   return JSON.stringify(revision);
 }
 function clearDisplayLifetime() {
@@ -442,7 +443,8 @@ function clearDisplayLifetime() {
 }
 function bindDisplayLifetime(requestKey: string) {
   clearDisplayLifetime();
-  const proof = handTimeline.snapshot().sourceStatus.firstUtgProof;
+  const source = handTimeline.snapshot().sourceStatus;
+  const proof = source.firstUtgProof ?? source.hjProof;
   if (!proof || lastDomStateJson === null) return;
   displayLifetime = { requestKey, receivedAt: proof.witness.receivedAt, expiresAt: proof.expiresAt,
     dom: lastDomStateJson, source: displaySourceBinding() };
@@ -451,7 +453,7 @@ function bindDisplayLifetime(requestKey: string) {
 function refreshDisplayLifetime() {
   if (!displayLifetime) return;
   if (displayLifetime.dom !== lastDomStateJson || displayLifetime.source !== displaySourceBinding() || Date.now() < displayLifetime.receivedAt ||
-      Date.now() < displayLifetime.expiresAt && !handTimeline.snapshot().sourceStatus.firstUtgProof) {
+      Date.now() < displayLifetime.expiresAt && !(handTimeline.snapshot().sourceStatus.firstUtgProof ?? handTimeline.snapshot().sourceStatus.hjProof)) {
     clearDisplayLifetime();
     overlayState.aiResult = null;
     overlayState.policyLine = null;
@@ -535,9 +537,9 @@ setInterval(() => {
     lastRecommendationRequestKey = null;
     requestSequence++;
     const { state, confidence, bigBlind, amountToCall: parsedAmountToCall, positions, decisionPot } = assessment;
-    // Only the independently cross-checked first UTG boundary can supply absent
-    // nonblind zero contributions. Generic monetary/EV assessment is unchanged.
-    const amountToCall = preflop?.openingEvidence === "first_utg_hand_start" && bigBlind !== null
+    // Only a cross-checked first-turn window anchored to the forced-blind
+    // boundary can supply absent zeros. Generic monetary/EV rules are unchanged.
+    const amountToCall = (preflop?.openingEvidence === "first_utg_hand_start" || preflop?.openingEvidence === "hj_after_utg_fold") && bigBlind !== null
       ? preflop.amountToCallBB! * bigBlind : parsedAmountToCall;
     overlayState.street = state?.street ?? "unreadable";
     overlayState.opponentStatsLine = state ? state.seats.filter(s=>s.isOccupied&&!s.isYou&&!s.isFolded).map(s=>{const evidence=opponentStats.profile(s.playerName);return s.playerName+": "+(evidence?evidence.playerProfile.handsObserved+" observed windows / "+evidence.playerProfile.eligibleHands+" eligible hands ("+evidence.statsStorage+")":"identity ambiguous");}).join("; ") : null;

@@ -1,5 +1,15 @@
 # Socket state and unopened-preflop evidence audit
 
+## Phase 3A: first HJ after explicit UTG fold
+
+The existing reducer now also issues a dependent `sourceStatus.hjProof` for the
+closed boundary -> explicit UTG fold -> first HJ activation sequence observed
+in hands 150 and 168. See [PREFLOP_PHASE3A.md](PREFLOP_PHASE3A.md) for the exact
+raw-patch contract, empirical limits, frozen roster and new HJ activation
+deadline. Only out-of-chart HJ FOLD is enabled; original hand168 QQ stays
+blocked from RAISE. UTG FOLD/RAISE, generic history/legality, accounting and
+strategy are unchanged. This is not same-decision renewal or global coverage.
+
 ## Exact five-chip opening rule (2026-10-16, current)
 
 See [PREFLOP_RAISE_PHASE2.md](PREFLOP_RAISE_PHASE2.md) for the accepted hand169

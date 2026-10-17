@@ -24,8 +24,8 @@ export const PreflopInputSchema = z.object({
   potBB: chips.nullable(), amountToCallBB: chips.nullable(),
   contributionMeaning: z.enum(["street_total", "increment", "unknown"]),
   historyCoverage: z.enum(["complete", "partial"]),
-  /** Decision-local empty voluntary window at an independently proven first UTG turn. */
-  openingEvidence: z.literal("first_utg_hand_start").optional(),
+  /** Independently proven decision-local window, never whole-hand coverage. */
+  openingEvidence: z.enum(["first_utg_hand_start", "hj_after_utg_fold"]).optional(),
   actions: z.array(action), historyNotes: z.array(z.string()),
   tournamentContext: z.enum(["chip_ev_only", "unknown"]),
 });

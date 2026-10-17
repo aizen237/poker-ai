@@ -86,11 +86,14 @@ export function evaluatePreflopReference(packet: DecisionPacket): {
   if (new Set(events.map(a => a.observation)).size !== events.length) return fail("Blind/action ordering is ambiguous.");
   const posts = events.filter(a => a.action === "post_blind");
   const firstUtg = context.openingEvidence === "first_utg_hand_start";
+  const firstHj = context.openingEvidence === "hj_after_utg_fold";
   if (firstUtg && (context.heroPosition !== "UTG" || events.length !== 0)) return fail("First UTG boundary evidence cannot certify a later turn or prior voluntary action.");
+  if (firstHj && (context.heroPosition !== "HJ" || events.length !== 1 || posts.length)) return fail("HJ fold-prefix evidence supports exactly one prior UTG fold and boundary blind totals.");
   // At the first UTG boundary, source blind totals are known simultaneously;
   // do not invent an ordering/timestamps for forced posts or require turns that
-  // cannot legally precede UTG. Other positions retain the ordered-log path.
-  if (!firstUtg && (posts.length !== 2 || posts.some(a => {
+  // cannot legally precede UTG. HJ's one-fold source window uses that same
+  // boundary baseline; other positions retain the ordered-log path.
+  if (!firstUtg && !firstHj && (posts.length !== 2 || posts.some(a => {
     const position = context.players.find(p => p.seat === a.seat)?.position;
     return a.totalContributionBB !== (position === "SB" ? 0.5 : position === "BB" ? 1 : -1);
   }) || new Set(posts.map(a => a.seat)).size !== 2 || events.slice(0, 2).some(a => a.action !== "post_blind"))) return fail("Exactly two ordered normal blind posts are required; no antes, straddles or extra posts.");
@@ -116,6 +119,7 @@ export function evaluatePreflopReference(packet: DecisionPacket): {
   if (!packet.candidateActions.includes(action)) return fail("Reference action is absent from the proven legal action set.");
   if (action === "FOLD") return { action, raiseToBB: null, investmentBB: null, reasons: [], strategySource: RFI_STRATEGY_SOURCE,
     explanation: `${hand} is outside the ${packet.hero.position} six-max 100BB+ RFI reference. Fold; no limp strategy is modeled.` };
+  if (firstHj) return fail("HJ RAISE is not certified by the HJ FOLD-only source contract; no substitution with FOLD.");
   const raiseToBB = 2.5, investmentBB = raiseToBB - hero.contributionBB!;
   const controls = execution.controls;
   const legal = execution.raiseBounds;
