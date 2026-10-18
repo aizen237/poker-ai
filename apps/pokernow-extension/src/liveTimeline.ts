@@ -10,7 +10,7 @@ export interface TimelineRuntimeOptions {
   fetchLog: (url: string, init: RequestInit) => Promise<Response>;
   now: () => number;
 }
-/** Source timeline stays incomplete. Dependent UTG/HJ witnesses support only
+/** Source timeline stays incomplete. Dependent UTG/HJ/CO witnesses support only
  * their decision-local chart classes, never generic betting/history coverage. */
 export function createTimelineRuntime(options: TimelineRuntimeOptions) {
   const fallback = createSnapshotTimeline(options.sessionId);
@@ -143,6 +143,7 @@ export function createTimelineRuntime(options: TimelineRuntimeOptions) {
           sourceMetadata: sourceMetadata.snapshot(),
           firstUtgProof,
           hjProof: connected ? firstUtgSource.hjProof() : null,
+          coProof: connected ? firstUtgSource.coProof() : null,
           // Compatibility/display view of the same contract, not another validator.
           firstUtg: firstUtgProof?.witness ?? null,
           firstUtgEvidence: firstUtgSource.diagnostic(),

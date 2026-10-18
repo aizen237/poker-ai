@@ -5456,7 +5456,7 @@
     contributionMeaning: external_exports.enum(["street_total", "increment", "unknown"]),
     historyCoverage: external_exports.enum(["complete", "partial"]),
     /** Independently proven decision-local window, never whole-hand coverage. */
-    openingEvidence: external_exports.enum(["first_utg_hand_start", "hj_after_utg_fold"]).optional(),
+    openingEvidence: external_exports.enum(["first_utg_hand_start", "hj_after_utg_fold", "co_after_utg_hj_folds"]).optional(),
     actions: external_exports.array(action),
     historyNotes: external_exports.array(external_exports.string()),
     tournamentContext: external_exports.enum(["chip_ev_only", "unknown"])
@@ -5598,8 +5598,8 @@
     /** Empirical exact-size rule, NOT a general minimum/grid or live server ack. */
     exactOpeningSize: external_exports.object({
       rule: external_exports.literal("pokernow-0.1.72-th-4fun-1-2-exact5-v1"),
-      /** Legacy absence is UTG-only; HJ requires an explicit bound window. */
-      decisionWindow: external_exports.enum(["first_utg_boundary", "hj_after_utg_fold"]).optional(),
+      /** Legacy absence is UTG-only; HJ/CO require an explicit bound window. */
+      decisionWindow: external_exports.enum(["first_utg_boundary", "hj_after_utg_fold", "co_after_utg_hj_folds"]).optional(),
       provenance: external_exports.string().min(1).max(2e3),
       tableId: external_exports.string().min(1),
       handId: external_exports.string().min(1),
@@ -5699,11 +5699,14 @@
     const posts = events.filter((a2) => a2.action === "post_blind");
     const firstUtg2 = context.openingEvidence === "first_utg_hand_start";
     const firstHj = context.openingEvidence === "hj_after_utg_fold";
+    const firstCo = context.openingEvidence === "co_after_utg_hj_folds";
     if (firstUtg2 && (context.heroPosition !== "UTG" || events.length !== 0))
       return fail("First UTG boundary evidence cannot certify a later turn or prior voluntary action.");
     if (firstHj && (context.heroPosition !== "HJ" || events.length !== 1 || posts.length))
       return fail("HJ fold-prefix evidence supports exactly one prior UTG fold and boundary blind totals.");
-    if (!firstUtg2 && !firstHj && (posts.length !== 2 || posts.some((a2) => {
+    if (firstCo && (context.heroPosition !== "CO" || events.length !== 2 || posts.length))
+      return fail("CO fold-prefix evidence supports exactly UTG then HJ folds and boundary blind totals.");
+    if (!firstUtg2 && !firstHj && !firstCo && (posts.length !== 2 || posts.some((a2) => {
       const position2 = context.players.find((p) => p.seat === a2.seat)?.position;
       return a2.totalContributionBB !== (position2 === "SB" ? 0.5 : position2 === "BB" ? 1 : -1);
     }) || new Set(posts.map((a2) => a2.seat)).size !== 2 || events.slice(0, 2).some((a2) => a2.action !== "post_blind")))
@@ -5752,9 +5755,11 @@
     const exact = execution.exactOpeningSize;
     if (firstHj && !exact)
       return fail("HJ RAISE requires its dependent exact-five-chip sizing certificate; no substitution with FOLD.");
+    if (firstCo && !exact)
+      return fail("CO RAISE requires its dependent exact-five-chip sizing certificate; no substitution with FOLD.");
     if (exact) {
       const now = Date.now();
-      if (exact.rule !== "pokernow-0.1.72-th-4fun-1-2-exact5-v1" || !(firstUtg2 && (exact.decisionWindow === void 0 || exact.decisionWindow === "first_utg_boundary") || firstHj && exact.decisionWindow === "hj_after_utg_fold") || hero.contributionBB !== 0 || context.heroSeat !== exact.heroSeat || exact.units !== "chips" || exact.bigBlindChips !== 2 || exact.contributionChips !== 0 || exact.raiseToChips !== 5 || exact.investmentChips !== 5 || exact.remainingStackChips !== packet.hero.stackBB * 2 || investmentBB >= packet.hero.stackBB || packet.potEvidence?.bigBlind !== 2 || packet.decisionProofs?.handId !== `${exact.tableId}:hand:${exact.handId}` || packet.decisionProofs?.connectionGeneration !== exact.generation || packet.decisionProofs?.decisionEpoch !== exact.decisionEpoch || exact.expiresAt !== exact.receivedAt + 1e4 || now < exact.receivedAt || now >= exact.expiresAt)
+      if (exact.rule !== "pokernow-0.1.72-th-4fun-1-2-exact5-v1" || !(firstUtg2 && (exact.decisionWindow === void 0 || exact.decisionWindow === "first_utg_boundary") || firstHj && exact.decisionWindow === "hj_after_utg_fold" || firstCo && exact.decisionWindow === "co_after_utg_hj_folds") || hero.contributionBB !== 0 || context.heroSeat !== exact.heroSeat || exact.units !== "chips" || exact.bigBlindChips !== 2 || exact.contributionChips !== 0 || exact.raiseToChips !== 5 || exact.investmentChips !== 5 || exact.remainingStackChips !== packet.hero.stackBB * 2 || investmentBB >= packet.hero.stackBB || packet.potEvidence?.bigBlind !== 2 || packet.decisionProofs?.handId !== `${exact.tableId}:hand:${exact.handId}` || packet.decisionProofs?.connectionGeneration !== exact.generation || packet.decisionProofs?.decisionEpoch !== exact.decisionEpoch || exact.expiresAt !== exact.receivedAt + 1e4 || now < exact.receivedAt || now >= exact.expiresAt)
         return fail("Exact five-chip opening rule is outside its bound profile, decision, capacity or original freshness window.");
       if (controls.issues.length || (exact.controls === "panel_closed_unchecked" ? controls.formVisible || controls.raiseSubmitVisible || controls.selectedRaiseToBB !== null : !controls.formVisible || !controls.raiseSubmitVisible || controls.raiseSubmitEnabled !== true || controls.selectedRaiseToBB === null || controls.selectedRaiseToBB > packet.hero.stackBB || (exact.controls === "selected_amount_matches" ? controls.selectedRaiseToBB !== 2.5 : controls.selectedRaiseToBB === 2.5)))
         return fail("Current Raise controls contradict the independently certified exact size.");
@@ -8096,15 +8101,21 @@
   function currentHj(read, assessment, timeline) {
     return currentOpeningWindow(read, assessment, timeline, "HJ");
   }
+  function currentCo(read, assessment, timeline) {
+    return currentOpeningWindow(read, assessment, timeline, "CO");
+  }
   function currentOpeningWindow(read, assessment, timeline, role) {
-    const source = timeline?.sourceStatus, proof = role === "UTG" ? source?.firstUtgProof : source?.hjProof, w = proof?.witness;
+    const source = timeline?.sourceStatus, proof = role === "UTG" ? source?.firstUtgProof : role === "HJ" ? source?.hjProof : source?.coProof, w = proof?.witness;
     const id = source?.identity, chain = proof?.continuity;
-    const utg = w?.players.find((p) => p.position === "UTG");
+    const foldedPositions = role === "CO" ? ["UTG", "HJ"] : role === "HJ" ? ["UTG"] : [];
+    const foldedIds = foldedPositions.map((position2) => w?.players.find((p) => p.position === position2)?.playerId);
     const state = assessment.state;
-    if (!read || !timeline || !w || !source?.connected || !id || !state || id.tableId !== w.tableId || id.handId !== w.handId || id.handNumber !== w.handNumber || id.heroPlayerId !== w.heroId || (role === "UTG" ? id.frameCursor !== w.cursor : id.frameCursor !== source?.hjProof?.anchor.cursor) || timeline.current.handId !== `${w.tableId}:hand:${w.handId}` || timeline.current.handNumber !== w.handNumber || proof?.scope !== (role === "UTG" ? "first_utg_boundary" : "hj_after_utg_fold") || proof.version !== 1 || proof.historyComplete !== false || role === "HJ" && (Date.now() < w.receivedAt || Date.now() >= proof.expiresAt || w.players.find((p) => p.playerId === w.heroId)?.position !== "HJ") || chain?.generation !== w.generation || chain.status !== "validated_prefix" || chain.tableId !== w.tableId || chain.handId !== w.handId || chain.cursor !== w.cursor || chain.throughSequence <= chain.baselineSequence || id.chainGap || timeline.current.coverage.issues.some((i) => i.code === "metadata_gap" || i.code === "identity_conflict") || timeline.current.seatMapping.status === "invalid" || read.context.readErrors.length || state.street !== "preflop" || state.board.length || assessment.smallBlind !== w.smallBlind || assessment.bigBlind !== w.bigBlind || read.context.dealerSeatNumber !== w.players.find((p) => p.position === "BTN")?.seat) return null;
-    if (timeline.current.events.some((e) => e.source === "pokernow_log_v3" && !isSourceNonActionMetadata(e) && !["hand_start", "player_stacks", "post"].includes(e.action) && !(role === "HJ" && e.action === "fold" && e.actor?.playerId === utg?.playerId && e.street === "preflop"))) return null;
-    if (role === "HJ" && timeline.current.events.filter((e) => e.source === "pokernow_log_v3" && e.action === "fold").length > 1) return null;
-    if (role === "HJ") {
+    if (!read || !timeline || !w || !source?.connected || !id || !state || id.tableId !== w.tableId || id.handId !== w.handId || id.handNumber !== w.handNumber || id.heroPlayerId !== w.heroId || (role === "UTG" ? id.frameCursor !== w.cursor : id.frameCursor !== (proof && "anchor" in proof ? proof.anchor.cursor : null)) || timeline.current.handId !== `${w.tableId}:hand:${w.handId}` || timeline.current.handNumber !== w.handNumber || proof?.scope !== (role === "UTG" ? "first_utg_boundary" : role === "HJ" ? "hj_after_utg_fold" : "co_after_utg_hj_folds") || proof.version !== 1 || proof.historyComplete !== false || role !== "UTG" && (Date.now() < w.receivedAt || Date.now() >= proof.expiresAt || w.players.find((p) => p.playerId === w.heroId)?.position !== role) || chain?.generation !== w.generation || chain.status !== "validated_prefix" || chain.tableId !== w.tableId || chain.handId !== w.handId || chain.cursor !== w.cursor || chain.throughSequence <= chain.baselineSequence || id.chainGap || timeline.current.coverage.issues.some((i) => i.code === "metadata_gap" || i.code === "identity_conflict") || timeline.current.seatMapping.status === "invalid" || read.context.readErrors.length || state.street !== "preflop" || state.board.length || assessment.smallBlind !== w.smallBlind || assessment.bigBlind !== w.bigBlind || read.context.dealerSeatNumber !== w.players.find((p) => p.position === "BTN")?.seat) return null;
+    if (timeline.current.events.some((e) => e.source === "pokernow_log_v3" && !isSourceNonActionMetadata(e) && !["hand_start", "player_stacks", "post"].includes(e.action) && !(role !== "UTG" && e.action === "fold" && !!e.actor?.playerId && foldedIds.includes(e.actor.playerId) && e.street === "preflop"))) return null;
+    const logFolds = timeline.current.events.filter((e) => e.source === "pokernow_log_v3" && e.action === "fold");
+    if (role !== "UTG" && (logFolds.length > foldedIds.length || new Set(logFolds.map((e) => e.actor?.playerId)).size !== logFolds.length)) return null;
+    if (role === "CO" && logFolds.length === 2 && (logFolds.some((e) => e.order === "ambiguous") || logFolds.some((e, i) => e.actor?.playerId !== foldedIds[i]))) return null;
+    if (role !== "UTG") {
       const posts = timeline.current.events.filter((e) => e.source === "pokernow_log_v3" && e.action === "post");
       if (posts.length > 2 || new Set(posts.map((e) => e.actor?.playerId)).size !== posts.length || posts.some((e) => {
         const player2 = w.players.find((p) => p.playerId === e.actor?.playerId);
@@ -8117,7 +8128,7 @@
     if (seats.length !== 6 || new Set(seats.map((s) => s.seatNumber)).size !== 6 || seats.filter((s) => s.isYou).length !== 1 || seats.filter((s) => s.isCurrentToAct).length !== 1) return null;
     for (const p of w.players) {
       const s = seats.find((s2) => s2.seatNumber === p.seat);
-      if (!s || s.isFolded !== (role === "HJ" && p.position === "UTG") || s.isAllIn || s.isOffline || s.isSettling || s.betReadError || s.stack === null || s.stack < 100 * w.bigBlind || s.stack !== p.sourceStack && s.stack !== p.sourceStack - p.contribution || assessment.positions.get(p.seat) !== p.position || (s.currentBet === null ? p.contribution !== 0 : s.currentBet !== p.contribution) || s.isYou !== (p.playerId === w.heroId) || s.isCurrentToAct !== (p.playerId === w.heroId)) return null;
+      if (!s || s.isFolded !== foldedPositions.includes(p.position) || s.isAllIn || s.isOffline || s.isSettling || s.betReadError || s.stack === null || s.stack < 100 * w.bigBlind || s.stack !== p.sourceStack && s.stack !== p.sourceStack - p.contribution || assessment.positions.get(p.seat) !== p.position || (s.currentBet === null ? p.contribution !== 0 : s.currentBet !== p.contribution) || s.isYou !== (p.playerId === w.heroId) || s.isCurrentToAct !== (p.playerId === w.heroId)) return null;
     }
     const hero = seats.find((s) => s.isYou);
     const ranks = "23456789TJQKA";
@@ -8150,7 +8161,9 @@
     const hero = state?.seats.find((s) => s.isYou);
     try {
       const hj = currentHj(read, assessment, timeline);
-      const first = currentFirstUtg(read, assessment, timeline) ?? hj;
+      const co = currentCo(read, assessment, timeline);
+      const first = currentFirstUtg(read, assessment, timeline) ?? hj ?? co;
+      const folds = co ? timeline.sourceStatus.coProof.folds : hj ? [timeline.sourceStatus.hjProof.fold] : [];
       if (first) return buildPreflopContext({
         heroSeat: first.heroSeat,
         playersDealtIn: 6,
@@ -8159,21 +8172,21 @@
           position: p.position,
           remainingStackBB: state.seats.find((s) => s.seatNumber === p.seat).stack / bigBlind,
           contributionBB: p.contribution / bigBlind,
-          folded: !!hj && p.position === "UTG",
+          folded: folds.some((f) => f.playerId === p.playerId),
           allIn: false
         })),
         potBB: decisionPot === null ? null : decisionPot / bigBlind,
         amountToCallBB: 1,
         contributionMeaning: "street_total",
         historyCoverage: "complete",
-        openingEvidence: hj ? "hj_after_utg_fold" : "first_utg_hand_start",
-        actions: hj ? [{
-          seat: hj.players.find((p) => p.position === "UTG").seat,
+        openingEvidence: co ? "co_after_utg_hj_folds" : hj ? "hj_after_utg_fold" : "first_utg_hand_start",
+        actions: folds.map((f) => ({
+          seat: f.seat,
           action: "fold",
           totalContributionBB: 0,
-          observation: timeline.sourceStatus.hjProof.fold.sequence,
+          observation: f.sequence,
           wagerAction: null
-        }] : [],
+        })),
         historyNotes: [],
         tournamentContext: "chip_ev_only"
       });
@@ -8489,7 +8502,8 @@
     const hand = timeline?.current, source = timeline?.sourceStatus;
     const utg = currentFirstUtg(read, assessment, timeline);
     const hj = currentHj(read, assessment, timeline);
-    const first = utg ?? hj;
+    const co = currentCo(read, assessment, timeline);
+    const first = utg ?? hj ?? co;
     const mapping = hand?.seatMapping;
     const events = hand?.events.filter((e) => e.source === "pokernow_log_v3") ?? [];
     const starts = events.filter((e) => e.action === "hand_start");
@@ -8533,6 +8547,7 @@
       candidate: !!first || assessment.state?.street === "preflop" && disallowed.length === 0,
       firstUtgBoundary: utg,
       hjWindow: hj,
+      coWindow: co,
       heroSeat: {
         status: first || heroSeatVerified ? "proven" : identityConflict ? "contradicted" : "insufficient",
         seat: first?.heroSeat ?? (heroSeatVerified ? entry.seat : null),
@@ -8558,7 +8573,7 @@
         scope,
         status: "proven",
         confidence: "high",
-        provenance: [first.provenance, `Six explicit dealt-card entries/iHPI IDs; frozen seats cross-checked against dealer/SB/BB and current DOM; ${hj ? "one explicit UTG fold then first HJ turn" : "first UTG only"}.`],
+        provenance: [first.provenance, `Six explicit dealt-card entries/iHPI IDs; frozen seats cross-checked against dealer/SB/BB and current DOM; ${co ? "explicit UTG/HJ folds with intervening HJ turn then first CO turn" : hj ? "one explicit UTG fold then first HJ turn" : "first UTG only"}.`],
         reasons: []
       })) : [
         proof("roster", rosterReasons, identityConflict || membershipChanged),
@@ -8582,21 +8597,23 @@
         scope: "raiseLegality",
         status: contradicted ? "contradicted" : "insufficient",
         confidence: "low",
-        provenance: ["Dependent UTG/HJ exact five-chip opening rule"],
+        provenance: ["Dependent UTG/HJ/CO exact five-chip opening rule"],
         reasons: [reason]
       }
     });
     const utg = currentFirstUtg(read, assessment, timeline);
-    const first = utg ?? currentHj(read, assessment, timeline);
-    const proof = utg ? timeline?.sourceStatus.firstUtgProof : timeline?.sourceStatus.hjProof;
+    const hj = currentHj(read, assessment, timeline);
+    const first = utg ?? hj ?? currentCo(read, assessment, timeline);
+    const role = utg ? "UTG" : hj ? "HJ" : "CO";
+    const proof = utg ? timeline?.sourceStatus.firstUtgProof : hj ? timeline?.sourceStatus.hjProof : timeline?.sourceStatus.coProof;
     if (!first || !proof || Date.now() < first.receivedAt || Date.now() >= proof.expiresAt || proof.expiresAt !== first.receivedAt + 1e4)
-      return fail("No fresh cross-checked UTG/HJ decision proof; sizing cannot renew source evidence.");
+      return fail("No fresh cross-checked UTG/HJ/CO decision proof; sizing cannot renew source evidence.");
     if (first.openingSizeProfile !== "pokernow-0.1.72-th-4fun-1-2-exact5-v1")
       return fail("Unknown or changed PokerNow exact-five-chip rule profile/version.");
     const hero = assessment.state.seats.find((s) => s.isYou);
     const sourceHero = first.players.find((p) => p.playerId === first.heroId);
-    if (!epoch || first.bigBlind !== 2 || sourceHero.position !== (utg ? "UTG" : "HJ") || sourceHero.contribution !== 0 || hero.stack === null || hero.stack < 200 || hero.stack <= 5)
-      return fail("Exact five-chip rule requires a supported first UTG/HJ turn, zero contribution and proven deep remaining capacity.");
+    if (!epoch || first.bigBlind !== 2 || sourceHero.position !== role || sourceHero.contribution !== 0 || hero.stack === null || hero.stack < 200 || hero.stack <= 5)
+      return fail("Exact five-chip rule requires a supported first UTG/HJ/CO turn, zero contribution and proven deep remaining capacity.");
     const c = read.raiseControl;
     if (c.issues.length) return fail(`Contradictory Raise controls: ${c.issues.join("; ")}`, true);
     if (c.formVisible && (!c.amountControlVisible || !c.raiseSubmitVisible || c.raiseSubmitEnabled !== true))
@@ -8606,7 +8623,7 @@
       return fail("Visible selected amount/BB display/capacity observations contradict each other.", true);
     if (!c.formVisible && (c.amountControlVisible || c.raiseSubmitVisible || c.selectedRaiseToChips !== null))
       return fail("Raise-control visibility/amount observations contradict a closed panel.", true);
-    const provenance = "Exact-size empirical rule: hand169 first-UTG server acceptance (frame66 tB[hero]=5, cHB=5, frame67 next actor), matching 0.1.72 normal no-ante 1/2 play-money Hold'em profile. Not a live server acknowledgment, generic minimum, maximum or chip grid. " + (utg ? "Original firstUtgProof deadline applies." : "HJ equivalence: explicit zero-contribution UTG fold then first HJ turn; unchanged forced-blind wagers/profile, no prior hero action or reopening restriction. Original hjProof activation deadline applies, not the anchor's time.");
+    const provenance = "Exact-size empirical rule: hand169 first-UTG server acceptance (frame66 tB[hero]=5, cHB=5, frame67 next actor), matching 0.1.72 normal no-ante 1/2 play-money Hold'em profile. Not a live server acknowledgment, generic minimum, maximum or chip grid. " + (utg ? "Original firstUtgProof deadline applies." : `${role} equivalence: explicit zero-contribution ${hj ? "UTG fold then first HJ turn" : "UTG fold, HJ turn/fold then first CO turn"}; unchanged forced-blind wagers/profile, no prior hero action or reopening restriction. Original ${hj ? "hjProof" : "coProof"} activation deadline applies, not the anchor's time.`);
     const size = {
       rule: first.openingSizeProfile,
       provenance,
@@ -8738,16 +8755,17 @@
         deepEnough && !settling ? [] : ["Hero and every active opponent must have proven 100BB+ hand-start effective capacity."]
       );
       const hj = currentHj(read, assessment, timeline);
-      const first = currentFirstUtg(read, assessment, timeline) ?? hj;
+      const co = currentCo(read, assessment, timeline);
+      const first = currentFirstUtg(read, assessment, timeline) ?? hj ?? co;
       if (first) {
-        const continuity = (hj ? source.hjProof : source.firstUtgProof).continuity;
-        set("connection", "proven", `Validated ${hj ? "HJ" : "first-UTG"} source prefix: generation ${continuity.generation}, registration ${continuity.baselineSequence} through ${continuity.throughSequence}, cursor ${continuity.cursor}. ${first.provenance} Not whole-hand/log coverage.`);
+        const continuity = (co ? source.coProof : hj ? source.hjProof : source.firstUtgProof).continuity;
+        set("connection", "proven", `Validated ${co ? "CO" : hj ? "HJ" : "first-UTG"} source prefix: generation ${continuity.generation}, registration ${continuity.baselineSequence} through ${continuity.throughSequence}, cursor ${continuity.cursor}. ${first.provenance} Not whole-hand/log coverage.`);
         set("stack", "proven", `${first.provenance} Numeric remaining DOM stacks independently >=100BB for all six players.`);
         set("callCost", "proven", `${first.provenance} Normal SB=1/BB=2 source totals; hero contribution zero, no intervening wagers. Call gap=2 chips.`);
       }
     }
     const opening = openingSizeEvidence(read, assessment, timeline, epoch);
-    if (unopened?.firstUtgBoundary || unopened?.hjWindow) proofs[PROOF_SCOPES.indexOf("raiseLegality")] = opening.proof;
+    if (unopened?.firstUtgBoundary || unopened?.hjWindow || unopened?.coWindow) proofs[PROOF_SCOPES.indexOf("raiseLegality")] = opening.proof;
     if (packet?.preflopExecution?.exactOpeningSize && JSON.stringify(packet.preflopExecution.exactOpeningSize) !== JSON.stringify(opening.size)) {
       set("raiseLegality", "contradicted", "Dependent sizing/packet cross-check", ["Sizing belongs to a different source, control or epoch."]);
     }
@@ -8756,7 +8774,7 @@
       decisionEpoch: epoch,
       binding: "diagnostic-only: no packet",
       handId: source?.identity ? timeline.current.handId : null,
-      connectionGeneration: source?.firstUtgProof?.continuity.generation ?? source?.hjProof?.continuity.generation ?? chain?.generation ?? null,
+      connectionGeneration: source?.firstUtgProof?.continuity.generation ?? source?.hjProof?.continuity.generation ?? source?.coProof?.continuity.generation ?? chain?.generation ?? null,
       proofs
     };
     if (packet) envelope.binding = decisionProofBinding({ ...packet, decisionProofs: envelope }, epoch);
@@ -8780,6 +8798,7 @@
       handId: timeline.current.handId,
       firstUtg: s.firstUtgProof ?? null,
       ...s.hjProof ? { hj: s.hjProof } : {},
+      ...s.coProof ? { co: s.coProof } : {},
       generation: s.sourceMetadata.socketContinuity.generation,
       continuity: s.sourceMetadata.socketContinuity.status,
       gap: s.sourceMetadata.socketContinuity.chainGap,
@@ -9391,10 +9410,16 @@
     if (exact([...common, "cPI", "pITT", "sNA", "pASA", "sNAA", "mAVTB"]) && token3(raw.cPI) && raw.pITT === raw.cPI && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now && integer2(raw.mAVTB)) return "turn";
     return null;
   }
-  function advanceHjWindow(pending, data, sequence, at) {
-    const raw = data.hjPatch, kind2 = hjPatchKind(raw), w = pending.witness;
+  function validatedOpeningPatch(data, heroId) {
+    const raw = data.hjPatch, kind2 = hjPatchKind(raw);
     const projectedKeys = ["now", "pre", "eventsData", "fV", "pITT", kind2 === "fold" ? "pGS" : "cPI"];
-    if (!raw || !kind2 || data.event !== "gC" || data.heroId !== w.heroId || Object.keys(data.frame).length !== projectedKeys.length || !projectedKeys.every((k) => Object.hasOwn(data.frame, k)) || Object.entries(data.frame).some(([k, v]) => JSON.stringify(raw[k]) !== JSON.stringify(v))) return null;
+    if (!raw || !kind2 || data.event !== "gC" || data.heroId !== heroId || Object.keys(data.frame).length !== projectedKeys.length || !projectedKeys.every((k) => Object.hasOwn(data.frame, k)) || Object.entries(data.frame).some(([k, v]) => JSON.stringify(raw[k]) !== JSON.stringify(v))) return null;
+    return { raw, kind: kind2 };
+  }
+  function advanceHjWindow(pending, data, sequence, at) {
+    const w = pending.witness, patch = validatedOpeningPatch(data, w.heroId);
+    if (!patch) return null;
+    const { raw, kind: kind2 } = patch;
     const utg = w.players.find((p) => p.position === "UTG"), bb = w.players.find((p) => p.position === "BB");
     if (!pending.fold) {
       if (kind2 !== "fold" || sequence !== pending.anchor.sequence + 1 || raw.pre !== pending.anchor.cursor || Object.keys(raw.pGS)[0] !== utg.playerId || raw.wBACPI[0] !== bb.playerId) return null;
@@ -9428,6 +9453,52 @@
     } };
   }
 
+  // src/coWindow.ts
+  function advanceCoWindow(pending, data, sequence, at) {
+    const w = pending.witness, patch = validatedOpeningPatch(data, w.heroId);
+    if (!patch || pending.folds.length > 2) return null;
+    const { raw, kind: kind2 } = patch;
+    const utg = w.players.find((p) => p.position === "UTG");
+    const hj = w.players.find((p) => p.position === "HJ");
+    const bb = w.players.find((p) => p.position === "BB");
+    const step = pending.folds.length === 0 ? 0 : !pending.hjActivation ? 1 : pending.folds.length === 1 ? 2 : 3;
+    const previousCursor = step === 0 ? pending.anchor.cursor : step === 2 ? pending.hjActivation.sourcePatch.now : pending.folds.at(-1).cursor;
+    if (sequence !== pending.anchor.sequence + step + 1 || raw.pre !== previousCursor) return null;
+    if (step === 0 || step === 2) {
+      const actor = step === 0 ? utg : hj;
+      if (kind2 !== "fold" || Object.keys(raw.pGS)[0] !== actor.playerId || raw.wBACPI[0] !== bb.playerId) return null;
+      return { pending: { ...pending, folds: [...pending.folds, {
+        sequence,
+        cursor: raw.now,
+        previousCursor: raw.pre,
+        receivedAt: at,
+        playerId: actor.playerId,
+        seat: actor.seat,
+        sourcePatch: structuredClone(raw)
+      }] } };
+    }
+    if (kind2 !== "turn" || raw.cPI !== (step === 1 ? hj.playerId : w.heroId)) return null;
+    if (step === 1) return { pending: { ...pending, hjActivation: { sequence, sourcePatch: structuredClone(raw) } } };
+    const witness = {
+      ...w,
+      cursor: raw.now,
+      previousCursor: raw.pre,
+      receivedAt: at,
+      provenance: `${w.provenance} Explicit UTG fold -> HJ turn -> HJ fold -> first CO activation at ${raw.now}. Closed hands-143/149/167 patch contract; no generic action coverage.`
+    };
+    return { pending, proof: {
+      version: 1,
+      scope: "co_after_utg_hj_folds",
+      historyComplete: false,
+      expiresAt: at + 1e4,
+      witness,
+      anchor: structuredClone(pending.anchor),
+      folds: structuredClone(pending.folds),
+      hjActivation: structuredClone(pending.hjActivation),
+      activation: { sequence, sourcePatch: structuredClone(raw) }
+    } };
+  }
+
   // src/firstUtgSource.ts
   var object5 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
   var token4 = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(v);
@@ -9441,7 +9512,7 @@
   function firstUtg(reg, next, tableId, generation, at, role = "UTG") {
     const a = reg.frame, b = next.frame, hero = reg.heroId;
     const firstActor = role === "UTG" ? hero : b.cPI;
-    if (role === "HJ" && (a.version !== "0.1.72" || (b.version ?? a.version) !== "0.1.72" || b.fV !== "0.1.72")) return null;
+    if (role !== "UTG" && (a.version !== "0.1.72" || (b.version ?? a.version) !== "0.1.72" || b.fV !== "0.1.72")) return null;
     if (!hero || next.event !== "gC" || a.id !== tableId || Object.hasOwn(b, "id") && b.id !== tableId || b.r === true || next.heroId !== hero || !integer3(a.now) || !integer3(b.now) || b.pre !== a.now || b.now <= a.now || !integer3(a.gN) || b.gN !== a.gN + 1 || !token4(a.hI) || !token4(b.hI) || a.hI === b.hI || !same(a.gT, [1, 5]) || !same(b.gT, [1, 0]) || !same(b.oTC, { "1": [] }) || b.gameResult !== "<D>" || b.cPI !== firstActor || b.pITT !== firstActor || !same(b.cRPI, []) || !same(b.eventsData, []) || !same(b.players, {}) || !same(b.rHP, []) || b.rHC !== null) return null;
     const profile = { smallBlind: 1, bigBlind: 2, ante: null, deadButton: false, gM: "th", mode: "4fun", aD: false, aS: false, cM: false, cR: false };
     for (const [k, value] of Object.entries(profile)) if (!same(a[k], value) || Object.hasOwn(b, k) && !same(b[k], value)) return null;
@@ -9454,7 +9525,7 @@
     const dealer = rows.findIndex(([seat, id]) => seat === b.dealerSeat && id === b.dealerID);
     if (dealer < 0) return null;
     const cycle = [...rows.slice(dealer), ...rows.slice(0, dealer)];
-    const heroIndex = role === "UTG" ? 3 : 4;
+    const heroIndex = role === "UTG" ? 3 : role === "HJ" ? 4 : 5;
     if (cycle[1][1] !== b.sBPI || cycle[2][1] !== b.bBPI || cycle[3][1] !== firstActor || cycle[heroIndex][1] !== hero || Object.keys(b.tB).length !== 2 || b.tB[b.sBPI] !== 1 || b.tB[b.bBPI] !== 2) return null;
     const roles = ["BTN", "SB", "BB", "UTG", "HJ", "CO"];
     const players = [];
@@ -9480,7 +9551,7 @@
       bigBlind: 2,
       players,
       ...a.version === "0.1.72" && b.fV === "0.1.72" && (b.version ?? a.version) === "0.1.72" && same(b.nR, [1]) && (Object.hasOwn(b, "mTB") ? b.mTB : a.mTB) === null && (Object.hasOwn(b, "rIT") ? b.rIT : a.rIT) === "no" && (Object.hasOwn(b, "sPM") ? b.sPM : a.sPM) === false ? { openingSizeProfile: "pokernow-0.1.72-th-4fun-1-2-exact5-v1" } : {},
-      provenance: `PokerNow validated hand-start ${a.hI}/${a.gN} -> ${b.hI}/${b.gN}, pre=${b.pre}, now=${b.now}; first UTG turn has no preceding voluntary turn; forced blinds only. Hand-53 observed source profile; bounded consecutive source state.${role === "HJ" ? " Frozen HJ anchor only; not yet an actionable decision." : ""}`
+      provenance: `PokerNow validated hand-start ${a.hI}/${a.gN} -> ${b.hI}/${b.gN}, pre=${b.pre}, now=${b.now}; first UTG turn has no preceding voluntary turn; forced blinds only. Hand-53 observed source profile; bounded consecutive source state.${role !== "UTG" ? ` Frozen ${role} anchor only; not yet an actionable decision.` : ""}`
     };
   }
   function createFirstUtgSource(tableId, now) {
@@ -9489,10 +9560,14 @@
     let hjPending = null;
     let hjProof = null;
     let hjReason = "No supported HJ boundary/fold/turn sequence observed.";
+    let coPending = null;
+    let coProof = null;
+    let coReason = "No supported CO boundary/two-fold/turn sequence observed.";
     let lastCertificate = null;
     const invalidateWitness = (reason2, sequence) => {
       witness = null;
       hjProof = null;
+      coProof = null;
       if (lastCertificate && (!lastCertificate.invalidation || sequence !== null && lastCertificate.invalidation.sequence === sequence && lastCertificate.invalidation.at === now())) {
         lastCertificate.invalidation = { at: now(), sequence, reason: reason2 };
       }
@@ -9530,6 +9605,8 @@
           invalidateWitness(message, integer3(sequence) ? sequence : null);
           hjPending = null;
           hjReason = message;
+          coPending = null;
+          coReason = message;
           baseline = null;
           rejectedGeneration = lastGeneration;
           reason = message;
@@ -9551,6 +9628,8 @@
         lastGeneration = generation;
         if (newGeneration) {
           hjPending = null;
+          coPending = null;
+          coReason = "New generation; CO evidence reset.";
           rejectedGeneration = null;
           lastObservedAt = -1;
           registrationSeen = false;
@@ -9625,6 +9704,28 @@
           } : null;
           if (hjProof) hjPending = null;
           hjReason = hjProof ? "Explicit UTG fold and immediately linked HJ first turn proven; live cross-checks still required." : anchor ? "Frozen six-player HJ hand anchor; waiting for the next explicit UTG fold." : advanced ? "Explicit UTG fold accepted; waiting for the immediately linked HJ activation." : "No supported consecutive boundary -> UTG fold -> HJ turn; unsupported updates invalidate this window.";
+          const coAnchor = firstUtg(previous.data, data, tableId, generation, observedAt, "CO");
+          const coAdvanced = coPending ? advanceCoWindow(coPending, data, sequence, observedAt) : null;
+          coPending = coAnchor ? { witness: coAnchor, folds: [], anchor: {
+            sequence,
+            cursor: coAnchor.cursor,
+            receivedAt: observedAt,
+            firstActorId: coAnchor.players.find((p) => p.position === "UTG").playerId
+          } } : coAdvanced?.pending ?? null;
+          coProof = coAdvanced?.proof ? {
+            ...coAdvanced.proof,
+            continuity: {
+              status: "validated_prefix",
+              baselineSequence: previous.baselineSequence,
+              throughSequence: sequence,
+              generation,
+              tableId,
+              handId: frame.hI,
+              cursor: frame.now
+            }
+          } : null;
+          if (coProof) coPending = null;
+          coReason = coProof ? "Explicit UTG/HJ folds and linked first CO turn proven; live cross-checks still required." : coAnchor ? "Frozen CO anchor; waiting for explicit UTG fold, HJ turn/fold and CO turn." : coAdvanced ? "Supported CO prefix retained; waiting for the next exact fold/turn transition." : "No consecutive boundary -> UTG fold -> HJ turn -> HJ fold -> CO turn; unsupported updates invalidate this window.";
           witness = firstUtg(previous.data, data, tableId, generation, observedAt);
           if (witness) lastCertificate = {
             handId: witness.handId,
@@ -9644,6 +9745,8 @@
         invalidateWitness("Source disconnect, reader gap or reset invalidated first-UTG evidence.", null);
         hjPending = null;
         hjReason = "Source disconnected/reset.";
+        coPending = null;
+        coReason = "Source disconnected/reset.";
         baseline = null;
         rejectedGeneration = lastGeneration;
         reason = "Source disconnect, reader gap or reset invalidated first-UTG evidence.";
@@ -9654,6 +9757,9 @@
       proof: currentProof,
       hjProof() {
         return hjProof && baseline && now() >= hjProof.witness.receivedAt && now() < hjProof.expiresAt && baseline.generation === hjProof.witness.generation && baseline.data.frame.hI === hjProof.witness.handId && baseline.data.frame.now === hjProof.witness.cursor ? structuredClone(hjProof) : null;
+      },
+      coProof() {
+        return coProof && baseline && now() >= coProof.witness.receivedAt && now() < coProof.expiresAt && baseline.generation === coProof.witness.generation && baseline.data.frame.hI === coProof.witness.handId && baseline.data.frame.now === coProof.witness.cursor ? structuredClone(coProof) : null;
       },
       diagnostic() {
         const currentTime = now();
@@ -9674,6 +9780,11 @@
             reason: hjProof && now() >= hjProof.expiresAt ? "HJ proof expired at its original activation deadline." : hjReason,
             anchor: hjPending?.anchor ?? hjProof?.anchor ?? null,
             expiresAt: hjProof?.expiresAt ?? null
+          },
+          coWindow: {
+            reason: coProof && now() >= coProof.expiresAt ? "CO proof expired at its original activation deadline." : coReason,
+            anchor: coPending?.anchor ?? coProof?.anchor ?? null,
+            expiresAt: coProof?.expiresAt ?? null
           },
           reason: witness && now() - witness.receivedAt > 1e4 ? "First-UTG witness expired after 10 seconds; original receive time is not renewed." : reason,
           observations: structuredClone(observations),
@@ -9850,6 +9961,7 @@
             sourceMetadata: sourceMetadata.snapshot(),
             firstUtgProof,
             hjProof: connected ? firstUtgSource.hjProof() : null,
+            coProof: connected ? firstUtgSource.coProof() : null,
             // Compatibility/display view of the same contract, not another validator.
             firstUtg: firstUtgProof?.witness ?? null,
             firstUtgEvidence: firstUtgSource.diagnostic(),
@@ -10252,6 +10364,7 @@
     const revision = JSON.parse(liveProofRevision(handTimeline.snapshot()));
     delete revision.firstUtg;
     delete revision.hj;
+    delete revision.co;
     return JSON.stringify(revision);
   }
   function clearDisplayLifetime() {
@@ -10262,7 +10375,7 @@
   function bindDisplayLifetime(requestKey) {
     clearDisplayLifetime();
     const source = handTimeline.snapshot().sourceStatus;
-    const proof = source.firstUtgProof ?? source.hjProof;
+    const proof = source.firstUtgProof ?? source.hjProof ?? source.coProof;
     if (!proof || lastDomStateJson === null) return;
     displayLifetime = {
       requestKey,
@@ -10275,7 +10388,7 @@
   }
   function refreshDisplayLifetime() {
     if (!displayLifetime) return;
-    if (displayLifetime.dom !== lastDomStateJson || displayLifetime.source !== displaySourceBinding() || Date.now() < displayLifetime.receivedAt || Date.now() < displayLifetime.expiresAt && !(handTimeline.snapshot().sourceStatus.firstUtgProof ?? handTimeline.snapshot().sourceStatus.hjProof)) {
+    if (displayLifetime.dom !== lastDomStateJson || displayLifetime.source !== displaySourceBinding() || Date.now() < displayLifetime.receivedAt || Date.now() < displayLifetime.expiresAt && !(handTimeline.snapshot().sourceStatus.firstUtgProof ?? handTimeline.snapshot().sourceStatus.hjProof ?? handTimeline.snapshot().sourceStatus.coProof)) {
       clearDisplayLifetime();
       overlayState.aiResult = null;
       overlayState.policyLine = null;
@@ -10351,7 +10464,7 @@
         lastRecommendationRequestKey = null;
         requestSequence++;
         const { state, confidence, bigBlind, amountToCall: parsedAmountToCall, positions, decisionPot } = assessment;
-        const amountToCall = (preflop?.openingEvidence === "first_utg_hand_start" || preflop?.openingEvidence === "hj_after_utg_fold") && bigBlind !== null ? preflop.amountToCallBB * bigBlind : parsedAmountToCall;
+        const amountToCall = (preflop?.openingEvidence === "first_utg_hand_start" || preflop?.openingEvidence === "hj_after_utg_fold" || preflop?.openingEvidence === "co_after_utg_hj_folds") && bigBlind !== null ? preflop.amountToCallBB * bigBlind : parsedAmountToCall;
         overlayState.street = state?.street ?? "unreadable";
         overlayState.opponentStatsLine = state ? state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded).map((s) => {
           const evidence = opponentStats.profile(s.playerName);

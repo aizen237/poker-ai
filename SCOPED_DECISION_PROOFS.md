@@ -2,6 +2,12 @@
 
 ## Implemented boundary and remaining work
 
+Current scope update: [Phase 3C](PREFLOP_PHASE3C.md) documents the supported
+UTG/HJ/CO opening windows and shared exact-five sizing contract. The original
+hand-53/FOLD-only statements below describe the earlier implementation.
+Later positions, facing actions, postflop EV and whole-hand completeness remain
+unproven; no generic gates were relaxed.
+
 `historyComplete` remains false and remains available to whole-hand accounting
 and source diagnostics. It is not a requirement of the new decision proof
 evaluator. Inspection found no existing direct global `historyComplete` gate to

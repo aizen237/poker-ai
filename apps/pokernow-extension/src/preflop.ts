@@ -2,7 +2,7 @@ import { buildPreflopContext, type DecisionPacket } from "@poker-ai/ai-core";
 import type { LiveStateAssessment, ActionHistory } from "@poker-ai/browser-reader";
 import type { LiveTableRead } from "./tableRead.js";
 import type { LiveTimelineDiagnostic } from "./liveTimeline.js";
-import { currentFirstUtg, currentHj } from "./firstUtgLive.js";
+import { currentFirstUtg, currentHj, currentCo } from "./firstUtgLive.js";
 
 /** Current observations only. This neither certifies the source window nor supplies legal minima. */
 export function buildLivePreflopExecution(read: LiveTableRead, assessment: LiveStateAssessment,
@@ -19,24 +19,26 @@ export function buildLivePreflopExecution(read: LiveTableRead, assessment: LiveS
 }
 
 /** Polling remains partial. The source authority supplies only first UTG or
- * the exact first-HJ-after-UTG-fold *decision-local* window. */
+ * the exact HJ/CO fold-prefix *decision-local* window. */
 export function buildLivePreflopContext(assessment: LiveStateAssessment, actionHistory: ActionHistory, timeline?: LiveTimelineDiagnostic | null, read?: LiveTableRead) {
   const { state, bigBlind, positions, decisionPot, amountToCall } = assessment;
   if (bigBlind === null || !Number.isFinite(bigBlind) || bigBlind <= 0) return null;
   const hero = state?.seats.find(s => s.isYou);
   try {
     const hj = currentHj(read, assessment, timeline);
-    const first = currentFirstUtg(read, assessment, timeline) ?? hj;
+    const co = currentCo(read, assessment, timeline);
+    const first = currentFirstUtg(read, assessment, timeline) ?? hj ?? co;
+    const folds = co ? timeline!.sourceStatus.coProof!.folds : hj ? [timeline!.sourceStatus.hjProof!.fold] : [];
     if (first) return buildPreflopContext({
       heroSeat: first.heroSeat, playersDealtIn: 6,
       players: first.players.map(p => ({ seat: p.seat, position: p.position,
         remainingStackBB: state!.seats.find(s => s.seatNumber === p.seat)!.stack! / bigBlind,
-        contributionBB: p.contribution / bigBlind, folded: !!hj && p.position === "UTG", allIn: false })),
+        contributionBB: p.contribution / bigBlind, folded: folds.some(f => f.playerId === p.playerId), allIn: false })),
       potBB: decisionPot === null ? null : decisionPot / bigBlind, amountToCallBB: 1,
       contributionMeaning: "street_total", historyCoverage: "complete",
-      openingEvidence: hj ? "hj_after_utg_fold" : "first_utg_hand_start",
-      actions: hj ? [{ seat: hj.players.find(p => p.position === "UTG")!.seat, action: "fold",
-        totalContributionBB: 0, observation: timeline!.sourceStatus.hjProof!.fold.sequence, wagerAction: null }] : [],
+      openingEvidence: co ? "co_after_utg_hj_folds" : hj ? "hj_after_utg_fold" : "first_utg_hand_start",
+      actions: folds.map(f => ({ seat: f.seat, action: "fold" as const,
+        totalContributionBB: 0, observation: f.sequence, wagerAction: null })),
       historyNotes: [], tournamentContext: "chip_ev_only",
     });
     const preflop = state?.street === "preflop" && hero?.isOccupied && bigBlind !== null && state.seats.filter(s => s.isOccupied).length >= 2 ? buildPreflopContext({

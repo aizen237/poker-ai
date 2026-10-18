@@ -1,5 +1,6 @@
 import { initializeUtgState, advanceUtgState } from "./firstUtgState.js";
 import { advanceHjWindow, hjPatchKind, type HjPending, type HjProof } from "./hjWindow.js";
+import { advanceCoWindow, type CoPending, type CoProof } from "./coWindow.js";
 
 /** Scoped first-UTG witness from consecutive bounded source state.
  * No general poker-state emulator or full action-history claim. */
@@ -24,7 +25,7 @@ const keys = ["id", "hI", "gN", "now", "pre", "r", "gT", "seats", "iHPI", "deale
   "tB", "pGS", "cPI", "pITT", "smallBlind", "bigBlind", "ante", "deadButton", "gM", "mode", "oTC", "gameResult",
   "aD", "aS", "cM", "cR", "cRPI", "rHP", "rHC", "eventsData", "version", "fV", "nR", "mTB", "rIT", "sPM"];
 export interface UtgProjection { event: "registered" | "gC" | "rup"; heroId: string | null; frame: Record<string, any>;
-  /** Only the two exact raw transition shapes; absent means no HJ permission. */
+  /** Only the two exact raw transition shapes; absent means no HJ/CO permission. */
   hjPatch?: Record<string, any> }
 
 /** Separate bounded projection; no names, credentials, stats or opponent cards. */
@@ -84,10 +85,10 @@ export interface FirstUtgProof {
 }
 
 function firstUtg(reg: UtgProjection, next: UtgProjection, tableId: string, generation: number, at: number,
-  role: "UTG" | "HJ" = "UTG"): FirstUtgWitness | null {
+  role: "UTG" | "HJ" | "CO" = "UTG"): FirstUtgWitness | null {
   const a = reg.frame, b = next.frame, hero = reg.heroId;
   const firstActor = role === "UTG" ? hero : b.cPI;
-  if (role === "HJ" && (a.version !== "0.1.72" || (b.version ?? a.version) !== "0.1.72" || b.fV !== "0.1.72")) return null;
+  if (role !== "UTG" && (a.version !== "0.1.72" || (b.version ?? a.version) !== "0.1.72" || b.fV !== "0.1.72")) return null;
   if (!hero || next.event !== "gC" || a.id !== tableId ||
       (Object.hasOwn(b, "id") && b.id !== tableId) || b.r === true || next.heroId !== hero ||
       !integer(a.now) || !integer(b.now) || b.pre !== a.now || b.now <= a.now ||
@@ -113,7 +114,7 @@ function firstUtg(reg: UtgProjection, next: UtgProjection, tableId: string, gene
   const dealer = rows.findIndex(([seat, id]) => seat === b.dealerSeat && id === b.dealerID);
   if (dealer < 0) return null;
   const cycle = [...rows.slice(dealer), ...rows.slice(0, dealer)];
-  const heroIndex = role === "UTG" ? 3 : 4;
+  const heroIndex = role === "UTG" ? 3 : role === "HJ" ? 4 : 5;
   if (cycle[1]![1] !== b.sBPI || cycle[2]![1] !== b.bBPI || cycle[3]![1] !== firstActor || cycle[heroIndex]![1] !== hero ||
       Object.keys(b.tB).length !== 2 || b.tB[b.sBPI] !== 1 || b.tB[b.bBPI] !== 2) return null;
   const roles = ["BTN", "SB", "BB", "UTG", "HJ", "CO"] as const;
@@ -136,7 +137,7 @@ function firstUtg(reg: UtgProjection, next: UtgProjection, tableId: string, gene
       (Object.hasOwn(b, "rIT") ? b.rIT : a.rIT) === "no" &&
       (Object.hasOwn(b, "sPM") ? b.sPM : a.sPM) === false
       ? { openingSizeProfile: "pokernow-0.1.72-th-4fun-1-2-exact5-v1" as const } : {}),
-    provenance: `PokerNow validated hand-start ${a.hI}/${a.gN} -> ${b.hI}/${b.gN}, pre=${b.pre}, now=${b.now}; first UTG turn has no preceding voluntary turn; forced blinds only. Hand-53 observed source profile; bounded consecutive source state.${role === "HJ" ? " Frozen HJ anchor only; not yet an actionable decision." : ""}` };
+    provenance: `PokerNow validated hand-start ${a.hI}/${a.gN} -> ${b.hI}/${b.gN}, pre=${b.pre}, now=${b.now}; first UTG turn has no preceding voluntary turn; forced blinds only. Hand-53 observed source profile; bounded consecutive source state.${role !== "UTG" ? ` Frozen ${role} anchor only; not yet an actionable decision.` : ""}` };
 }
 
 /** Every later update expires the current decision witness. Validated state may
@@ -147,12 +148,16 @@ export function createFirstUtgSource(tableId: string, now: () => number) {
   let hjPending: HjPending | null = null;
   let hjProof: HjProof | null = null;
   let hjReason = "No supported HJ boundary/fold/turn sequence observed.";
+  let coPending: CoPending | null = null;
+  let coProof: CoProof | null = null;
+  let coReason = "No supported CO boundary/two-fold/turn sequence observed.";
   // Diagnostic history only: never consumed by snapshot() or proof activation.
   let lastCertificate: { handId: string; generation: number; issuedBySequence: number; receivedAt: number; expiresAt: number;
     invalidation: { at: number; sequence: number | null; reason: string } | null } | null = null;
   const invalidateWitness = (reason: string, sequence: number | null) => {
     witness = null;
     hjProof = null;
+    coProof = null;
     if (lastCertificate && (!lastCertificate.invalidation || sequence !== null &&
         lastCertificate.invalidation.sequence === sequence && lastCertificate.invalidation.at === now())) {
       lastCertificate.invalidation = { at: now(), sequence, reason };
@@ -176,7 +181,7 @@ export function createFirstUtgSource(tableId: string, now: () => number) {
   };
   return {
     accept(raw: unknown, sequence: unknown, generation: unknown, observedAt: unknown): SourceBootstrapReceipt | undefined {
-      const reject = (message: string) => { invalidateWitness(message, integer(sequence) ? sequence : null); hjPending = null; hjReason = message; baseline = null; rejectedGeneration = lastGeneration; reason = message; };
+      const reject = (message: string) => { invalidateWitness(message, integer(sequence) ? sequence : null); hjPending = null; hjReason = message; coPending = null; coReason = message; baseline = null; rejectedGeneration = lastGeneration; reason = message; };
       if (!integer(sequence) || !integer(generation) || generation < 1) { reject("Invalid local source sequence/generation."); return; }
       if (sequence <= lastSequence || generation < lastGeneration) { reject("Stale/replayed local source delivery invalidated carried state."); return; }
       invalidateWitness("Subsequent source update requires a new certificate; no same-decision renewal contract is verified.", sequence);
@@ -185,7 +190,7 @@ export function createFirstUtgSource(tableId: string, now: () => number) {
       const contiguous = sequence === lastSequence + 1 && !newGeneration;
       lastSequence = sequence;
       lastGeneration = generation;
-      if (newGeneration) { hjPending = null; rejectedGeneration = null; lastObservedAt = -1; registrationSeen = false; }
+      if (newGeneration) { hjPending = null; coPending = null; coReason = "New generation; CO evidence reset."; rejectedGeneration = null; lastObservedAt = -1; registrationSeen = false; }
       if (!integer(observedAt) || observedAt > now() || observedAt < lastObservedAt) { reject("Invalid or regressing local receive time."); return; }
       lastObservedAt = observedAt;
       const valid = object(raw) && object(raw.frame) && JSON.stringify(raw).length <= 40_000 && ["registered", "gC", "rup"].includes(raw.event);
@@ -239,6 +244,20 @@ export function createFirstUtgSource(tableId: string, now: () => number) {
           : anchor ? "Frozen six-player HJ hand anchor; waiting for the next explicit UTG fold."
           : advanced ? "Explicit UTG fold accepted; waiting for the immediately linked HJ activation."
           : "No supported consecutive boundary -> UTG fold -> HJ turn; unsupported updates invalidate this window.";
+        const coAnchor = firstUtg(previous.data, data, tableId, generation, observedAt, "CO");
+        const coAdvanced = coPending ? advanceCoWindow(coPending, data, sequence, observedAt) : null;
+        coPending = coAnchor ? { witness: coAnchor, folds: [], anchor: {
+          sequence, cursor: coAnchor.cursor, receivedAt: observedAt,
+          firstActorId: coAnchor.players.find(p => p.position === "UTG")!.playerId,
+        } } : coAdvanced?.pending ?? null;
+        coProof = coAdvanced?.proof ? { ...coAdvanced.proof,
+          continuity: { status: "validated_prefix", baselineSequence: previous.baselineSequence,
+            throughSequence: sequence, generation, tableId, handId: frame.hI, cursor: frame.now } } : null;
+        if (coProof) coPending = null;
+        coReason = coProof ? "Explicit UTG/HJ folds and linked first CO turn proven; live cross-checks still required."
+          : coAnchor ? "Frozen CO anchor; waiting for explicit UTG fold, HJ turn/fold and CO turn."
+          : coAdvanced ? "Supported CO prefix retained; waiting for the next exact fold/turn transition."
+          : "No consecutive boundary -> UTG fold -> HJ turn -> HJ fold -> CO turn; unsupported updates invalidate this window.";
         witness = firstUtg(previous.data, data, tableId, generation, observedAt);
         if (witness) lastCertificate = { handId: witness.handId, generation, issuedBySequence: sequence,
           receivedAt: witness.receivedAt, expiresAt: witness.receivedAt + 10_000, invalidation: null };
@@ -247,12 +266,15 @@ export function createFirstUtgSource(tableId: string, now: () => number) {
           : "Validated source state carried forward; this update is not a supported first-UTG boundary.";
       } catch (error) { reject(error instanceof Error ? error.message : "Unsupported source mutation."); }
     },
-    reset() { invalidateWitness("Source disconnect, reader gap or reset invalidated first-UTG evidence.", null); hjPending = null; hjReason = "Source disconnected/reset."; baseline = null; rejectedGeneration = lastGeneration; reason = "Source disconnect, reader gap or reset invalidated first-UTG evidence."; },
+    reset() { invalidateWitness("Source disconnect, reader gap or reset invalidated first-UTG evidence.", null); hjPending = null; hjReason = "Source disconnected/reset."; coPending = null; coReason = "Source disconnected/reset."; baseline = null; rejectedGeneration = lastGeneration; reason = "Source disconnect, reader gap or reset invalidated first-UTG evidence."; },
     snapshot() { return currentProof()?.witness ?? null; },
     proof: currentProof,
     hjProof() { return hjProof && baseline && now() >= hjProof.witness.receivedAt && now() < hjProof.expiresAt &&
       baseline.generation === hjProof.witness.generation && baseline.data.frame.hI === hjProof.witness.handId &&
       baseline.data.frame.now === hjProof.witness.cursor ? structuredClone(hjProof) : null; },
+    coProof() { return coProof && baseline && now() >= coProof.witness.receivedAt && now() < coProof.expiresAt &&
+      baseline.generation === coProof.witness.generation && baseline.data.frame.hI === coProof.witness.handId &&
+      baseline.data.frame.now === coProof.witness.cursor ? structuredClone(coProof) : null; },
     diagnostic() {
       const currentTime = now();
       const certificate = lastCertificate ? structuredClone(lastCertificate) : null;
@@ -267,6 +289,8 @@ export function createFirstUtgSource(tableId: string, now: () => number) {
           missingRenewalEvidence: "No verified fresh server decision snapshot/acknowledgment binds this hand, first-action window and actor to a current request or authoritative decision version. Cached state, cursor continuity and receive time are insufficient." },
         hjWindow: { reason: hjProof && now() >= hjProof.expiresAt ? "HJ proof expired at its original activation deadline." : hjReason,
           anchor: hjPending?.anchor ?? hjProof?.anchor ?? null, expiresAt: hjProof?.expiresAt ?? null },
+        coWindow: { reason: coProof && now() >= coProof.expiresAt ? "CO proof expired at its original activation deadline." : coReason,
+          anchor: coPending?.anchor ?? coProof?.anchor ?? null, expiresAt: coProof?.expiresAt ?? null },
         reason: witness && now() - witness.receivedAt > 10_000 ? "First-UTG witness expired after 10 seconds; original receive time is not renewed." : reason,
         observations: structuredClone(observations), droppedObservations, retainedCharacters,
         carriedState: baseline ? { generation: baseline.generation, sequence: baseline.sequence, projection: structuredClone(baseline.data) } : null,

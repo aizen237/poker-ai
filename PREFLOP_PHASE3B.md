@@ -1,5 +1,9 @@
 # Phase 3B: source-verified unopened HJ RAISE
 
+Later scope update: [Phase 3C](PREFLOP_PHASE3C.md) uses the same producer for
+the separately proven two-fold first-CO window. CO-blocked statements below
+record the original Phase 3B scope.
+
 This extends the existing exact-five-chip producer to the already supported
 first HJ decision after an explicit UTG fold. The user reports UTG FOLD/RAISE
 and Phase 3A HJ FOLD as live verified. HJ RAISE is implemented and replay-tested;

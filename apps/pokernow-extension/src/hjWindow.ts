@@ -37,15 +37,24 @@ export interface HjPending {
   fold?: HjProof["fold"];
 }
 
+/** Shared closed-shape check for the HJ and CO recognizers. The bounded
+ * projection must agree with the retained raw patch; no dropped mutation. */
+export function validatedOpeningPatch(data: UtgProjection, heroId: string) {
+  const raw = data.hjPatch, kind = hjPatchKind(raw);
+  const projectedKeys = ["now", "pre", "eventsData", "fV", "pITT", kind === "fold" ? "pGS" : "cPI"];
+  if (!raw || !kind || data.event !== "gC" || data.heroId !== heroId ||
+      Object.keys(data.frame).length !== projectedKeys.length || !projectedKeys.every(k => Object.hasOwn(data.frame, k)) ||
+      Object.entries(data.frame).some(([k, v]) => JSON.stringify(raw[k]) !== JSON.stringify(v))) return null;
+  return { raw, kind };
+}
+
 /** Called only AFTER the existing reducer validates this consecutive update.
  * This is a two-transition recognizer, not another continuity/state reducer. */
 export function advanceHjWindow(pending: HjPending, data: UtgProjection, sequence: number, at: number):
   { pending: HjPending; proof?: Omit<HjProof, "continuity"> } | null {
-  const raw = data.hjPatch, kind = hjPatchKind(raw), w = pending.witness;
-  const projectedKeys = ["now", "pre", "eventsData", "fV", "pITT", kind === "fold" ? "pGS" : "cPI"];
-  if (!raw || !kind || data.event !== "gC" || data.heroId !== w.heroId ||
-      Object.keys(data.frame).length !== projectedKeys.length || !projectedKeys.every(k => Object.hasOwn(data.frame, k)) ||
-      Object.entries(data.frame).some(([k, v]) => JSON.stringify(raw[k]) !== JSON.stringify(v))) return null;
+  const w = pending.witness, patch = validatedOpeningPatch(data, w.heroId);
+  if (!patch) return null;
+  const { raw, kind } = patch;
   const utg = w.players.find(p => p.position === "UTG")!, bb = w.players.find(p => p.position === "BB")!;
   if (!pending.fold) {
     if (kind !== "fold" || sequence !== pending.anchor.sequence + 1 || raw.pre !== pending.anchor.cursor ||

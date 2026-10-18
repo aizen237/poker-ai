@@ -223,3 +223,15 @@ and reparsed log rows. Sequence 6 explicitly removes `nQ-ZBcAfge`, supplies
 Sequence 78 starts hand 121. Tests distinguish a fresh decision from the export
 18.227 seconds later; synthetic negative/alternate-departure cases mutate copies
 only and are not additional live evidence. See `SOCKET_STATE_AUDIT.md` for scope.
+
+## Phase 3C CO windows
+
+pokernow-co-143.json and pokernow-co-149.json derive from the local
+raise-sizing-paired.json; pokernow-co-167.json derives from raise-5-accepted.json.
+They reuse the earlier sanitized bounded prefixes and preserve ALL raw fields
+of the final four fold/turn patches. Only table/player/hand identities are
+substituted. Numeric values, array order, source/local timestamps and original
+hero cards (J5s, AKo, QJo respectively) are unchanged. No new live capture or
+DOM evidence is claimed. Tests simulate the synchronous DOM cross-check using
+the existing reader result shape. The positive decisions/proofs are produced
+by the real MAIN-to-overlay path; negative mutations are explicitly synthetic.

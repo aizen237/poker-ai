@@ -4,12 +4,13 @@ An npm-workspaces TypeScript project for reading PokerNow, calculating poker
 facts, estimating uncertain opponent ranges, and displaying assisted advice.
 It does not click actions or play automatically.
 
-**Current status:** parsing, simulation and conservative policy components are
-implemented and tested. Live recommendations use decision-specific proof gates;
-contestable pot, ordered decision windows, exact legality and model inputs remain
-unproven by the current live adapter. Global `historyComplete` stays diagnostic,
-not an activation requirement. Preflop/nonterminal strategy remains unimplemented
-in the deterministic policy; this pass does not unlock live assisted advice.
+**Current status:** scoped six-player 1/2-chip deep-stack opening advice supports
+first UTG, HJ after an explicit UTG fold, and CO after explicit UTG/HJ folds.
+The existing charts select FOLD or an independently certified exact-five RAISE.
+Each requires a fresh source-backed decision window and live cross-checks;
+see [Phase 3C](PREFLOP_PHASE3C.md) for exact limits and verification status.
+Global `historyComplete` remains false. Other positions, facing-action pots
+and generic postflop/EV activation remain unsupported.
 This is not a completed solver or an unrestricted live recommendation system.
 
 ## Local setup
@@ -37,6 +38,7 @@ refresh the PokerNow tab. Source changes alone are not enough.
 ## Documentation
 
 - [Scoped decision proofs, exact blockers and readiness](SCOPED_DECISION_PROOFS.md)
+- [Current CO opening scope, evidence and live check](PREFLOP_PHASE3C.md)
 - [V2 hand/event timeline and required live capture](V2_HAND_TIMELINE.md)
 - [V1 architecture](V1_ARCHITECTURE.md)
 - [Reliability audit and current limitations](V1_RELIABILITY_AUDIT.md)

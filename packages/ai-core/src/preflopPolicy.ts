@@ -14,8 +14,8 @@ export const PreflopExecutionSchema = z.object({
   /** Empirical exact-size rule, NOT a general minimum/grid or live server ack. */
   exactOpeningSize: z.object({
     rule: z.literal("pokernow-0.1.72-th-4fun-1-2-exact5-v1"),
-    /** Legacy absence is UTG-only; HJ requires an explicit bound window. */
-    decisionWindow: z.enum(["first_utg_boundary", "hj_after_utg_fold"]).optional(),
+    /** Legacy absence is UTG-only; HJ/CO require an explicit bound window. */
+    decisionWindow: z.enum(["first_utg_boundary", "hj_after_utg_fold", "co_after_utg_hj_folds"]).optional(),
     provenance: z.string().min(1).max(2000),
     tableId: z.string().min(1), handId: z.string().min(1), heroId: z.string().min(1),
     heroSeat: z.number().int().positive(), generation: z.number().int().positive(),
@@ -89,13 +89,15 @@ export function evaluatePreflopReference(packet: DecisionPacket): {
   const posts = events.filter(a => a.action === "post_blind");
   const firstUtg = context.openingEvidence === "first_utg_hand_start";
   const firstHj = context.openingEvidence === "hj_after_utg_fold";
+  const firstCo = context.openingEvidence === "co_after_utg_hj_folds";
   if (firstUtg && (context.heroPosition !== "UTG" || events.length !== 0)) return fail("First UTG boundary evidence cannot certify a later turn or prior voluntary action.");
   if (firstHj && (context.heroPosition !== "HJ" || events.length !== 1 || posts.length)) return fail("HJ fold-prefix evidence supports exactly one prior UTG fold and boundary blind totals.");
+  if (firstCo && (context.heroPosition !== "CO" || events.length !== 2 || posts.length)) return fail("CO fold-prefix evidence supports exactly UTG then HJ folds and boundary blind totals.");
   // At the first UTG boundary, source blind totals are known simultaneously;
   // do not invent an ordering/timestamps for forced posts or require turns that
-  // cannot legally precede UTG. HJ's one-fold source window uses that same
+  // cannot legally precede UTG. HJ/CO fold-prefix windows use that same
   // boundary baseline; other positions retain the ordered-log path.
-  if (!firstUtg && !firstHj && (posts.length !== 2 || posts.some(a => {
+  if (!firstUtg && !firstHj && !firstCo && (posts.length !== 2 || posts.some(a => {
     const position = context.players.find(p => p.seat === a.seat)?.position;
     return a.totalContributionBB !== (position === "SB" ? 0.5 : position === "BB" ? 1 : -1);
   }) || new Set(posts.map(a => a.seat)).size !== 2 || events.slice(0, 2).some(a => a.action !== "post_blind"))) return fail("Exactly two ordered normal blind posts are required; no antes, straddles or extra posts.");
@@ -126,6 +128,7 @@ export function evaluatePreflopReference(packet: DecisionPacket): {
   const legal = execution.raiseBounds;
   const exact = execution.exactOpeningSize;
   if (firstHj && !exact) return fail("HJ RAISE requires its dependent exact-five-chip sizing certificate; no substitution with FOLD.");
+  if (firstCo && !exact) return fail("CO RAISE requires its dependent exact-five-chip sizing certificate; no substitution with FOLD.");
   if (exact) {
     // This branch cannot be used for other sizes, positions or response models.
     // Source provenance is issued by the local reader; the relay does not act
@@ -133,7 +136,8 @@ export function evaluatePreflopReference(packet: DecisionPacket): {
     const now = Date.now();
     if (exact.rule !== "pokernow-0.1.72-th-4fun-1-2-exact5-v1" ||
         !(firstUtg && (exact.decisionWindow === undefined || exact.decisionWindow === "first_utg_boundary") ||
-          firstHj && exact.decisionWindow === "hj_after_utg_fold") ||
+          firstHj && exact.decisionWindow === "hj_after_utg_fold" ||
+          firstCo && exact.decisionWindow === "co_after_utg_hj_folds") ||
         hero.contributionBB !== 0 || context.heroSeat !== exact.heroSeat ||
         exact.units !== "chips" || exact.bigBlindChips !== 2 || exact.contributionChips !== 0 ||
         exact.raiseToChips !== 5 || exact.investmentChips !== 5 ||

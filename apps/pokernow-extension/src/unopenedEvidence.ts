@@ -2,18 +2,19 @@ import type { ScopedProof } from "@poker-ai/ai-core";
 import { isSourceNonActionMetadata, parsePlayerStacks, type LiveStateAssessment } from "@poker-ai/browser-reader";
 import type { LiveTableRead } from "./tableRead.js";
 import type { LiveTimelineDiagnostic } from "./liveTimeline.js";
-import { currentFirstUtg, currentHj } from "./firstUtgLive.js";
+import { currentFirstUtg, currentHj, currentCo } from "./firstUtgLive.js";
 
 /** Audit actual source evidence, not DOM-derived absence of wagers or supplied proof labels.
  * General logs cannot certify dealt-in membership or decision catch-up. The
- * separately validated first-UTG and one-fold HJ contracts are scoped exceptions.
+ * validated first-UTG, one-fold HJ and two-fold CO contracts are scoped exceptions.
  */
 export function inspectLiveUnopenedEvidence(read: LiveTableRead, assessment: LiveStateAssessment,
   timeline: LiveTimelineDiagnostic | null) {
   const hand = timeline?.current, source = timeline?.sourceStatus;
   const utg = currentFirstUtg(read, assessment, timeline);
   const hj = currentHj(read, assessment, timeline);
-  const first = utg ?? hj;
+  const co = currentCo(read, assessment, timeline);
+  const first = utg ?? hj ?? co;
   const mapping = hand?.seatMapping;
   const events = hand?.events.filter(e => e.source === "pokernow_log_v3") ?? [];
   const starts = events.filter(e => e.action === "hand_start");
@@ -56,6 +57,7 @@ export function inspectLiveUnopenedEvidence(read: LiveTableRead, assessment: Liv
     candidate: !!first || assessment.state?.street === "preflop" && disallowed.length === 0,
     firstUtgBoundary: utg,
     hjWindow: hj,
+    coWindow: co,
     heroSeat: { status: first || heroSeatVerified ? "proven" : identityConflict ? "contradicted" : "insufficient",
       seat: first?.heroSeat ?? (heroSeatVerified ? entry!.seat : null), playerId: heroId ?? null, evidenceEventId: entry?.evidenceEventId ?? null },
     listedPlayerCount: first ? 6 : sixPlayerRow?.parsed.kind === "valid" ? sixPlayerRow.parsed.entries.length : null,
@@ -65,7 +67,7 @@ export function inspectLiveUnopenedEvidence(read: LiveTableRead, assessment: Liv
       timestamp: e.sourceTimestampRaw, evidence: e.evidence })),
     proofs: first ? (["roster", "position", "actionWindow"] as const).map(scope => ({
       scope, status: "proven" as const, confidence: "high" as const,
-      provenance: [first.provenance, `Six explicit dealt-card entries/iHPI IDs; frozen seats cross-checked against dealer/SB/BB and current DOM; ${hj ? "one explicit UTG fold then first HJ turn" : "first UTG only"}.`], reasons: [],
+      provenance: [first.provenance, `Six explicit dealt-card entries/iHPI IDs; frozen seats cross-checked against dealer/SB/BB and current DOM; ${co ? "explicit UTG/HJ folds with intervening HJ turn then first CO turn" : hj ? "one explicit UTG fold then first HJ turn" : "first UTG only"}.`], reasons: [],
     })) : [proof("roster", rosterReasons, identityConflict || membershipChanged),
       proof("position", ["Player stacks supplies seat assignments only. Dealt-in membership, source dealer and clockwise seat order are unproven."], identityConflict),
       proof("actionWindow", actionReasons, identityConflict || disallowed.length > 0)],

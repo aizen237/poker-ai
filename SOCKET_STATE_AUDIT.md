@@ -1,5 +1,18 @@
 # Socket state and unopened-preflop evidence audit
 
+## Phase 3C: first CO after explicit UTG and HJ folds
+
+Existing captures contain full CO sequences in hands143 (15-19), 149 (85-89)
+and 167 (43-47). The same validated reducer now issues a scoped coProof after
+exactly boundary -> UTG fold -> HJ turn -> HJ fold -> CO turn. Frozen positions,
+deep stacks and all four complete raw patch shapes are required. CO activation
+starts its own original ten-second window; no prior deadline is renewed.
+The unchanged CO chart supports FOLD and, under the same independently matched
+exact-five profile, RAISE through the existing sizing producer.
+See [PREFLOP_PHASE3C.md](PREFLOP_PHASE3C.md) for evidence, limits and tests.
+No later-position, whole-hand-history or generic betting permission follows.
+Earlier documents' CO-blocked statements describe their historical scope.
+
 ## Phase 3B: first HJ exact-five RAISE
 
 The user reports Phase 3A HJ FOLD live verified. The same existing exact-five
