@@ -1,5 +1,8 @@
 # Phase 3C: source-verified unopened CO FOLD and exact-five RAISE
 
+Later scope update: [Phase 3D](PREFLOP_PHASE3D.md) adds the separately proven
+three-fold BTN window. BTN-blocked statements below record Phase 3C scope.
+
 ## Existing captured evidence
 
 | Local capture | Hand | Boundary | UTG fold | HJ turn | HJ fold | CO turn | Original cards | Boundary to CO |

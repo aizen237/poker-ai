@@ -13,36 +13,65 @@ export interface CoPending {
   anchor: HjProof["anchor"];
   folds: HjProof["fold"][];
   hjActivation?: HjProof["activation"];
+  coActivation?: HjProof["activation"];
+}
+
+export interface BtnProof extends Omit<CoProof, "scope" | "folds"> {
+  scope: "btn_after_utg_hj_co_folds";
+  folds: [HjProof["fold"], HjProof["fold"], HjProof["fold"]];
+  coActivation: HjProof["activation"];
 }
 
 /** Exact four-patch sequence captured in hands143/149/167. Called only after
  * the existing reducer validates continuity. No later positions or renewal. */
 export function advanceCoWindow(pending: CoPending, data: UtgProjection, sequence: number, at: number):
   { pending: CoPending; proof?: Omit<CoProof, "continuity"> } | null {
+  const result = advanceFoldPrefix(pending, data, sequence, at, "CO");
+  if (!result) return null;
+  return { pending: result.pending, ...(result.proof ? { proof: { ...result.proof,
+    scope: "co_after_utg_hj_folds" as const, folds: result.proof.folds as CoProof["folds"] } } : {}) };
+}
+
+/** Same closed fold/turn grammar, extended by the captured third fold/turn in
+ * hands148/166. Continuity remains owned by firstUtgSource, not this recognizer. */
+export function advanceBtnWindow(pending: CoPending, data: UtgProjection, sequence: number, at: number):
+  { pending: CoPending; proof?: Omit<BtnProof, "continuity"> } | null {
+  const result = advanceFoldPrefix(pending, data, sequence, at, "BTN");
+  if (!result) return null;
+  return { pending: result.pending, ...(result.proof ? { proof: { ...result.proof,
+    scope: "btn_after_utg_hj_co_folds" as const, folds: result.proof.folds as BtnProof["folds"],
+    coActivation: structuredClone(pending.coActivation!) } } : {}) };
+}
+
+/** Frozen actor order plus separate explicit activations; no skipped/coalesced
+ * transitions, general history coverage, later-position permission or renewal. */
+function advanceFoldPrefix(pending: CoPending, data: UtgProjection, sequence: number, at: number, target: "CO" | "BTN") {
   const w = pending.witness, patch = validatedOpeningPatch(data, w.heroId);
-  if (!patch || pending.folds.length > 2) return null;
+  const length = target === "CO" ? 2 : 3;
+  if (!patch || pending.folds.length > length || w.players.find(p => p.playerId === w.heroId)?.position !== target) return null;
   const { raw, kind } = patch;
-  const utg = w.players.find(p => p.position === "UTG")!;
-  const hj = w.players.find(p => p.position === "HJ")!;
+  const actors = ["UTG", "HJ", "CO", "BTN"].map(position => w.players.find(p => p.position === position)!);
   const bb = w.players.find(p => p.position === "BB")!;
-  const step = pending.folds.length === 0 ? 0 : !pending.hjActivation ? 1 : pending.folds.length === 1 ? 2 : 3;
-  const previousCursor = step === 0 ? pending.anchor.cursor : step === 2
-    ? pending.hjActivation!.sourcePatch.now : pending.folds.at(-1)!.cursor;
-  if (sequence !== pending.anchor.sequence + step + 1 || raw.pre !== previousCursor) return null;
-  if (step === 0 || step === 2) {
-    const actor = step === 0 ? utg : hj;
+  const turns = [pending.hjActivation, pending.coActivation].filter(v => v !== undefined);
+  const step = pending.folds.length + turns.length;
+  const previousCursor = step === 0 ? pending.anchor.cursor : step % 2 === 0
+    ? turns.at(-1)!.sourcePatch.now : pending.folds.at(-1)!.cursor;
+  if (step >= length * 2 || sequence !== pending.anchor.sequence + step + 1 || raw.pre !== previousCursor) return null;
+  if (step % 2 === 0) {
+    const actor = actors[step / 2]!;
     if (kind !== "fold" || Object.keys(raw.pGS)[0] !== actor.playerId || raw.wBACPI[0] !== bb.playerId) return null;
     return { pending: { ...pending, folds: [...pending.folds, {
       sequence, cursor: raw.now, previousCursor: raw.pre, receivedAt: at,
       playerId: actor.playerId, seat: actor.seat, sourcePatch: structuredClone(raw),
     }] } };
   }
-  if (kind !== "turn" || raw.cPI !== (step === 1 ? hj.playerId : w.heroId)) return null;
-  if (step === 1) return { pending: { ...pending, hjActivation: { sequence, sourcePatch: structuredClone(raw) } } };
+  if (kind !== "turn" || raw.cPI !== actors[(step + 1) / 2]!.playerId) return null;
+  if (step < length * 2 - 1) return { pending: { ...pending,
+    [step === 1 ? "hjActivation" : "coActivation"]: { sequence, sourcePatch: structuredClone(raw) } } };
   const witness = { ...w, cursor: raw.now, previousCursor: raw.pre, receivedAt: at,
-    provenance: `${w.provenance} Explicit UTG fold -> HJ turn -> HJ fold -> first CO activation at ${raw.now}. Closed hands-143/149/167 patch contract; no generic action coverage.` };
-  return { pending, proof: { version: 1, scope: "co_after_utg_hj_folds", historyComplete: false,
+    provenance: `${w.provenance} Explicit UTG fold -> HJ turn -> HJ fold -> ${target === "CO" ? "first CO" : "CO turn -> CO fold -> first BTN"} activation at ${raw.now}. Closed ${target === "CO" ? "hands-143/149/167" : "hands-148/166"} patch contract; no generic action coverage.` };
+  return { pending, proof: { version: 1 as const, historyComplete: false as const,
     expiresAt: at + 10_000, witness, anchor: structuredClone(pending.anchor),
-    folds: structuredClone(pending.folds) as CoProof["folds"], hjActivation: structuredClone(pending.hjActivation!),
+    folds: structuredClone(pending.folds), hjActivation: structuredClone(pending.hjActivation!),
     activation: { sequence, sourcePatch: structuredClone(raw) } } };
 }

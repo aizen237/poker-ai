@@ -37,7 +37,7 @@ export interface HjPending {
   fold?: HjProof["fold"];
 }
 
-/** Shared closed-shape check for the HJ and CO recognizers. The bounded
+/** Shared closed-shape check for the HJ, CO and BTN recognizers. The bounded
  * projection must agree with the retained raw patch; no dropped mutation. */
 export function validatedOpeningPatch(data: UtgProjection, heroId: string) {
   const raw = data.hjPatch, kind = hjPatchKind(raw);

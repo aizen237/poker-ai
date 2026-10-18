@@ -111,8 +111,9 @@ For a single local sizing investigation, see [manual RAISE evidence capture](RAI
 It is disabled by default and does not activate RAISE or perform poker actions.
 
 The independent [Phase 2 exact-five-chip rule](PREFLOP_RAISE_PHASE2.md), extended
-by [Phase 3B](PREFLOP_PHASE3B.md) and [Phase 3C](PREFLOP_PHASE3C.md), supports
-matching first-UTG, one-fold HJ and two-fold CO chart RAISE windows. Each uses
+by [Phase 3B](PREFLOP_PHASE3B.md), [Phase 3C](PREFLOP_PHASE3C.md) and
+[Phase 3D](PREFLOP_PHASE3D.md), supports matching first-UTG, one-fold HJ,
+two-fold CO and three-fold BTN chart RAISE windows. Each uses
 its own original ten-second activation deadline with the panel closed or open. Rebuild,
 reload the unpacked extension, refresh the table and restart the relay after
 updating so the reader and compiled packet schema agree. The collector remains

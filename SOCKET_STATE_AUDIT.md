@@ -1,5 +1,19 @@
 # Socket state and unopened-preflop evidence audit
 
+## Phase 3D: first BTN after explicit UTG, HJ and CO folds
+
+Captured hand148 sequences74-80 and hand166 sequences32-38 contain the complete
+three-fold sequence with separate HJ/CO/BTN turn patches. The existing reducer
+now issues btnProof using the shared CO/BTN fold-prefix recognizer; no new
+continuity authority is introduced. Frozen six-player positions and the same
+profile/deep-stack/live cross-checks are required. The original BTN activation
+starts its own ten-second deadline. The unchanged BTN chart supports FOLD and,
+through the existing empirical exact-five sizing producer, RAISE TO 5 CHIPS.
+See [PREFLOP_PHASE3D.md](PREFLOP_PHASE3D.md) for the legality equivalence,
+fixture provenance, tests and limits. Historical acceptance is not live server
+preflight. No SB/BB, generic betting/history permission or proof renewal follows.
+Earlier BTN-blocked statements retain their historical scope.
+
 ## Phase 3C: first CO after explicit UTG and HJ folds
 
 Existing captures contain full CO sequences in hands143 (15-19), 149 (85-89)

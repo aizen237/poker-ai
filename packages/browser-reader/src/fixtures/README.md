@@ -235,3 +235,15 @@ hero cards (J5s, AKo, QJo respectively) are unchanged. No new live capture or
 DOM evidence is claimed. Tests simulate the synchronous DOM cross-check using
 the existing reader result shape. The positive decisions/proofs are produced
 by the real MAIN-to-overlay path; negative mutations are explicitly synthetic.
+
+## Phase 3D BTN windows
+
+pokernow-btn-148.json comes from local raise-sizing-paired.json (through sequence80);
+pokernow-btn-166.json comes from raise-5-accepted.json (through sequence38).
+Earlier frames reuse tracked bounded prefixes from the HJ fixtures. The final
+six fold/turn patches retain ALL raw fields, with player identities substituted.
+Original cards Qd/Jd and Kc/8d, numeric values, array order and source/local times
+are unchanged. Neither fixture claims a new captured DOM or BTN accepted raise.
+The real source-to-overlay tests simulate DOM cross-checks using the existing
+reader result shape. A clearly labeled synthetic 7c/2d card variation tests FOLD;
+negative tests mutate copies only. Raw evidence remains local and ignored.
