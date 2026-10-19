@@ -730,3 +730,13 @@ actually dealt-in players. This is the smallest next sample for six-player
 membership, ordering and action-window evidence. Use the existing raw recorder;
 no special poker action is required. Any min/max/increment metadata present is
 retained, but capture alone does not guarantee legality or completeness proof.
+
+## Phase 3F BB audit: no activation
+
+The saved six-player BB hands164/146 are walks: explicit SB fold then settlement,
+without a BB decision. Hand49 remains a two-player completion candidate, not the
+required six-player closed completion/activation contract. The current engine
+also has no BB-versus-limp strategy; legal CHECK is insufficient. No production
+proofs, source semantics, sizing or freshness behavior changed. Added walk replay
+and fail-closed regression coverage; see [PREFLOP_PHASE3F.md](PREFLOP_PHASE3F.md)
+for exact sequence evidence, independent blockers and the one bounded capture.

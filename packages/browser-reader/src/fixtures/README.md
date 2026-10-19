@@ -260,3 +260,13 @@ with ordinary remaining stacks after blind deductions. Original Q9o tests FOLD;
 original33 tests blocked chart RAISE. Synthetic card/negative mutations are labeled.
 Raw local captures stay ignored. Positive tests traverse the real MAIN-to-overlay
 path without injecting proof objects or selected decisions.
+
+## Phase 3F BB walk (no BB activation)
+
+pokernow-bb-walk-164.json uses the existing sanitized bounded registration from
+the hand165 prefix plus every raw field of sequences2–11 from local
+raise-5-accepted.json. Player IDs are substituted, numbers/order/times retained.
+Registration occurs during hand164; no fresh boundary is claimed. SB folds,
+settlement follows, and BB is never activated. DOM read shapes are simulated.
+Completion/raise variations in tests are explicitly synthetic rejection cases,
+not new PokerNow observations. No raw evidence directory files are committed.

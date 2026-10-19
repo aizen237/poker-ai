@@ -3,6 +3,7 @@ import { buildPreflopContext } from "./preflopContext.js";
 import { decisionProofBinding, PROOF_SCOPES } from "./decisionProofs.js";
 import { validateDecisionPacket, type DecisionPacket } from "./decisionPacket.js";
 import { evaluateDecisionPolicy } from "./decisionPolicy.js";
+import { evaluatePreflopReference, unopenedChartAction } from "./preflopPolicy.js";
 import { getPolicyRecommendation } from "./policyRecommendation.js";
 import type { ModelRouter } from "./modelRouter.js";
 
@@ -69,6 +70,18 @@ describe("scoped six-max deep-stack raise-first-in reference", () => {
     expect(evaluateDecisionPolicy(bind(p))).toMatchObject({ chosenAction: "FOLD", chosenSizeBB: null, raiseToBB: null, activation: { allowed: true } });
   });
   it("does not treat the BB option as an RFI", () => { blocked(packet("BB")); });
+  it.each(["AA", "72o", "KQo"])("BB versus SB limp has no strategy for %s even with synthetic legal CHECK/RAISE permissions", hand => {
+    const p = packet("BB");
+    if (hand === "AA") p.hero.holeCards = [{ rank: 14, suit: "s" }, { rank: 14, suit: "h" }];
+    if (hand === "72o") p.hero.holeCards = [{ rank: 7, suit: "s" }, { rank: 2, suit: "h" }];
+    expect(p.preflop!.situation).toBe("limped_pot");
+    expect(p.facingAction.amountBB).toBe(0);
+    expect(p.candidateActions).toEqual(["CHECK", "RAISE"]);
+    expect(unopenedChartAction(p)).toBeNull();
+    expect(evaluatePreflopReference(p)).toMatchObject({ action: null, raiseToBB: null });
+    expect(evaluatePreflopReference(p).reasons.join(" ")).toContain("No deterministic response table");
+    blocked(bind(p));
+  });
   it.each([
     ["hero not to act", (p: DecisionPacket) => { p.preflopExecution!.heroIsCurrentToAct = false; }],
     ["missing execution", (p: DecisionPacket) => { delete p.preflopExecution; }],
