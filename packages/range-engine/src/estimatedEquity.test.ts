@@ -10,6 +10,15 @@ function estimate(hands:string[],status:OpponentRangeEstimate["status"]="modeled
 }
 const opts=()=>({iterations:60,rng:mulberry32(20)});
 describe("equity source selection",()=>{
+ it("an SB completion does not supply a modeled limp or limp-call range",()=>{
+  const hero=parseCards("Ah Ad");
+  const sb=estimateOpponentRange({position:"SB",actions:[{street:"preflop",action:"call",priorRaises:0,facing:"none",unopened:true}],
+   historyCoverage:"complete",effectiveStackBB:125,playersDealtIn:6,chipEvOnly:true,knownCards:hero});
+  expect(sb.status).toBe("prior_only");expect(sb.confidence).toBe("low");
+  expect(sb.assumptions.join(" ")).toContain("Call context is unresolved");
+  const result=calculateEquityForEstimates(hero,[sb],[],opts());
+  expect(result.equity).toBeUndefined();expect(result.source).toBeUndefined();
+ });
  it("uses each distinct modeled range and labels multiway equity",()=>{
   const hero=parseCards("Qh Qd"),board=parseCards("2h 3c 9d");
   const estimates=[estimate(["AA"]),estimate(["KK"])];

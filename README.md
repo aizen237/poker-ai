@@ -44,6 +44,7 @@ refresh the PokerNow tab. Source changes alone are not enough.
 - [Original SB source window implementation](PREFLOP_PHASE3E.md)
 - [Historical hand212 SB acceptance audit](PREFLOP_SB_212_ACCEPTANCE.md)
 - [BB audit: missing completion evidence and strategy](PREFLOP_PHASE3F.md)
+- [BB completion audit tool and strategy requirements](PREFLOP_PHASE3G.md)
 - [V2 hand/event timeline and required live capture](V2_HAND_TIMELINE.md)
 - [V1 architecture](V1_ARCHITECTURE.md)
 - [Reliability audit and current limitations](V1_RELIABILITY_AUDIT.md)

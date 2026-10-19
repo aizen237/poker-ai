@@ -1,5 +1,10 @@
 # Phase 3F: BB support audit — activation remains blocked
 
+Current follow-up: [Phase 3G](PREFLOP_PHASE3G.md) adds a local capture-audit tool
+and strategy-boundary regressions; BB remains blocked. SB RAISE is now enabled
+by [paired hand224 evidence](PREFLOP_SB_224_RAISE.md). Earlier SB-blocked statements
+below describe the historical Phase 3F implementation.
+
 No BB action is enabled. This pass adds regression protection and documents two
 independent missing contracts: six-player SB-completion source evidence and a
 BB-versus-SB-limp strategic policy. A legal free CHECK does not establish that

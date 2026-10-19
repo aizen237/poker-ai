@@ -35,7 +35,7 @@ describe("BB abstention through real MAIN -> reader -> overlay (no BB policy exi
   });
   // These mutations test rejection only. They are NOT captured six-player SB
   // completions, a verified call grammar, or positive BB permission fixtures.
-  it.each(["limp", "raise", "wrong-actor", "missed", "gap", "reconnect", "replay", "expired"])(
+  it.each(["limp", "raise", "wrong-actor", "missed", "gap", "reconnect", "replay", "expired", "changed-hand", "ambiguous-contribution"])(
     "synthetic %s cannot turn a legal-looking BB DOM option into advice", async variant => {
       const f = await replay(variant);
       expect(f.assessment.state?.seats.find(s => s.isYou)?.isCurrentToAct).toBe(true);
@@ -67,6 +67,8 @@ async function replay(variant: string) {
     if (variant === "gap") last.payload.pre++;
     if (variant === "reconnect") last.connectionGeneration++;
     if (variant === "replay") frames.splice(-1, 0, structuredClone(frames.at(-2)));
+    if (variant === "changed-hand") last.payload.hI = "OTHER_HAND";
+    if (variant === "ambiguous-contribution") wager.tB = { PLAYER_10: "2" };
   }
   const read = load("utg-reader-cross-check.json").read;
   read.context.dealerSeatNumber = start.dealerSeat;

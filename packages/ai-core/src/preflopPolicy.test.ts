@@ -6,6 +6,7 @@ import { evaluateDecisionPolicy } from "./decisionPolicy.js";
 import { evaluatePreflopReference, unopenedChartAction } from "./preflopPolicy.js";
 import { getPolicyRecommendation } from "./policyRecommendation.js";
 import type { ModelRouter } from "./modelRouter.js";
+import { calculateRaiseEV } from "@poker-ai/poker-engine";
 
 const positions = ["UTG", "HJ", "CO", "BTN", "SB", "BB"] as const;
 // Synthetic independent certificates, NOT a captured live decision or complete source producer.
@@ -81,6 +82,27 @@ describe("scoped six-max deep-stack raise-first-in reference", () => {
     expect(evaluatePreflopReference(p)).toMatchObject({ action: null, raiseToBB: null });
     expect(evaluatePreflopReference(p).reasons.join(" ")).toContain("No deterministic response table");
     blocked(bind(p));
+  });
+  it.each([0, 0.5, 1])("equity %s and a legal free check do not supply a BB strategy or terminal model", equity => {
+    const p = packet("BB");
+    p.policyContext!.equity = { estimate: equity, low: equity, high: equity,
+      source: "Synthetic showdown equity, not action EV", confidence: "medium" };
+    p.policyContext!.checkEndsHand = true; // Deliberately false claim: preflop check only closes this round.
+    p.policyContext!.responses = [{ investmentBB: 2, equityIfCalled: p.policyContext!.equity,
+      foldEquity: { estimate: 0.5, low: 0.5, high: 0.5, source: "Synthetic assumption", confidence: "medium" },
+      callerRangeBasis: "Uncalibrated SB continuation assumption", model: "fold_or_call", assumption: "No later betting or limp-reraise" }];
+    expect(blocked(bind(p)).actionEVs).toEqual([]);
+  });
+  it("the existing simplified raise EV cannot identify CHECK vs RAISE without response/future-betting evidence", () => {
+    // Counterexamples, NOT calibrated ranges, a legal sizing certificate, or a
+    // poker policy. Even the optimistic no-more-betting simplification changes
+    // its ranking when unmeasured inputs change. Real deep-stack CHECK is not 0.
+    const checkShowdownOnly = 0.5 * 2;
+    const unfavorable = calculateRaiseEV(0.25, 0, 2, 2, 2).ev;
+    const favorable = calculateRaiseEV(0.75, 0.5, 2, 2, 2).ev;
+    expect(unfavorable).toBeLessThan(checkShowdownOnly);
+    expect(favorable).toBeGreaterThan(checkShowdownOnly);
+    blocked(packet("BB"));
   });
   it.each([
     ["hero not to act", (p: DecisionPacket) => { p.preflopExecution!.heroIsCurrentToAct = false; }],

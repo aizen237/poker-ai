@@ -1,0 +1,395 @@
+{
+  "capture": {
+    "temporaryDiagnosticsOnly": true,
+    "authoritativeOrdering": false,
+    "historyCompletenessProof": false,
+    "active": false,
+    "stopReason": "exported_or_manually_stopped",
+    "frameCount": 5,
+    "retainedJsonCharacters": 3891,
+    "rejectedFrames": 0,
+    "retainedSourceCharacters": 4377,
+    "registeredCaptured": true,
+    "limits": {
+      "frames": 500,
+      "characters": 4194304
+    }
+  },
+  "frames": [
+    {
+      "localReceiveSequence": 1,
+      "localReceivedAt": 1791681968659,
+      "connectionGeneration": 1,
+      "event": "registered",
+      "payload": {
+        "currentPlayer": {
+          "id": "PLAYER_1"
+        },
+        "gameState": {
+          "aD": false,
+          "aS": false,
+          "cM": false,
+          "cR": false,
+          "gM": "th",
+          "gN": 48,
+          "gT": [
+            1,
+            5
+          ],
+          "hI": "HAND_48",
+          "id": "TABLE_TEST",
+          "lE": true,
+          "mR": 2,
+          "nR": [
+            1
+          ],
+          "pC": {
+            "PLAYER_3": {
+              "cards": [
+                {
+                  "value": null,
+                  "showing": false
+                },
+                {
+                  "value": null,
+                  "showing": false
+                }
+              ]
+            },
+            "PLAYER_2": {
+              "cards": [
+                {
+                  "value": "Jh",
+                  "showing": true
+                },
+                {
+                  "value": "8c",
+                  "showing": true
+                }
+              ]
+            },
+            "PLAYER_1": {
+              "cards": [
+                {
+                  "value": "9d",
+                  "showing": false
+                },
+                {
+                  "value": "6h",
+                  "showing": false
+                }
+              ]
+            }
+          },
+          "rH": false,
+          "sG": false,
+          "tB": {},
+          "uP": 1791557771373,
+          "aGC": true,
+          "aVC": true,
+          "cHB": 0,
+          "cPI": null,
+          "dSB": false,
+          "gDM": [],
+          "mTB": null,
+          "now": 1791681923076,
+          "oTC": {
+            "1": [
+              "9s",
+              "Kh",
+              "Js",
+              "5h",
+              "3d"
+            ]
+          },
+          "pGS": {
+            "PLAYER_3": "inGame",
+            "PLAYER_2": "allIn",
+            "PLAYER_1": "inGame"
+          },
+          "pTB": {
+            "PLAYER_3": 0,
+            "PLAYER_2": 0,
+            "PLAYER_1": 0
+          },
+          "pot": 0,
+          "rHC": null,
+          "rHP": [],
+          "rIT": "no",
+          "sBS": 2,
+          "sNA": "NSAGRS",
+          "sPI": [],
+          "sPM": false,
+          "tHC": [
+            "Js",
+            "Kh",
+            "9s"
+          ],
+          "ante": null,
+          "bBPI": "PLAYER_3",
+          "cRPI": [
+            "PLAYER_3",
+            "PLAYER_1"
+          ],
+          "iHPI": [
+            "PLAYER_3",
+            "PLAYER_2",
+            "PLAYER_1"
+          ],
+          "lSPI": null,
+          "mode": "4fun",
+          "pASA": 1791557054654,
+          "pITT": null,
+          "sBPI": "PLAYER_2",
+          "sNAA": 1791557064480,
+          "mAVTB": 119,
+          "seats": [
+            [
+              1,
+              "PLAYER_1"
+            ],
+            [
+              2,
+              "PLAYER_2"
+            ],
+            [
+              3,
+              "PLAYER_3"
+            ]
+          ],
+          "dLTWTB": null,
+          "status": "inProgress",
+          "wBACPI": [],
+          "dLTWoTB": null,
+          "ownerID": "PLAYER_1",
+          "players": {
+            "PLAYER_3": {
+              "id": "PLAYER_3",
+              "stack": 87,
+              "status": "inGame"
+            },
+            "PLAYER_2": {
+              "id": "PLAYER_2",
+              "stack": 6,
+              "status": "inGame",
+              "disconnectedSince": 1791553866718
+            },
+            "PLAYER_1": {
+              "id": "PLAYER_1",
+              "stack": 119,
+              "status": "inGame"
+            }
+          },
+          "version": "0.1.72",
+          "bigBlind": 2,
+          "dealerID": "PLAYER_1",
+          "deadButton": false,
+          "dealerSeat": 1,
+          "eventsData": [],
+          "gameResult": {
+            "PLAYER_2": {
+              "1": {
+                "hC": [
+                  "Jh",
+                  "8c"
+                ],
+                "position": 1
+              },
+              "gained": 6
+            }
+          },
+          "smallBlind": 1,
+          "bigBlindCheck": false,
+          "directToNexTurn": false,
+          "recordChatForReplay": true,
+          "allowStandaloneRebuy": false,
+          "pre": 1791681910929,
+          "mEV": 0,
+          "fV": "0.1.72",
+          "sN": 1791681969118
+        }
+      }
+    },
+    {
+      "localReceiveSequence": 2,
+      "localReceivedAt": 1791681979674,
+      "connectionGeneration": 1,
+      "event": "gC",
+      "payload": {
+        "uP": "<D>",
+        "now": 1791681980133,
+        "sNAA": 1791681984133,
+        "players": {
+          "PLAYER_2": {
+            "disconnectedSince": 1791681980133
+          }
+        },
+        "eventsData": [],
+        "pre": 1791681923076,
+        "mEV": 0,
+        "fV": "0.1.72",
+        "sN": 1791681980135
+      }
+    },
+    {
+      "localReceiveSequence": 3,
+      "localReceivedAt": 1791681982138,
+      "connectionGeneration": 1,
+      "event": "gC",
+      "payload": {
+        "gN": 49,
+        "gT": [
+          1,
+          0
+        ],
+        "hI": "HAND_49",
+        "mR": 4,
+        "nR": [
+          1
+        ],
+        "pC": {
+          "PLAYER_3": {
+            "cards": [
+              {
+                "value": null,
+                "showing": false
+              },
+              {
+                "value": null,
+                "showing": false
+              }
+            ],
+            "name1": null,
+            "prob1": null,
+            "name2RH": null,
+            "name2": null,
+            "name1RH": null
+          },
+          "PLAYER_1": {
+            "cards": [
+              {
+                "value": "Kh",
+                "showing": false
+              },
+              {
+                "value": "Th",
+                "showing": false
+              }
+            ],
+            "name1": null,
+            "prob1": null,
+            "name2RH": null,
+            "name2": null,
+            "name1RH": null
+          }
+        },
+        "tB": {
+          "PLAYER_3": 1,
+          "PLAYER_1": 2
+        },
+        "cHB": 2,
+        "cPI": "PLAYER_3",
+        "gDM": [],
+        "now": 1791681982561,
+        "oTC": {
+          "1": []
+        },
+        "pGS": {
+          "PLAYER_2": "<D>"
+        },
+        "pTB": {
+          "PLAYER_2": "<D>"
+        },
+        "rHP": [],
+        "sBS": 3,
+        "sNA": null,
+        "sPI": [],
+        "tHC": null,
+        "bBPI": "PLAYER_1",
+        "cRPI": [],
+        "iHPI": [
+          "PLAYER_3",
+          "PLAYER_1"
+        ],
+        "pASA": 1791681982561,
+        "pITT": "PLAYER_3",
+        "sBPI": "PLAYER_3",
+        "sNAA": null,
+        "mAVTB": 87,
+        "seats": [
+          [
+            1,
+            "PLAYER_1"
+          ],
+          [
+            3,
+            "PLAYER_3"
+          ]
+        ],
+        "wBACPI": [
+          "PLAYER_1"
+        ],
+        "players": {
+          "PLAYER_2": "<D>"
+        },
+        "dealerID": "PLAYER_3",
+        "dealerSeat": 3,
+        "eventsData": [],
+        "gameResult": "<D>",
+        "pre": 1791681980133,
+        "mEV": 0,
+        "fV": "0.1.72",
+        "sN": 1791681982601,
+        "rHC": null
+      }
+    },
+    {
+      "localReceiveSequence": 4,
+      "localReceivedAt": 1791682081321,
+      "connectionGeneration": 1,
+      "event": "gC",
+      "payload": {
+        "tB": {
+          "PLAYER_3": 2
+        },
+        "now": 1791682081744,
+        "pGS": {},
+        "sNA": "NSAA",
+        "cRPI": [
+          "PLAYER_3"
+        ],
+        "pITT": null,
+        "sNAA": 1791682082544,
+        "wBACPI": [
+          "PLAYER_1"
+        ],
+        "eventsData": [],
+        "pre": 1791681982561,
+        "mEV": 0,
+        "fV": "0.1.72",
+        "sN": 1791682081788
+      }
+    },
+    {
+      "localReceiveSequence": 5,
+      "localReceivedAt": 1791682082166,
+      "connectionGeneration": 1,
+      "event": "gC",
+      "payload": {
+        "cPI": "PLAYER_1",
+        "now": 1791682082616,
+        "sNA": null,
+        "pASA": 1791682082616,
+        "pITT": "PLAYER_1",
+        "sNAA": null,
+        "mAVTB": 119,
+        "eventsData": [],
+        "pre": 1791682081744,
+        "mEV": 0,
+        "fV": "0.1.72",
+        "sN": 1791682082620
+      }
+    }
+  ],
+  "provenance": "Captured hand49, two-player completion candidate only. Identities substituted; registration player/card metadata bounded to existing reader fields; frames2-5 retain raw fields/numbers/times/order. No six-player or verified call contract is claimed."
+}

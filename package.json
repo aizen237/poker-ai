@@ -11,6 +11,7 @@
     "build": "npm run build:ts && npm run typecheck --workspace=@poker-ai/pokernow-extension && npm run bundle --workspace=@poker-ai/pokernow-extension",
     "build:ts": "tsc -b --force",
     "build:extension": "npm run build --workspace=@poker-ai/pokernow-extension",
+    "audit:bb": "node apps/pokernow-extension/scripts/audit-bb-capture.mjs",
     "dev:relay": "npm run dev --workspace=@poker-ai/ai-relay-server",
     "pretest": "npm run build:ts",
     "test": "npm run test --workspaces --if-present",

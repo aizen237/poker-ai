@@ -1,5 +1,16 @@
 # Socket state and unopened-preflop evidence audit
 
+## Phase 3G BB completion investigation
+
+Replayed the seven currently available raw exports through the existing source
+authority. Only hand49 has an adjacent SB total1->2 / BB-turn candidate, with
+two dealt-in players. Hands212/224 are accepted SB raises; the other relevant
+six-player sequences are walks. A local read-only `audit:bb` command now retains
+candidate patches/metadata and rejected-source reasons without issuing proofs.
+No six-player completion grammar, strategy or live BB action is enabled.
+See [PREFLOP_PHASE3G.md](PREFLOP_PHASE3G.md) for exact missing evidence, strategy
+research, tests and one bounded capture. Existing opening proofs are unchanged.
+
 ## Hand224 paired SB input/acceptance: exact-five rule enabled
 
 Local sb-raise-224.json and the supplied image (saved as sb-raise-224.png.png)

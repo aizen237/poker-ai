@@ -298,3 +298,12 @@ Hand147/212 chart RAISE replays now use the later rule only while their source
 windows are fresh. Historical accepted actions outside expiry never renew them.
 Controlled negative mutations are test variations, not additional live evidence.
 Neither raw source file nor screenshot is committed.
+
+## Phase 3G: actual two-player completion candidate
+
+pokernow-bb-completion-candidate-49.json preserves raw hand49 frames2-5 and
+their original numbers/order/timestamps. Table/hand/player IDs are substituted;
+registration player/card metadata is bounded to reader fields. This is TWO
+dealt-in players, not a synthetic six-player completion. Audit positives retain
+it as observational only. Controlled mutations test rejection, not evidence of
+new PokerNow semantics. Raw local captures are not added to Git.

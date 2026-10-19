@@ -126,3 +126,9 @@ of sizing. Panel selection alone is not authorization, and opening/editing the
 panel never renews the original SB activation +10s deadline. Reload the rebuilt
 extension, refresh PokerNow and restart the relay for the updated packet schema.
 No automatic poker actions are added.
+
+To inspect an existing raw BB capture locally, run
+`npm run audit:bb -- evidence/your-bb-completion.json`. See
+[Phase 3G](PREFLOP_PHASE3G.md). This offline tool reuses the current source
+authority and prints observational evidence only; it never activates advice,
+writes evidence or contacts PokerNow. Keep its output local.
