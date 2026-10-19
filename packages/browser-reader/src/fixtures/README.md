@@ -247,3 +247,16 @@ are unchanged. Neither fixture claims a new captured DOM or BTN accepted raise.
 The real source-to-overlay tests simulate DOM cross-checks using the existing
 reader result shape. A clearly labeled synthetic 7c/2d card variation tests FOLD;
 negative tests mutate copies only. Raw evidence remains local and ignored.
+
+## Phase 3E SB windows
+
+pokernow-sb-147.json derives from raise-sizing-paired.json through sequence71;
+pokernow-sb-165.json derives from raise-5-accepted.json through sequence29.
+Earlier frames reuse the tracked bounded prefixes; all eight final fold/turn
+payloads retain every raw field with identity substitution only. Original cards
+3s/3h and 9s/Qc, numeric values, array order and source/local times are unchanged.
+No SB accepted raise is present. Tests simulate the synchronous DOM cross-check
+with ordinary remaining stacks after blind deductions. Original Q9o tests FOLD;
+original33 tests blocked chart RAISE. Synthetic card/negative mutations are labeled.
+Raw local captures stay ignored. Positive tests traverse the real MAIN-to-overlay
+path without injecting proof objects or selected decisions.

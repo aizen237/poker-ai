@@ -23,20 +23,25 @@ export function currentBtn(read: LiveTableRead | undefined, assessment: LiveStat
   return currentOpeningWindow(read, assessment, timeline, "BTN");
 }
 
-/** Shared live cross-checks; HJ/CO/BTN prefixes are produced by the same reducer.
+export function currentSb(read: LiveTableRead | undefined, assessment: LiveStateAssessment,
+  timeline: LiveTimelineDiagnostic | null | undefined) {
+  return currentOpeningWindow(read, assessment, timeline, "SB");
+}
+
+/** Shared live cross-checks; HJ/CO/BTN/SB prefixes are produced by the same reducer.
  * DOM folds can contradict a source witness, never create one. */
 function currentOpeningWindow(read: LiveTableRead | undefined, assessment: LiveStateAssessment,
-  timeline: LiveTimelineDiagnostic | null | undefined, role: "UTG" | "HJ" | "CO" | "BTN") {
-  const source = timeline?.sourceStatus, proof = role === "UTG" ? source?.firstUtgProof : role === "HJ" ? source?.hjProof : role === "CO" ? source?.coProof : source?.btnProof, w = proof?.witness;
+  timeline: LiveTimelineDiagnostic | null | undefined, role: "UTG" | "HJ" | "CO" | "BTN" | "SB") {
+  const source = timeline?.sourceStatus, proof = role === "UTG" ? source?.firstUtgProof : role === "HJ" ? source?.hjProof : role === "CO" ? source?.coProof : role === "BTN" ? source?.btnProof : source?.sbProof, w = proof?.witness;
   const id = source?.identity, chain = proof?.continuity;
-  const foldedPositions = role === "BTN" ? ["UTG", "HJ", "CO"] : role === "CO" ? ["UTG", "HJ"] : role === "HJ" ? ["UTG"] : [];
+  const foldedPositions = role === "SB" ? ["UTG", "HJ", "CO", "BTN"] : role === "BTN" ? ["UTG", "HJ", "CO"] : role === "CO" ? ["UTG", "HJ"] : role === "HJ" ? ["UTG"] : [];
   const foldedIds = foldedPositions.map(position => w?.players.find(p => p.position === position)?.playerId);
   const state = assessment.state;
   if (!read || !timeline || !w || !source?.connected || !id || !state ||
       id.tableId !== w.tableId || id.handId !== w.handId || id.handNumber !== w.handNumber || id.heroPlayerId !== w.heroId ||
       (role === "UTG" ? id.frameCursor !== w.cursor : id.frameCursor !== (proof && "anchor" in proof ? proof.anchor.cursor : null)) ||
       timeline.current.handId !== `${w.tableId}:hand:${w.handId}` || timeline.current.handNumber !== w.handNumber ||
-      proof?.scope !== (role === "UTG" ? "first_utg_boundary" : role === "HJ" ? "hj_after_utg_fold" : role === "CO" ? "co_after_utg_hj_folds" : "btn_after_utg_hj_co_folds") || proof.version !== 1 || proof.historyComplete !== false ||
+      proof?.scope !== (role === "UTG" ? "first_utg_boundary" : role === "HJ" ? "hj_after_utg_fold" : role === "CO" ? "co_after_utg_hj_folds" : role === "BTN" ? "btn_after_utg_hj_co_folds" : "sb_after_utg_hj_co_btn_folds") || proof.version !== 1 || proof.historyComplete !== false ||
       (role !== "UTG" && (Date.now() < w.receivedAt || Date.now() >= proof.expiresAt ||
         w.players.find(p => p.playerId === w.heroId)?.position !== role)) ||
       chain?.generation !== w.generation || chain.status !== "validated_prefix" || chain.tableId !== w.tableId ||
@@ -54,7 +59,7 @@ function currentOpeningWindow(read: LiveTableRead | undefined, assessment: LiveS
   const logFolds = timeline.current.events.filter(e => e.source === "pokernow_log_v3" && e.action === "fold");
   if (role !== "UTG" && (logFolds.length > foldedIds.length ||
       new Set(logFolds.map(e => e.actor?.playerId)).size !== logFolds.length)) return null;
-  if ((role === "CO" || role === "BTN") && logFolds.length > 1 &&
+  if ((role === "CO" || role === "BTN" || role === "SB") && logFolds.length > 1 &&
       (logFolds.some(e => e.order === "ambiguous") || logFolds.some((e, i) => i > 0 &&
         foldedIds.indexOf(e.actor?.playerId ?? undefined) <= foldedIds.indexOf(logFolds[i - 1]!.actor?.playerId ?? undefined)))) return null;
   if (role !== "UTG") {
@@ -82,6 +87,6 @@ function currentOpeningWindow(read: LiveTableRead | undefined, assessment: LiveS
   const ranks = "23456789TJQKA";
   const cards = hero.holeCards.map(c => `${ranks[c.rank - 2]}${c.suit}`).sort();
   if (cards.length !== 2 || JSON.stringify(cards) !== JSON.stringify([...w.heroCards].sort()) ||
-      assessment.amountToCall !== null && assessment.amountToCall !== w.bigBlind) return null;
+      assessment.amountToCall !== null && assessment.amountToCall !== w.bigBlind - w.players.find(p => p.playerId === w.heroId)!.contribution) return null;
   return w;
 }

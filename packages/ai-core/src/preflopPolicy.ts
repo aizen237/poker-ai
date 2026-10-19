@@ -91,15 +91,17 @@ export function evaluatePreflopReference(packet: DecisionPacket): {
   const firstHj = context.openingEvidence === "hj_after_utg_fold";
   const firstCo = context.openingEvidence === "co_after_utg_hj_folds";
   const firstBtn = context.openingEvidence === "btn_after_utg_hj_co_folds";
+  const firstSb = context.openingEvidence === "sb_after_utg_hj_co_btn_folds";
+  if (firstSb && (context.heroPosition !== "SB" || events.length !== 4 || posts.length)) return fail("SB fold-prefix evidence requires exactly UTG, HJ, CO and BTN folds and normal boundary blinds.");
   if (firstBtn && (context.heroPosition !== "BTN" || events.length !== 3 || posts.length)) return fail("BTN fold-prefix evidence supports exactly UTG, HJ and CO folds and boundary blind totals.");
   if (firstUtg && (context.heroPosition !== "UTG" || events.length !== 0)) return fail("First UTG boundary evidence cannot certify a later turn or prior voluntary action.");
   if (firstHj && (context.heroPosition !== "HJ" || events.length !== 1 || posts.length)) return fail("HJ fold-prefix evidence supports exactly one prior UTG fold and boundary blind totals.");
   if (firstCo && (context.heroPosition !== "CO" || events.length !== 2 || posts.length)) return fail("CO fold-prefix evidence supports exactly UTG then HJ folds and boundary blind totals.");
   // At the first UTG boundary, source blind totals are known simultaneously;
   // do not invent an ordering/timestamps for forced posts or require turns that
-  // cannot legally precede UTG. HJ/CO/BTN fold-prefix windows use that same
+  // cannot legally precede UTG. HJ/CO/BTN/SB fold-prefix windows use that same
   // boundary baseline; other positions retain the ordered-log path.
-  if (!firstUtg && !firstHj && !firstCo && !firstBtn && (posts.length !== 2 || posts.some(a => {
+  if (!firstUtg && !firstHj && !firstCo && !firstBtn && !firstSb && (posts.length !== 2 || posts.some(a => {
     const position = context.players.find(p => p.seat === a.seat)?.position;
     return a.totalContributionBB !== (position === "SB" ? 0.5 : position === "BB" ? 1 : -1);
   }) || new Set(posts.map(a => a.seat)).size !== 2 || events.slice(0, 2).some(a => a.action !== "post_blind"))) return fail("Exactly two ordered normal blind posts are required; no antes, straddles or extra posts.");
@@ -125,6 +127,7 @@ export function evaluatePreflopReference(packet: DecisionPacket): {
   if (!packet.candidateActions.includes(action)) return fail("Reference action is absent from the proven legal action set.");
   if (action === "FOLD") return { action, raiseToBB: null, investmentBB: null, reasons: [], strategySource: RFI_STRATEGY_SOURCE,
     explanation: `${hand} is outside the ${packet.hero.position} six-max 100BB+ RFI reference. Fold; no limp strategy is modeled.` };
+  if (firstSb) return fail("SB chart RAISE is uncertified: five total requires four additional chips after the posted small blind; no verified SB sizing contract. Do not substitute FOLD.");
   const raiseToBB = 2.5, investmentBB = raiseToBB - hero.contributionBB!;
   const controls = execution.controls;
   const legal = execution.raiseBounds;

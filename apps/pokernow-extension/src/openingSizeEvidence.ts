@@ -2,7 +2,7 @@ import type { DecisionPacket, ScopedProof } from "@poker-ai/ai-core";
 import type { LiveStateAssessment } from "@poker-ai/browser-reader";
 import type { LiveTableRead } from "./tableRead.js";
 import type { LiveTimelineDiagnostic } from "./liveTimeline.js";
-import { currentFirstUtg, currentHj, currentCo, currentBtn } from "./firstUtgLive.js";
+import { currentFirstUtg, currentHj, currentCo, currentBtn, currentSb } from "./firstUtgLive.js";
 
 /** ONE producer for engine sizing and raiseLegality. No bound/grid inference
  * from mR, mAVTB, nR, slider attributes or HTML validity. See Phases 2/3B/3C/3D. */
@@ -12,6 +12,8 @@ export function openingSizeEvidence(read: LiveTableRead, assessment: LiveStateAs
   const fail = (reason: string, contradicted = false): { size: Exact | null; proof: ScopedProof } => ({ size: null,
     proof: { scope: "raiseLegality", status: contradicted ? "contradicted" : "insufficient", confidence: "low",
       provenance: ["Dependent UTG/HJ/CO/BTN exact five-chip opening rule"], reasons: [reason] } });
+  if (currentSb(read, assessment, timeline))
+    return fail("SB sizing is unverified: historical five-chip acceptance had zero contribution. Need paired SB controls and accepted source total=5 with contribution=1 and additional investment=4; selected five alone is not authorization.");
   const utg = currentFirstUtg(read, assessment, timeline);
   const hj = currentHj(read, assessment, timeline);
   const co = currentCo(read, assessment, timeline);

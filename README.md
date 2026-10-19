@@ -6,10 +6,11 @@ It does not click actions or play automatically.
 
 **Current status:** scoped six-player 1/2-chip deep-stack opening advice supports
 first UTG, HJ after UTG folds, CO after UTG/HJ folds, and BTN after three
-explicit UTG/HJ/CO folds.
-The existing charts select FOLD or an independently certified exact-five RAISE.
+explicit UTG/HJ/CO folds. SB supports chart FOLD after four explicit folds;
+chart-included SB RAISE remains blocked pending nonzero-contribution sizing evidence.
+UTG/HJ/CO/BTN charts select FOLD or an independently certified exact-five RAISE.
 Each requires a fresh source-backed decision window and live cross-checks;
-see [Phase 3D](PREFLOP_PHASE3D.md) for exact limits and verification status.
+see [Phase 3E](PREFLOP_PHASE3E.md) for exact limits and verification status.
 Global `historyComplete` remains false. Other positions, facing-action pots
 and generic postflop/EV activation remain unsupported.
 This is not a completed solver or an unrestricted live recommendation system.
@@ -39,7 +40,7 @@ refresh the PokerNow tab. Source changes alone are not enough.
 ## Documentation
 
 - [Scoped decision proofs, exact blockers and readiness](SCOPED_DECISION_PROOFS.md)
-- [Current BTN opening scope, evidence and live check](PREFLOP_PHASE3D.md)
+- [Current SB FOLD scope and missing RAISE evidence](PREFLOP_PHASE3E.md)
 - [V2 hand/event timeline and required live capture](V2_HAND_TIMELINE.md)
 - [V1 architecture](V1_ARCHITECTURE.md)
 - [Reliability audit and current limitations](V1_RELIABILITY_AUDIT.md)

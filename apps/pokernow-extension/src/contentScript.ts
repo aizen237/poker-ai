@@ -436,6 +436,7 @@ function displaySourceBinding() {
   delete revision.hj;
   delete revision.co;
   delete revision.btn;
+  delete revision.sb;
   return JSON.stringify(revision);
 }
 function clearDisplayLifetime() {
@@ -446,7 +447,7 @@ function clearDisplayLifetime() {
 function bindDisplayLifetime(requestKey: string) {
   clearDisplayLifetime();
   const source = handTimeline.snapshot().sourceStatus;
-  const proof = source.firstUtgProof ?? source.hjProof ?? source.coProof ?? source.btnProof;
+  const proof = source.firstUtgProof ?? source.hjProof ?? source.coProof ?? source.btnProof ?? source.sbProof;
   if (!proof || lastDomStateJson === null) return;
   displayLifetime = { requestKey, receivedAt: proof.witness.receivedAt, expiresAt: proof.expiresAt,
     dom: lastDomStateJson, source: displaySourceBinding() };
@@ -455,7 +456,7 @@ function bindDisplayLifetime(requestKey: string) {
 function refreshDisplayLifetime() {
   if (!displayLifetime) return;
   if (displayLifetime.dom !== lastDomStateJson || displayLifetime.source !== displaySourceBinding() || Date.now() < displayLifetime.receivedAt ||
-      Date.now() < displayLifetime.expiresAt && !(handTimeline.snapshot().sourceStatus.firstUtgProof ?? handTimeline.snapshot().sourceStatus.hjProof ?? handTimeline.snapshot().sourceStatus.coProof ?? handTimeline.snapshot().sourceStatus.btnProof)) {
+      Date.now() < displayLifetime.expiresAt && !(handTimeline.snapshot().sourceStatus.firstUtgProof ?? handTimeline.snapshot().sourceStatus.hjProof ?? handTimeline.snapshot().sourceStatus.coProof ?? handTimeline.snapshot().sourceStatus.btnProof ?? handTimeline.snapshot().sourceStatus.sbProof)) {
     clearDisplayLifetime();
     overlayState.aiResult = null;
     overlayState.policyLine = null;
@@ -541,7 +542,7 @@ setInterval(() => {
     const { state, confidence, bigBlind, amountToCall: parsedAmountToCall, positions, decisionPot } = assessment;
     // Only a cross-checked first-turn window anchored to the forced-blind
     // boundary can supply absent zeros. Generic monetary/EV rules are unchanged.
-    const amountToCall = (preflop?.openingEvidence === "first_utg_hand_start" || preflop?.openingEvidence === "hj_after_utg_fold" || preflop?.openingEvidence === "co_after_utg_hj_folds" || preflop?.openingEvidence === "btn_after_utg_hj_co_folds") && bigBlind !== null
+    const amountToCall = (preflop?.openingEvidence === "first_utg_hand_start" || preflop?.openingEvidence === "hj_after_utg_fold" || preflop?.openingEvidence === "co_after_utg_hj_folds" || preflop?.openingEvidence === "btn_after_utg_hj_co_folds" || preflop?.openingEvidence === "sb_after_utg_hj_co_btn_folds") && bigBlind !== null
       ? preflop.amountToCallBB! * bigBlind : parsedAmountToCall;
     overlayState.street = state?.street ?? "unreadable";
     overlayState.opponentStatsLine = state ? state.seats.filter(s=>s.isOccupied&&!s.isYou&&!s.isFolded).map(s=>{const evidence=opponentStats.profile(s.playerName);return s.playerName+": "+(evidence?evidence.playerProfile.handsObserved+" observed windows / "+evidence.playerProfile.eligibleHands+" eligible hands ("+evidence.statsStorage+")":"identity ambiguous");}).join("; ") : null;

@@ -2,8 +2,9 @@
 
 ## Implemented boundary and remaining work
 
-Current scope update: [Phase 3D](PREFLOP_PHASE3D.md) documents the supported
-UTG/HJ/CO/BTN opening windows and shared exact-five sizing contract. The original
+Current scope update: [Phase 3E](PREFLOP_PHASE3E.md) documents the supported
+UTG/HJ/CO/BTN opening windows plus four-fold SB FOLD. The exact-five sizing
+contract still excludes SB; its nonzero-contribution legality is unverified. The original
 hand-53/FOLD-only statements below describe the earlier implementation.
 Later positions, facing actions, postflop EV and whole-hand completeness remain
 unproven; no generic gates were relaxed.

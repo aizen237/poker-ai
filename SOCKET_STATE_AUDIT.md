@@ -1,5 +1,18 @@
 # Socket state and unopened-preflop evidence audit
 
+## Phase 3E: first SB after four explicit folds
+
+Captured hands147 (63-71) and165 (21-29) contain eight separate fold/turn patches
+through hero SB activation. The same reducer/shared fold-prefix recognizer now
+issues sbProof, retaining all six positions, source SB1/BB2 and an original
+SB-activation +10s deadline. Live checks require BB still eligible and a one-chip
+call gap. Original Q9o displays chart FOLD; original33 stays blocked from RAISE.
+The zero-contribution exact-five acceptance does not prove the SB input convention
+or acceptance with one chip already posted. The existing sizing producer returns
+insufficient evidence; no size certificate is minted. See
+[PREFLOP_PHASE3E.md](PREFLOP_PHASE3E.md) for the evidence matrix, tests and smallest
+paired SB capture. Charts, global incomplete history and all existing gates remain.
+
 ## Phase 3D: first BTN after explicit UTG, HJ and CO folds
 
 Captured hand148 sequences74-80 and hand166 sequences32-38 contain the complete

@@ -1,5 +1,8 @@
 # Phase 3D: source-verified unopened BTN FOLD and RAISE
 
+Later scope update: [Phase 3E](PREFLOP_PHASE3E.md) adds four-fold SB FOLD only.
+SB RAISE remains blocked; the SB-blocked statements below describe Phase 3D.
+
 BTN now uses the unchanged six-max opening chart after exactly three explicit
 folds and the intervening source turn activations. UTG, HJ and CO retain their
 existing contracts. This is assisted advice only; nothing clicks or submits.

@@ -118,3 +118,9 @@ its own original ten-second activation deadline with the panel closed or open. R
 reload the unpacked extension, refresh the table and restart the relay after
 updating so the reader and compiled packet schema agree. The collector remains
 optional and does not authorize advice.
+
+[Phase 3E](PREFLOP_PHASE3E.md) adds SB chart FOLD after four source-verified
+folds, with the posted one-chip blind preserved. SB RAISE is still blocked;
+selecting five in the panel does not certify four-chip additional investment.
+The existing collector can record paired SB controls/raw transitions for a
+separately authorized manual acceptance test; no automatic actions are added.

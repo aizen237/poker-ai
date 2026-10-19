@@ -1,6 +1,6 @@
 import { initializeUtgState, advanceUtgState } from "./firstUtgState.js";
 import { advanceHjWindow, hjPatchKind, type HjPending, type HjProof } from "./hjWindow.js";
-import { advanceCoWindow, advanceBtnWindow, type CoPending, type CoProof, type BtnProof } from "./coWindow.js";
+import { advanceCoWindow, advanceBtnWindow, advanceSbWindow, type CoPending, type CoProof, type BtnProof, type SbProof } from "./coWindow.js";
 
 /** Scoped first-UTG witness from consecutive bounded source state.
  * No general poker-state emulator or full action-history claim. */
@@ -25,7 +25,7 @@ const keys = ["id", "hI", "gN", "now", "pre", "r", "gT", "seats", "iHPI", "deale
   "tB", "pGS", "cPI", "pITT", "smallBlind", "bigBlind", "ante", "deadButton", "gM", "mode", "oTC", "gameResult",
   "aD", "aS", "cM", "cR", "cRPI", "rHP", "rHC", "eventsData", "version", "fV", "nR", "mTB", "rIT", "sPM"];
 export interface UtgProjection { event: "registered" | "gC" | "rup"; heroId: string | null; frame: Record<string, any>;
-  /** Only the two exact raw transition shapes; absent means no HJ/CO/BTN permission. */
+  /** Only the two exact raw transition shapes; absent means no HJ/CO/BTN/SB permission. */
   hjPatch?: Record<string, any> }
 
 /** Separate bounded projection; no names, credentials, stats or opponent cards. */
@@ -85,7 +85,7 @@ export interface FirstUtgProof {
 }
 
 function firstUtg(reg: UtgProjection, next: UtgProjection, tableId: string, generation: number, at: number,
-  role: "UTG" | "HJ" | "CO" | "BTN" = "UTG"): FirstUtgWitness | null {
+  role: "UTG" | "HJ" | "CO" | "BTN" | "SB" = "UTG"): FirstUtgWitness | null {
   const a = reg.frame, b = next.frame, hero = reg.heroId;
   const firstActor = role === "UTG" ? hero : b.cPI;
   if (role !== "UTG" && (a.version !== "0.1.72" || (b.version ?? a.version) !== "0.1.72" || b.fV !== "0.1.72")) return null;
@@ -114,7 +114,7 @@ function firstUtg(reg: UtgProjection, next: UtgProjection, tableId: string, gene
   const dealer = rows.findIndex(([seat, id]) => seat === b.dealerSeat && id === b.dealerID);
   if (dealer < 0) return null;
   const cycle = [...rows.slice(dealer), ...rows.slice(0, dealer)];
-  const heroIndex = role === "UTG" ? 3 : role === "HJ" ? 4 : role === "CO" ? 5 : 0;
+  const heroIndex = role === "UTG" ? 3 : role === "HJ" ? 4 : role === "CO" ? 5 : role === "BTN" ? 0 : 1;
   if (cycle[1]![1] !== b.sBPI || cycle[2]![1] !== b.bBPI || cycle[3]![1] !== firstActor || cycle[heroIndex]![1] !== hero ||
       Object.keys(b.tB).length !== 2 || b.tB[b.sBPI] !== 1 || b.tB[b.bBPI] !== 2) return null;
   const roles = ["BTN", "SB", "BB", "UTG", "HJ", "CO"] as const;
@@ -154,6 +154,9 @@ export function createFirstUtgSource(tableId: string, now: () => number) {
   let btnPending: CoPending | null = null;
   let btnProof: BtnProof | null = null;
   let btnReason = "No supported BTN boundary/three-fold/turn sequence observed.";
+  let sbPending: CoPending | null = null;
+  let sbProof: SbProof | null = null;
+  let sbReason = "No supported SB boundary/four-fold/turn sequence observed.";
   // Diagnostic history only: never consumed by snapshot() or proof activation.
   let lastCertificate: { handId: string; generation: number; issuedBySequence: number; receivedAt: number; expiresAt: number;
     invalidation: { at: number; sequence: number | null; reason: string } | null } | null = null;
@@ -162,6 +165,7 @@ export function createFirstUtgSource(tableId: string, now: () => number) {
     hjProof = null;
     coProof = null;
     btnProof = null;
+    sbProof = null;
     if (lastCertificate && (!lastCertificate.invalidation || sequence !== null &&
         lastCertificate.invalidation.sequence === sequence && lastCertificate.invalidation.at === now())) {
       lastCertificate.invalidation = { at: now(), sequence, reason };
@@ -185,7 +189,7 @@ export function createFirstUtgSource(tableId: string, now: () => number) {
   };
   return {
     accept(raw: unknown, sequence: unknown, generation: unknown, observedAt: unknown): SourceBootstrapReceipt | undefined {
-      const reject = (message: string) => { invalidateWitness(message, integer(sequence) ? sequence : null); hjPending = null; hjReason = message; coPending = null; coReason = message; btnPending = null; btnReason = message; baseline = null; rejectedGeneration = lastGeneration; reason = message; };
+      const reject = (message: string) => { invalidateWitness(message, integer(sequence) ? sequence : null); hjPending = null; hjReason = message; coPending = null; coReason = message; btnPending = null; btnReason = message; sbPending = null; sbReason = message; baseline = null; rejectedGeneration = lastGeneration; reason = message; };
       if (!integer(sequence) || !integer(generation) || generation < 1) { reject("Invalid local source sequence/generation."); return; }
       if (sequence <= lastSequence || generation < lastGeneration) { reject("Stale/replayed local source delivery invalidated carried state."); return; }
       invalidateWitness("Subsequent source update requires a new certificate; no same-decision renewal contract is verified.", sequence);
@@ -194,7 +198,7 @@ export function createFirstUtgSource(tableId: string, now: () => number) {
       const contiguous = sequence === lastSequence + 1 && !newGeneration;
       lastSequence = sequence;
       lastGeneration = generation;
-      if (newGeneration) { hjPending = null; coPending = null; coReason = "New generation; CO evidence reset."; btnPending = null; btnReason = "New generation; BTN evidence reset."; rejectedGeneration = null; lastObservedAt = -1; registrationSeen = false; }
+      if (newGeneration) { hjPending = null; coPending = null; coReason = "New generation; CO evidence reset."; btnPending = null; btnReason = "New generation; BTN evidence reset."; sbPending = null; sbReason = "New generation; SB evidence reset."; rejectedGeneration = null; lastObservedAt = -1; registrationSeen = false; }
       if (!integer(observedAt) || observedAt > now() || observedAt < lastObservedAt) { reject("Invalid or regressing local receive time."); return; }
       lastObservedAt = observedAt;
       const valid = object(raw) && object(raw.frame) && JSON.stringify(raw).length <= 40_000 && ["registered", "gC", "rup"].includes(raw.event);
@@ -276,6 +280,20 @@ export function createFirstUtgSource(tableId: string, now: () => number) {
           : btnAnchor ? "Frozen BTN anchor; waiting for explicit UTG fold, HJ turn/fold, CO turn/fold and BTN turn."
           : btnAdvanced ? "Supported BTN prefix retained; waiting for the next exact fold/turn transition."
           : "No consecutive boundary -> UTG fold -> HJ turn -> HJ fold -> CO turn -> CO fold -> BTN turn; unsupported updates invalidate this window.";
+        const sbAnchor = firstUtg(previous.data, data, tableId, generation, observedAt, "SB");
+        const sbAdvanced = sbPending ? advanceSbWindow(sbPending, data, sequence, observedAt) : null;
+        sbPending = sbAnchor ? { witness: sbAnchor, folds: [], anchor: {
+          sequence, cursor: sbAnchor.cursor, receivedAt: observedAt,
+          firstActorId: sbAnchor.players.find(p => p.position === "UTG")!.playerId,
+        } } : sbAdvanced?.pending ?? null;
+        sbProof = sbAdvanced?.proof ? { ...sbAdvanced.proof,
+          continuity: { status: "validated_prefix", baselineSequence: previous.baselineSequence,
+            throughSequence: sequence, generation, tableId, handId: frame.hI, cursor: frame.now } } : null;
+        if (sbProof) sbPending = null;
+        sbReason = sbProof ? "Explicit UTG/HJ/CO/BTN folds and linked first SB turn proven; live cross-checks still required."
+          : sbAnchor ? "Frozen SB anchor; waiting for explicit UTG fold, HJ/CO/BTN turns and folds, then SB turn."
+          : sbAdvanced ? "Supported SB prefix retained; waiting for the next exact fold/turn transition."
+          : "No consecutive boundary -> UTG fold -> HJ turn -> HJ fold -> CO turn -> CO fold -> BTN turn -> BTN fold -> SB turn; unsupported updates invalidate this window.";
         witness = firstUtg(previous.data, data, tableId, generation, observedAt);
         if (witness) lastCertificate = { handId: witness.handId, generation, issuedBySequence: sequence,
           receivedAt: witness.receivedAt, expiresAt: witness.receivedAt + 10_000, invalidation: null };
@@ -284,7 +302,7 @@ export function createFirstUtgSource(tableId: string, now: () => number) {
           : "Validated source state carried forward; this update is not a supported first-UTG boundary.";
       } catch (error) { reject(error instanceof Error ? error.message : "Unsupported source mutation."); }
     },
-    reset() { invalidateWitness("Source disconnect, reader gap or reset invalidated first-UTG evidence.", null); hjPending = null; hjReason = "Source disconnected/reset."; coPending = null; coReason = "Source disconnected/reset."; btnPending = null; btnReason = "Source disconnected/reset."; baseline = null; rejectedGeneration = lastGeneration; reason = "Source disconnect, reader gap or reset invalidated first-UTG evidence."; },
+    reset() { invalidateWitness("Source disconnect, reader gap or reset invalidated first-UTG evidence.", null); hjPending = null; hjReason = "Source disconnected/reset."; coPending = null; coReason = "Source disconnected/reset."; btnPending = null; btnReason = "Source disconnected/reset."; sbPending = null; sbReason = "Source disconnected/reset."; baseline = null; rejectedGeneration = lastGeneration; reason = "Source disconnect, reader gap or reset invalidated first-UTG evidence."; },
     snapshot() { return currentProof()?.witness ?? null; },
     proof: currentProof,
     hjProof() { return hjProof && baseline && now() >= hjProof.witness.receivedAt && now() < hjProof.expiresAt &&
@@ -296,6 +314,9 @@ export function createFirstUtgSource(tableId: string, now: () => number) {
     btnProof() { return btnProof && baseline && now() >= btnProof.witness.receivedAt && now() < btnProof.expiresAt &&
       baseline.generation === btnProof.witness.generation && baseline.data.frame.hI === btnProof.witness.handId &&
       baseline.data.frame.now === btnProof.witness.cursor ? structuredClone(btnProof) : null; },
+    sbProof() { return sbProof && baseline && now() >= sbProof.witness.receivedAt && now() < sbProof.expiresAt &&
+      baseline.generation === sbProof.witness.generation && baseline.data.frame.hI === sbProof.witness.handId &&
+      baseline.data.frame.now === sbProof.witness.cursor ? structuredClone(sbProof) : null; },
     diagnostic() {
       const currentTime = now();
       const certificate = lastCertificate ? structuredClone(lastCertificate) : null;
@@ -314,6 +335,8 @@ export function createFirstUtgSource(tableId: string, now: () => number) {
           anchor: coPending?.anchor ?? coProof?.anchor ?? null, expiresAt: coProof?.expiresAt ?? null },
         btnWindow: { reason: btnProof && now() >= btnProof.expiresAt ? "BTN proof expired at its original activation deadline." : btnReason,
           anchor: btnPending?.anchor ?? btnProof?.anchor ?? null, expiresAt: btnProof?.expiresAt ?? null },
+        sbWindow: { reason: sbProof && now() >= sbProof.expiresAt ? "SB proof expired at its original activation deadline." : sbReason,
+          anchor: sbPending?.anchor ?? sbProof?.anchor ?? null, expiresAt: sbProof?.expiresAt ?? null },
         reason: witness && now() - witness.receivedAt > 10_000 ? "First-UTG witness expired after 10 seconds; original receive time is not renewed." : reason,
         observations: structuredClone(observations), droppedObservations, retainedCharacters,
         carriedState: baseline ? { generation: baseline.generation, sequence: baseline.sequence, projection: structuredClone(baseline.data) } : null,
