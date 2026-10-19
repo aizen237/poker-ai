@@ -1,5 +1,26 @@
 # Socket state and unopened-preflop evidence audit
 
+## Hand224 paired SB input/acceptance: exact-five rule enabled
+
+Local sb-raise-224.json and the supplied image (saved as sb-raise-224.png.png)
+match table, Ah7s, SB/BB/dealer, visible remaining stacks and contributions.
+The screenshot shows input5/2.5BB with SB1; it does not show a hand ID or submit
+receipt. User-reported pairing plus those independent matches supports an
+empirical exact-size rule, not a per-decision server authorization. Source
+frames3-10 explicitly fold UTG/HJ/CO/BTN and activate SB. Frame11 accepts SB
+total5 (cHB5, cRPIhero); frame12 activates BB. This is additional4, not input4.
+Acceptance arrives14.045s after SB activation, 4.045s after the unchanged expiry.
+It never renews a witness. mR8 remains opaque; no minimum/grid inference is added.
+
+The existing dependent sizing producer now supplies both exact size and
+raiseLegality for a fresh, cross-checked sbProof and the existing supported
+profile/deep stacks. The packet schema couples the SB rule/window to posted1
+and additional4; other positions retain posted0/additional5. FOLD remains sizing
+independent. The source reducer, continuity, historyComplete=false, charts,
+ten-second lifetime and overlay stale-response protections are unchanged.
+See [PREFLOP_SB_224_RAISE.md](PREFLOP_SB_224_RAISE.md) for evidence limits/tests.
+Earlier SB-blocked entries below describe their historical evidence scope.
+
 ## Phase 3E: first SB after four explicit folds
 
 Captured hands147 (63-71) and165 (21-29) contain eight separate fold/turn patches

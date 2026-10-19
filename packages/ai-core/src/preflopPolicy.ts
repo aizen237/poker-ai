@@ -13,18 +13,23 @@ export const PreflopExecutionSchema = z.object({
   }).optional(),
   /** Empirical exact-size rule, NOT a general minimum/grid or live server ack. */
   exactOpeningSize: z.object({
-    rule: z.literal("pokernow-0.1.72-th-4fun-1-2-exact5-v1"),
-    /** Legacy absence is UTG-only; HJ/CO/BTN require an explicit bound window. */
-    decisionWindow: z.enum(["first_utg_boundary", "hj_after_utg_fold", "co_after_utg_hj_folds", "btn_after_utg_hj_co_folds"]).optional(),
+    rule: z.enum(["pokernow-0.1.72-th-4fun-1-2-exact5-v1", "pokernow-0.1.72-th-4fun-1-2-sb-exact5-v1"]),
+    /** Legacy absence is UTG-only; later positions require an explicit bound window. */
+    decisionWindow: z.enum(["first_utg_boundary", "hj_after_utg_fold", "co_after_utg_hj_folds", "btn_after_utg_hj_co_folds", "sb_after_utg_hj_co_btn_folds"]).optional(),
     provenance: z.string().min(1).max(2000),
     tableId: z.string().min(1), handId: z.string().min(1), heroId: z.string().min(1),
     heroSeat: z.number().int().positive(), generation: z.number().int().positive(),
     sourceCursor: z.number().int().nonnegative(), decisionEpoch: z.string().min(1),
     receivedAt: z.number().finite(), expiresAt: z.number().finite(),
-    units: z.literal("chips"), bigBlindChips: z.literal(2), contributionChips: z.literal(0),
-    raiseToChips: z.literal(5), investmentChips: z.literal(5),
+    units: z.literal("chips"), bigBlindChips: z.literal(2), contributionChips: z.union([z.literal(0), z.literal(1)]),
+    raiseToChips: z.literal(5), investmentChips: z.union([z.literal(4), z.literal(5)]),
     remainingStackChips: z.number().finite().min(200),
     controls: z.enum(["panel_closed_unchecked", "selected_amount_matches", "selected_amount_differs"]),
+  }).superRefine((size, ctx) => {
+    const sb = size.decisionWindow === "sb_after_utg_hj_co_btn_folds";
+    if (size.rule !== (sb ? "pokernow-0.1.72-th-4fun-1-2-sb-exact5-v1" : "pokernow-0.1.72-th-4fun-1-2-exact5-v1") ||
+        size.contributionChips !== (sb ? 1 : 0) || size.investmentChips !== (sb ? 4 : 5))
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Exact opening rule, window and total/additional amounts must agree." });
   }).optional(),
   controls: z.object({
     source: z.string().min(1), formVisible: z.boolean(),
@@ -127,11 +132,11 @@ export function evaluatePreflopReference(packet: DecisionPacket): {
   if (!packet.candidateActions.includes(action)) return fail("Reference action is absent from the proven legal action set.");
   if (action === "FOLD") return { action, raiseToBB: null, investmentBB: null, reasons: [], strategySource: RFI_STRATEGY_SOURCE,
     explanation: `${hand} is outside the ${packet.hero.position} six-max 100BB+ RFI reference. Fold; no limp strategy is modeled.` };
-  if (firstSb) return fail("SB chart RAISE is uncertified: five total requires four additional chips after the posted small blind; no verified SB sizing contract. Do not substitute FOLD.");
   const raiseToBB = 2.5, investmentBB = raiseToBB - hero.contributionBB!;
   const controls = execution.controls;
   const legal = execution.raiseBounds;
   const exact = execution.exactOpeningSize;
+  if (firstSb && !exact) return fail("SB RAISE requires its dependent exact-five-chip sizing certificate; no substitution with FOLD.");
   if (firstHj && !exact) return fail("HJ RAISE requires its dependent exact-five-chip sizing certificate; no substitution with FOLD.");
   if (firstCo && !exact) return fail("CO RAISE requires its dependent exact-five-chip sizing certificate; no substitution with FOLD.");
   if (firstBtn && !exact) return fail("BTN RAISE requires its dependent exact-five-chip sizing certificate; no substitution with FOLD.");
@@ -140,14 +145,15 @@ export function evaluatePreflopReference(packet: DecisionPacket): {
     // Source provenance is issued by the local reader; the relay does not act
     // as a second PokerNow observer. Packet binding covers all these facts.
     const now = Date.now();
-    if (exact.rule !== "pokernow-0.1.72-th-4fun-1-2-exact5-v1" ||
+    if (exact.rule !== (firstSb ? "pokernow-0.1.72-th-4fun-1-2-sb-exact5-v1" : "pokernow-0.1.72-th-4fun-1-2-exact5-v1") ||
         !(firstUtg && (exact.decisionWindow === undefined || exact.decisionWindow === "first_utg_boundary") ||
           firstHj && exact.decisionWindow === "hj_after_utg_fold" ||
           firstCo && exact.decisionWindow === "co_after_utg_hj_folds" ||
-          firstBtn && exact.decisionWindow === "btn_after_utg_hj_co_folds") ||
-        hero.contributionBB !== 0 || context.heroSeat !== exact.heroSeat ||
-        exact.units !== "chips" || exact.bigBlindChips !== 2 || exact.contributionChips !== 0 ||
-        exact.raiseToChips !== 5 || exact.investmentChips !== 5 ||
+          firstBtn && exact.decisionWindow === "btn_after_utg_hj_co_folds" ||
+          firstSb && exact.decisionWindow === "sb_after_utg_hj_co_btn_folds") ||
+        hero.contributionBB !== (firstSb ? 0.5 : 0) || context.heroSeat !== exact.heroSeat ||
+        exact.units !== "chips" || exact.bigBlindChips !== 2 || exact.contributionChips !== (firstSb ? 1 : 0) ||
+        exact.raiseToChips !== 5 || exact.investmentChips !== (firstSb ? 4 : 5) ||
         exact.remainingStackChips !== packet.hero.stackBB * 2 || investmentBB >= packet.hero.stackBB ||
         packet.potEvidence?.bigBlind !== 2 ||
         packet.decisionProofs?.handId !== `${exact.tableId}:hand:${exact.handId}` ||
@@ -158,7 +164,7 @@ export function evaluatePreflopReference(packet: DecisionPacket): {
     if (controls.issues.length || (exact.controls === "panel_closed_unchecked"
       ? controls.formVisible || controls.raiseSubmitVisible || controls.selectedRaiseToBB !== null
       : !controls.formVisible || !controls.raiseSubmitVisible || controls.raiseSubmitEnabled !== true ||
-        controls.selectedRaiseToBB === null || controls.selectedRaiseToBB > packet.hero.stackBB ||
+        controls.selectedRaiseToBB === null || controls.selectedRaiseToBB < hero.contributionBB! || controls.selectedRaiseToBB - hero.contributionBB! > packet.hero.stackBB ||
         (exact.controls === "selected_amount_matches" ? controls.selectedRaiseToBB !== 2.5 : controls.selectedRaiseToBB === 2.5)))
       return fail("Current Raise controls contradict the independently certified exact size.");
   } else {

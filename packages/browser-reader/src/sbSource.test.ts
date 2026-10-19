@@ -19,6 +19,29 @@ function replay(hand = 147, change?: (frames: any[]) => void, mutateProjection?:
 }
 
 describe("SB proof issued by the existing bounded continuity authority", () => {
+  it("hand224 source agrees with paired screenshot observations, without renewing the expired acceptance", () => {
+    const captured = JSON.parse(readFileSync(new URL("./fixtures/pokernow-sb-224.json", import.meta.url), "utf8"));
+    const all = captured.frames, f = replay(224, frames => frames.splice(10)), proof = f.source.sbProof()!;
+    expect(proof).toMatchObject({ scope: "sb_after_utg_hj_co_btn_folds", historyComplete: false,
+      expiresAt: 1792394584888, witness: { heroCards: ["Ah", "7s"], receivedAt: 1792394574888,
+        heroId: "PLAYER_1", openingSizeProfile: "pokernow-0.1.72-th-4fun-1-2-exact5-v1" } });
+    expect(proof.folds.map(f => f.sequence)).toEqual([3, 5, 7, 9]);
+    expect(proof.witness.players.find(p => p.playerId === "PLAYER_1")).toMatchObject({ position: "SB", contribution: 1 });
+    const screen = captured.screenshotObservation;
+    expect(screen).toMatchObject({ heroCards: proof.witness.heroCards, heroContributionChips: 1,
+      heroRemainingStackChips: 250, bbContributionChips: 2, bbRemainingStackChips: 241,
+      selectedInputText: "5", displayedBBText: "2.5BB", handIdVisible: false });
+    expect(all[1].payload.dealerSeat).toBe(screen.dealerSeat);
+    // Read-only observation, not an automated screenshot parser or submit trace.
+    expect(all[10].payload).toMatchObject({ tB: { PLAYER_1: 5 }, cHB: 5, cRPI: ["PLAYER_1"] });
+    expect(all[10].payload.tB.PLAYER_1 - all[1].payload.tB.PLAYER_1).toBe(4);
+    expect(all[11].payload).toMatchObject({ cPI: "PLAYER_2", pITT: "PLAYER_2", pre: all[10].payload.now });
+    expect(all[10].localReceivedAt - proof.witness.receivedAt).toBe(14045);
+    f.at(proof.expiresAt - 1); expect(f.source.sbProof()).not.toBeNull();
+    f.at(proof.expiresAt); expect(f.source.sbProof()).toBeNull();
+    f.accept(all[10]); f.accept(all[11]); expect(f.source.sbProof()).toBeNull();
+    expect(f.source.diagnostic().historyComplete).toBe(false);
+  });
   it("hand212 certifies the original SB window but not its expired historical acceptance", () => {
     const all = saved(212), f = replay(212, frames => frames.splice(10));
     const proof = f.source.sbProof()!;

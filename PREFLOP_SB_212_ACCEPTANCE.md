@@ -1,5 +1,9 @@
 # Hand212: accepted SB total five, UI input semantics still unverified
 
+**Historical audit:** the later [paired hand224 evidence](PREFLOP_SB_224_RAISE.md)
+resolves this missing input-to-total link and enables the scoped SB rule.
+Hand212 alone did not establish that link; the assessment below is preserved.
+
 Result: **SB RAISE remains blocked**. Source-side acceptance is verified for the
 observed hand/profile; the current end-to-end feature also interprets input5 as
 total5 and tells the user to manually set five. The new raw file cannot verify

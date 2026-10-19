@@ -51,7 +51,7 @@ export function advanceBtnWindow(pending: CoPending, data: UtgProjection, sequen
 }
 
 /** Hands147/165 contain the fourth explicit fold/turn. This supplies only a
- * decision window; the zero-contribution exact-five rule does not authorize SB. */
+ * decision window; SB sizing requires the separate hand224 dependent rule. */
 export function advanceSbWindow(pending: CoPending, data: UtgProjection, sequence: number, at: number):
   { pending: CoPending; proof?: Omit<SbProof, "continuity"> } | null {
   const result = advanceFoldPrefix(pending, data, sequence, at, "SB");

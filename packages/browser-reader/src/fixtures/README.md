@@ -281,3 +281,20 @@ Frame11 accepts total5 after SB1; frame12 activates BB. No DOM checkpoint or
 input value is added. Tests simulate the current DOM and label card/control
 variations; these cannot establish which input was submitted in the live hand.
 The raw evidence file is ignored and never staged.
+
+## Hand224 paired SB input/accepted total
+
+pokernow-sb-224.json uses the same bounded registration convention as hand212.
+Only table/player/hand identities are substituted; original Ah7s, source and
+receive times, numbers, array order and full frames3-12 are retained. Paired
+local sb-raise-224.png.png was visually inspected: input5/2.5BB, SB1, base250,
+BB2/base241, dealer10 and table/cards agree. The screenshot has no hand ID;
+the user pairing and matching facts are documented, not a machine-bound receipt.
+The fixture's screenshotObservation is a manual visual record, not captured DOM.
+Live tests simulate DOM cross-checks using the real reader shape and run actual
+MAIN bridge -> reducer -> live adapters -> engine -> overlay. Original A7o now
+tests RAISE5/posted1/additional4, while original hand165 Q9o still tests FOLD.
+Hand147/212 chart RAISE replays now use the later rule only while their source
+windows are fresh. Historical accepted actions outside expiry never renew them.
+Controlled negative mutations are test variations, not additional live evidence.
+Neither raw source file nor screenshot is committed.

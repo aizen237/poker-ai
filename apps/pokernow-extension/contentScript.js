@@ -5597,9 +5597,9 @@
     }).optional(),
     /** Empirical exact-size rule, NOT a general minimum/grid or live server ack. */
     exactOpeningSize: external_exports.object({
-      rule: external_exports.literal("pokernow-0.1.72-th-4fun-1-2-exact5-v1"),
-      /** Legacy absence is UTG-only; HJ/CO/BTN require an explicit bound window. */
-      decisionWindow: external_exports.enum(["first_utg_boundary", "hj_after_utg_fold", "co_after_utg_hj_folds", "btn_after_utg_hj_co_folds"]).optional(),
+      rule: external_exports.enum(["pokernow-0.1.72-th-4fun-1-2-exact5-v1", "pokernow-0.1.72-th-4fun-1-2-sb-exact5-v1"]),
+      /** Legacy absence is UTG-only; later positions require an explicit bound window. */
+      decisionWindow: external_exports.enum(["first_utg_boundary", "hj_after_utg_fold", "co_after_utg_hj_folds", "btn_after_utg_hj_co_folds", "sb_after_utg_hj_co_btn_folds"]).optional(),
       provenance: external_exports.string().min(1).max(2e3),
       tableId: external_exports.string().min(1),
       handId: external_exports.string().min(1),
@@ -5612,11 +5612,15 @@
       expiresAt: external_exports.number().finite(),
       units: external_exports.literal("chips"),
       bigBlindChips: external_exports.literal(2),
-      contributionChips: external_exports.literal(0),
+      contributionChips: external_exports.union([external_exports.literal(0), external_exports.literal(1)]),
       raiseToChips: external_exports.literal(5),
-      investmentChips: external_exports.literal(5),
+      investmentChips: external_exports.union([external_exports.literal(4), external_exports.literal(5)]),
       remainingStackChips: external_exports.number().finite().min(200),
       controls: external_exports.enum(["panel_closed_unchecked", "selected_amount_matches", "selected_amount_differs"])
+    }).superRefine((size, ctx) => {
+      const sb = size.decisionWindow === "sb_after_utg_hj_co_btn_folds";
+      if (size.rule !== (sb ? "pokernow-0.1.72-th-4fun-1-2-sb-exact5-v1" : "pokernow-0.1.72-th-4fun-1-2-exact5-v1") || size.contributionChips !== (sb ? 1 : 0) || size.investmentChips !== (sb ? 4 : 5))
+        ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: "Exact opening rule, window and total/additional amounts must agree." });
     }).optional(),
     controls: external_exports.object({
       source: external_exports.string().min(1),
@@ -5755,12 +5759,12 @@
         strategySource: RFI_STRATEGY_SOURCE,
         explanation: `${hand} is outside the ${packet.hero.position} six-max 100BB+ RFI reference. Fold; no limp strategy is modeled.`
       };
-    if (firstSb)
-      return fail("SB chart RAISE is uncertified: five total requires four additional chips after the posted small blind; no verified SB sizing contract. Do not substitute FOLD.");
     const raiseToBB = 2.5, investmentBB = raiseToBB - hero.contributionBB;
     const controls = execution.controls;
     const legal = execution.raiseBounds;
     const exact = execution.exactOpeningSize;
+    if (firstSb && !exact)
+      return fail("SB RAISE requires its dependent exact-five-chip sizing certificate; no substitution with FOLD.");
     if (firstHj && !exact)
       return fail("HJ RAISE requires its dependent exact-five-chip sizing certificate; no substitution with FOLD.");
     if (firstCo && !exact)
@@ -5769,9 +5773,9 @@
       return fail("BTN RAISE requires its dependent exact-five-chip sizing certificate; no substitution with FOLD.");
     if (exact) {
       const now = Date.now();
-      if (exact.rule !== "pokernow-0.1.72-th-4fun-1-2-exact5-v1" || !(firstUtg2 && (exact.decisionWindow === void 0 || exact.decisionWindow === "first_utg_boundary") || firstHj && exact.decisionWindow === "hj_after_utg_fold" || firstCo && exact.decisionWindow === "co_after_utg_hj_folds" || firstBtn && exact.decisionWindow === "btn_after_utg_hj_co_folds") || hero.contributionBB !== 0 || context.heroSeat !== exact.heroSeat || exact.units !== "chips" || exact.bigBlindChips !== 2 || exact.contributionChips !== 0 || exact.raiseToChips !== 5 || exact.investmentChips !== 5 || exact.remainingStackChips !== packet.hero.stackBB * 2 || investmentBB >= packet.hero.stackBB || packet.potEvidence?.bigBlind !== 2 || packet.decisionProofs?.handId !== `${exact.tableId}:hand:${exact.handId}` || packet.decisionProofs?.connectionGeneration !== exact.generation || packet.decisionProofs?.decisionEpoch !== exact.decisionEpoch || exact.expiresAt !== exact.receivedAt + 1e4 || now < exact.receivedAt || now >= exact.expiresAt)
+      if (exact.rule !== (firstSb ? "pokernow-0.1.72-th-4fun-1-2-sb-exact5-v1" : "pokernow-0.1.72-th-4fun-1-2-exact5-v1") || !(firstUtg2 && (exact.decisionWindow === void 0 || exact.decisionWindow === "first_utg_boundary") || firstHj && exact.decisionWindow === "hj_after_utg_fold" || firstCo && exact.decisionWindow === "co_after_utg_hj_folds" || firstBtn && exact.decisionWindow === "btn_after_utg_hj_co_folds" || firstSb && exact.decisionWindow === "sb_after_utg_hj_co_btn_folds") || hero.contributionBB !== (firstSb ? 0.5 : 0) || context.heroSeat !== exact.heroSeat || exact.units !== "chips" || exact.bigBlindChips !== 2 || exact.contributionChips !== (firstSb ? 1 : 0) || exact.raiseToChips !== 5 || exact.investmentChips !== (firstSb ? 4 : 5) || exact.remainingStackChips !== packet.hero.stackBB * 2 || investmentBB >= packet.hero.stackBB || packet.potEvidence?.bigBlind !== 2 || packet.decisionProofs?.handId !== `${exact.tableId}:hand:${exact.handId}` || packet.decisionProofs?.connectionGeneration !== exact.generation || packet.decisionProofs?.decisionEpoch !== exact.decisionEpoch || exact.expiresAt !== exact.receivedAt + 1e4 || now < exact.receivedAt || now >= exact.expiresAt)
         return fail("Exact five-chip opening rule is outside its bound profile, decision, capacity or original freshness window.");
-      if (controls.issues.length || (exact.controls === "panel_closed_unchecked" ? controls.formVisible || controls.raiseSubmitVisible || controls.selectedRaiseToBB !== null : !controls.formVisible || !controls.raiseSubmitVisible || controls.raiseSubmitEnabled !== true || controls.selectedRaiseToBB === null || controls.selectedRaiseToBB > packet.hero.stackBB || (exact.controls === "selected_amount_matches" ? controls.selectedRaiseToBB !== 2.5 : controls.selectedRaiseToBB === 2.5)))
+      if (controls.issues.length || (exact.controls === "panel_closed_unchecked" ? controls.formVisible || controls.raiseSubmitVisible || controls.selectedRaiseToBB !== null : !controls.formVisible || !controls.raiseSubmitVisible || controls.raiseSubmitEnabled !== true || controls.selectedRaiseToBB === null || controls.selectedRaiseToBB < hero.contributionBB || controls.selectedRaiseToBB - hero.contributionBB > packet.hero.stackBB || (exact.controls === "selected_amount_matches" ? controls.selectedRaiseToBB !== 2.5 : controls.selectedRaiseToBB === 2.5)))
         return fail("Current Raise controls contradict the independently certified exact size.");
     } else {
       if (!legal?.verified || legal.minRaiseToBB <= 1 || raiseToBB < legal.minRaiseToBB || investmentBB >= packet.hero.stackBB || !Number.isFinite(legal.chipUnitBB) || legal.chipUnitBB <= 0 || !near(investmentBB / legal.chipUnitBB, Math.round(investmentBB / legal.chipUnitBB)) || !near(raiseToBB / legal.chipUnitBB, Math.round(raiseToBB / legal.chipUnitBB)))
@@ -8619,38 +8623,40 @@
         scope: "raiseLegality",
         status: contradicted ? "contradicted" : "insufficient",
         confidence: "low",
-        provenance: ["Dependent UTG/HJ/CO/BTN exact five-chip opening rule"],
+        provenance: ["Dependent UTG/HJ/CO/BTN/SB exact five-chip opening rule"],
         reasons: [reason]
       }
     });
-    if (currentSb(read, assessment, timeline))
-      return fail("SB sizing is unverified for UI input: hand212 accepted source total=5 with contribution=1 and additional investment=4, but no paired control evidence establishes which input produced that total. Historical acceptance cannot renew proof; selected five alone is not authorization.");
     const utg = currentFirstUtg(read, assessment, timeline);
     const hj = currentHj(read, assessment, timeline);
     const co = currentCo(read, assessment, timeline);
-    const first = utg ?? hj ?? co ?? currentBtn(read, assessment, timeline);
-    const role = utg ? "UTG" : hj ? "HJ" : co ? "CO" : "BTN";
-    const proof = utg ? timeline?.sourceStatus.firstUtgProof : hj ? timeline?.sourceStatus.hjProof : co ? timeline?.sourceStatus.coProof : timeline?.sourceStatus.btnProof;
+    const btn = currentBtn(read, assessment, timeline);
+    const sb = currentSb(read, assessment, timeline);
+    const first = utg ?? hj ?? co ?? btn ?? sb;
+    const role = utg ? "UTG" : hj ? "HJ" : co ? "CO" : btn ? "BTN" : "SB";
+    const proof = utg ? timeline?.sourceStatus.firstUtgProof : hj ? timeline?.sourceStatus.hjProof : co ? timeline?.sourceStatus.coProof : btn ? timeline?.sourceStatus.btnProof : timeline?.sourceStatus.sbProof;
     if (!first || !proof || Date.now() < first.receivedAt || Date.now() >= proof.expiresAt || proof.expiresAt !== first.receivedAt + 1e4)
-      return fail("No fresh cross-checked UTG/HJ/CO/BTN decision proof; sizing cannot renew source evidence.");
+      return fail("No fresh cross-checked UTG/HJ/CO/BTN/SB decision proof; sizing cannot renew source evidence.");
     if (first.openingSizeProfile !== "pokernow-0.1.72-th-4fun-1-2-exact5-v1")
       return fail("Unknown or changed PokerNow exact-five-chip rule profile/version.");
     const hero = assessment.state.seats.find((s) => s.isYou);
     const sourceHero = first.players.find((p) => p.playerId === first.heroId);
-    if (!epoch || first.bigBlind !== 2 || sourceHero.position !== role || sourceHero.contribution !== 0 || hero.stack === null || hero.stack < 200 || hero.stack <= 5)
-      return fail("Exact five-chip rule requires a supported first UTG/HJ/CO/BTN turn, zero contribution and proven deep remaining capacity.");
+    const contribution3 = sb ? 1 : 0;
+    const investment = sb ? 4 : 5;
+    if (!epoch || first.bigBlind !== 2 || sourceHero.position !== role || sourceHero.contribution !== contribution3 || hero.stack === null || hero.stack < 200 || hero.stack <= investment)
+      return fail("Exact five-chip rule requires a supported first opening turn, its proven contribution and deep remaining capacity.");
     const c = read.raiseControl;
     if (c.issues.length) return fail(`Contradictory Raise controls: ${c.issues.join("; ")}`, true);
     if (c.formVisible && (!c.amountControlVisible || !c.raiseSubmitVisible || c.raiseSubmitEnabled !== true))
       return fail("Open Raise panel lacks a usable selected input or enabled Raise submit.");
     const bbMatch = c.displayedBBText?.trim().match(/^(\d+(?:\.\d+)?)\s*BB$/);
-    if (c.formVisible && (c.selectedRaiseToChips === null || c.selectedRaiseToChips > hero.stack || !bbMatch || Number(bbMatch[1]) * 2 !== c.selectedRaiseToChips))
+    if (c.formVisible && (c.selectedRaiseToChips === null || c.selectedRaiseToChips < contribution3 || c.selectedRaiseToChips - contribution3 > hero.stack || !bbMatch || Number(bbMatch[1]) * 2 !== c.selectedRaiseToChips))
       return fail("Visible selected amount/BB display/capacity observations contradict each other.", true);
     if (!c.formVisible && (c.amountControlVisible || c.raiseSubmitVisible || c.selectedRaiseToChips !== null))
       return fail("Raise-control visibility/amount observations contradict a closed panel.", true);
-    const provenance = "Exact-size empirical rule: hand169 first-UTG server acceptance (frame66 tB[hero]=5, cHB=5, frame67 next actor), matching 0.1.72 normal no-ante 1/2 play-money Hold'em profile. Not a live server acknowledgment, generic minimum, maximum or chip grid. " + (utg ? "Original firstUtgProof deadline applies." : `${role} equivalence: explicit zero-contribution ${hj ? "UTG fold then first HJ turn" : co ? "UTG fold, HJ turn/fold then first CO turn" : "UTG fold, HJ turn/fold, CO turn/fold then first BTN turn"}; unchanged forced-blind wagers/profile, no prior hero action or reopening restriction. Original ${hj ? "hjProof" : co ? "coProof" : "btnProof"} activation deadline applies, not the anchor's time.`);
+    const provenance = sb ? "Exact-size empirical SB rule: paired hand224 screenshot shows input5/2.5BB with SB1; matching cards/stacks/table and user pairing link frame11 accepted tB[hero]=5/cHB=5 to frame12 BB turn. Total5 minus posted1 means additional4. Same 0.1.72 normal no-ante 1/2 play-money profile; not live server preflight or general min/max/grid. Historical acceptance was after expiry; original fresh sbProof deadline applies." : "Exact-size empirical rule: hand169 first-UTG server acceptance (frame66 tB[hero]=5, cHB=5, frame67 next actor), matching 0.1.72 normal no-ante 1/2 play-money Hold'em profile. Not a live server acknowledgment, generic minimum, maximum or chip grid. " + (utg ? "Original firstUtgProof deadline applies." : `${role} equivalence: explicit zero-contribution ${hj ? "UTG fold then first HJ turn" : co ? "UTG fold, HJ turn/fold then first CO turn" : "UTG fold, HJ turn/fold, CO turn/fold then first BTN turn"}; unchanged forced-blind wagers/profile, no prior hero action or reopening restriction. Original ${hj ? "hjProof" : co ? "coProof" : "btnProof"} activation deadline applies, not the anchor's time.`);
     const size = {
-      rule: first.openingSizeProfile,
+      rule: sb ? "pokernow-0.1.72-th-4fun-1-2-sb-exact5-v1" : first.openingSizeProfile,
       provenance,
       decisionWindow: proof.scope,
       tableId: first.tableId,
@@ -8664,9 +8670,9 @@
       expiresAt: proof.expiresAt,
       units: "chips",
       bigBlindChips: 2,
-      contributionChips: 0,
+      contributionChips: contribution3,
       raiseToChips: 5,
-      investmentChips: 5,
+      investmentChips: investment,
       remainingStackChips: hero.stack,
       controls: !c.formVisible ? "panel_closed_unchecked" : c.selectedRaiseToChips === 5 ? "selected_amount_matches" : "selected_amount_differs"
     };

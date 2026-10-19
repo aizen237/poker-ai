@@ -6,11 +6,11 @@ It does not click actions or play automatically.
 
 **Current status:** scoped six-player 1/2-chip deep-stack opening advice supports
 first UTG, HJ after UTG folds, CO after UTG/HJ folds, and BTN after three
-explicit UTG/HJ/CO folds. SB supports chart FOLD after four explicit folds;
-chart-included SB RAISE remains blocked pending nonzero-contribution sizing evidence.
-UTG/HJ/CO/BTN charts select FOLD or an independently certified exact-five RAISE.
+explicit UTG/HJ/CO folds. SB supports chart FOLD or RAISE after four explicit folds.
+The SB exact-five rule uses total5, posted1, additional4; the earlier positions
+use total5, posted0, additional5. Charts remain unchanged.
 Each requires a fresh source-backed decision window and live cross-checks;
-see [Phase 3E](PREFLOP_PHASE3E.md) for exact limits and verification status.
+see [the paired hand224 SB rule](PREFLOP_SB_224_RAISE.md) for exact limits and verification status.
 Global `historyComplete` remains false. Other positions, facing-action pots
 and generic postflop/EV activation remain unsupported.
 This is not a completed solver or an unrestricted live recommendation system.
@@ -40,8 +40,9 @@ refresh the PokerNow tab. Source changes alone are not enough.
 ## Documentation
 
 - [Scoped decision proofs, exact blockers and readiness](SCOPED_DECISION_PROOFS.md)
-- [Current SB FOLD scope and missing RAISE evidence](PREFLOP_PHASE3E.md)
-- [Hand212 accepted SB total and remaining UI pairing](PREFLOP_SB_212_ACCEPTANCE.md)
+- [Current SB FOLD/RAISE scope and hand224 evidence](PREFLOP_SB_224_RAISE.md)
+- [Original SB source window implementation](PREFLOP_PHASE3E.md)
+- [Historical hand212 SB acceptance audit](PREFLOP_SB_212_ACCEPTANCE.md)
 - [BB audit: missing completion evidence and strategy](PREFLOP_PHASE3F.md)
 - [V2 hand/event timeline and required live capture](V2_HAND_TIMELINE.md)
 - [V1 architecture](V1_ARCHITECTURE.md)

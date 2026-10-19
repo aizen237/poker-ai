@@ -1,4 +1,11 @@
-# Phase 3E: source-verified unopened SB FOLD; SB RAISE remains gated
+# Phase 3E: source-verified unopened SB window
+
+**Current update:** [paired hand224 evidence and SB RAISE](PREFLOP_SB_224_RAISE.md)
+resolves the input-to-total blocker below. The existing producer now supports
+total5 / posted1 / additional4 under a separate SB rule, without changing the
+source window or expiry. This document preserves the original FOLD-only audit,
+historical validation counts and missing-evidence assessment for traceability.
+Do not repeat the superseded capture request at its end.
 
 Hand212 update: [the accepted SB raise audit](PREFLOP_SB_212_ACCEPTANCE.md)
 verifies a source total of five after the posted one. The remaining blocker is

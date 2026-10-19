@@ -3,8 +3,11 @@
 ## Implemented boundary and remaining work
 
 Current scope update: [Phase 3E](PREFLOP_PHASE3E.md) documents the supported
-UTG/HJ/CO/BTN opening windows plus four-fold SB FOLD. The exact-five sizing
-contract still excludes SB; its nonzero-contribution legality is unverified. The original
+UTG/HJ/CO/BTN opening windows plus four-fold SB FOLD. The
+[paired hand224 SB rule](PREFLOP_SB_224_RAISE.md) adds SB exact-five RAISE with
+posted1/additional4 through the same dependent sizing producer. It binds the
+original fresh SB window and uses a separate empirical SB rule identifier;
+zero-contribution permissions cannot be transplanted to SB. The original
 hand-53/FOLD-only statements below describe the earlier implementation.
 Later positions, facing actions, postflop EV and whole-hand completeness remain
 unproven; no generic gates were relaxed.
