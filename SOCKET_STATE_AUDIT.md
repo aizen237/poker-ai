@@ -740,3 +740,16 @@ also has no BB-versus-limp strategy; legal CHECK is insufficient. No production
 proofs, source semantics, sizing or freshness behavior changed. Added walk replay
 and fail-closed regression coverage; see [PREFLOP_PHASE3F.md](PREFLOP_PHASE3F.md)
 for exact sequence evidence, independent blockers and the one bounded capture.
+
+## Hand212 accepted SB raise: narrower remaining blocker
+
+The local sb-raise-5-capture.json records registration1, hand212 boundary2,
+four explicit folds/turns3–10, accepted hero total5 at11 and BB activation12.
+The same SB source contract passes; original77 is chart-included. Source SB1
+to5 implies four additional chips. Acceptance arrives41.772s after activation,
+beyond the unchanged10s expiry. No UI input/checkpoint is present; it cannot
+prove input5 (rather than another input) produced total5. No new sizing gate
+is enabled. The production blocker text now acknowledges SB acceptance and
+names the missing paired nonzero-contribution input mapping. See
+[the detailed audit](PREFLOP_SB_212_ACCEPTANCE.md). A saved contemporaneous
+hand212 control observation could resolve this without another accepted raise.

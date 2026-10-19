@@ -19,6 +19,23 @@ function replay(hand = 147, change?: (frames: any[]) => void, mutateProjection?:
 }
 
 describe("SB proof issued by the existing bounded continuity authority", () => {
+  it("hand212 certifies the original SB window but not its expired historical acceptance", () => {
+    const all = saved(212), f = replay(212, frames => frames.splice(10));
+    const proof = f.source.sbProof()!;
+    expect(proof).toMatchObject({ scope: "sb_after_utg_hj_co_btn_folds", expiresAt: 1792393093516,
+      witness: { heroCards: ["7c", "7d"], receivedAt: 1792393083516,
+        openingSizeProfile: "pokernow-0.1.72-th-4fun-1-2-exact5-v1" } });
+    expect(proof.folds.map(f => f.sequence)).toEqual([3, 5, 7, 9]);
+    expect(all[10].payload).toMatchObject({ tB: { PLAYER_1: 5 }, cHB: 5, cRPI: ["PLAYER_1"] });
+    expect(all[11].payload).toMatchObject({ cPI: "PLAYER_2", pITT: "PLAYER_2", pre: all[10].payload.now });
+    expect(all[10].localReceivedAt - proof.witness.receivedAt).toBe(41772);
+    // Difference of observed totals, not an observed stack debit or input value.
+    expect(all[10].payload.tB.PLAYER_1 - all[1].payload.tB.PLAYER_1).toBe(4);
+    f.at(proof.expiresAt - 1); expect(f.source.sbProof()).not.toBeNull();
+    f.at(proof.expiresAt); expect(f.source.sbProof()).toBeNull();
+    f.accept(all[10]); f.accept(all[11]);
+    expect(f.source.sbProof()).toBeNull(); expect(f.source.diagnostic().historyComplete).toBe(false);
+  });
   it.each([147, 165])("hand%i certifies four ordered folds and intermediate HJ/CO/BTN activations", hand => {
     const f = replay(hand), boundary = f.frames.at(-9), turn = f.frames.at(-1), proof = f.source.sbProof()!;
     expect(proof).toMatchObject({ version: 1, scope: "sb_after_utg_hj_co_btn_folds", historyComplete: false,

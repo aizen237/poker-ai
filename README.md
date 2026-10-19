@@ -41,6 +41,7 @@ refresh the PokerNow tab. Source changes alone are not enough.
 
 - [Scoped decision proofs, exact blockers and readiness](SCOPED_DECISION_PROOFS.md)
 - [Current SB FOLD scope and missing RAISE evidence](PREFLOP_PHASE3E.md)
+- [Hand212 accepted SB total and remaining UI pairing](PREFLOP_SB_212_ACCEPTANCE.md)
 - [BB audit: missing completion evidence and strategy](PREFLOP_PHASE3F.md)
 - [V2 hand/event timeline and required live capture](V2_HAND_TIMELINE.md)
 - [V1 architecture](V1_ARCHITECTURE.md)

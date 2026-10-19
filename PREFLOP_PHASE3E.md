@@ -1,5 +1,11 @@
 # Phase 3E: source-verified unopened SB FOLD; SB RAISE remains gated
 
+Hand212 update: [the accepted SB raise audit](PREFLOP_SB_212_ACCEPTANCE.md)
+verifies a source total of five after the posted one. The remaining blocker is
+the nonzero-contribution UI input-to-total link, not absence of SB acceptance.
+The original evidence assessment below records hands147/165; hand212 supersedes
+its missing-acceptance statements without changing activation.
+
 This adds only the supported first Small Blind decision after UTG, HJ, CO and
 BTN explicitly fold. The existing SB chart is unchanged. Out-of-chart hands
 may display FOLD; chart-included hands abstain pending independent SB sizing.

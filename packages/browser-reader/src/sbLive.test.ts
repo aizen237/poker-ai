@@ -31,6 +31,38 @@ function controls(kind: string) {
 
 
 describe("recorded SB sequence through MAIN -> source proof -> policy -> overlay", () => {
+  it.each(["closed", "ready", "different-selection", "wrong-bb", "disabled", "duplicate"])(
+    "hand212 original77 remains blocked with %s controls: accepted total does not reveal input", async control => {
+      const f = await live({ hand: 212, control });
+      expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
+      expect(f.text()).toContain("hand212 accepted source total=5");
+      expect(f.text()).toContain("no paired control evidence");
+      expect(f.socket.send).not.toHaveBeenCalled();
+    });
+  it("hand212 acceptance outside the deadline cannot authorize or renew the decision", async () => {
+    const f = await live({ hand: 212 });
+    const [raise, bbTurn] = load("pokernow-sb-212.json").frames.slice(-2);
+    expect(raise.localReceivedAt - f.turn.localReceivedAt).toBe(41772);
+    expect(raise.payload.tB.PLAYER_1 - f.boundary.payload.tB.PLAYER_1).toBe(4);
+    f.atAge(10000); f.refresh(); f.poll(); expect(f.action()).toBeNull();
+    f.incoming(raise); f.refresh(); f.poll();
+    f.incoming(bbTurn); f.refresh(); f.poll();
+    // Deliberately stale DOM still shows hero SB: source/expiry must veto it.
+    expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
+  });
+  it("synthetic out-of-chart hand212 preserves FOLD and cannot be resurrected by acceptance or late explanation", async () => {
+    const f = await live({ hand: 212, cards: ["7c", "2d"] });
+    expect(f.action(), f.text()).toBe("FOLD");
+    const pending = f.requests[0]!;
+    f.atAge(9999); f.refresh(); expect(f.action()).toBe("FOLD");
+    f.atAge(10000); f.refresh(); expect(f.action()).toBeNull(); expect(f.text()).toContain("EVIDENCE EXPIRED");
+    for (const frame of load("pokernow-sb-212.json").frames.slice(-2)) f.incoming(frame);
+    f.refresh(); f.poll();
+    pending.resolve({ ok: true, json: async () => ({ ok: true, decisionSource: "engine_policy", result: {
+      action: "FOLD", confidence: 1, reasoning: "Expired hand212 explanation" } }) });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(f.action()).toBeNull(); expect(f.text()).not.toContain("Expired hand212 explanation");
+  });
   it("hand165 original Q9o displays FOLD, preserves six positions and the posted blind", async () => {
     const f = await live(); expect(f.action(), f.text()).toBe("FOLD");
     const p = f.requests[0]!.packet;
@@ -197,11 +229,12 @@ describe("recorded SB sequence through MAIN -> source proof -> policy -> overlay
 // -> contentScript overlay. No synthetic certificate or selected policy injection.
 // Source envelopes are captured hands 147/165. DOM cross-checks are simulated
 // using the existing reader result shape; card variants are explicitly synthetic.
-async function live(options: { hand?: 147 | 165; cards?: string[]; control?: string; age?: number; delayTurn?: number; logActions?: string[];
+async function live(options: { hand?: 147 | 165 | 212; cards?: string[]; control?: string; age?: number; delayTurn?: number; logActions?: string[];
   mutate?: (frames: any[], read: any) => void } = {}) {
   vi.resetModules();
   const captured = load(`pokernow-sb-${options.hand ?? 165}.json`);
-  const frames = structuredClone(captured.frames);
+  // Hand212 includes the later accepted raise/BB turn; start at its real SB window.
+  const frames = structuredClone(options.hand === 212 ? captured.frames.slice(0, 10) : captured.frames);
   const boundary = frames.at(-9), turn = frames.at(-1), start = boundary.payload;
   const cards = options.cards ?? start.pC.PLAYER_1.cards.map((c: any) => c.value);
   start.pC.PLAYER_1.cards = cards.map((value: string) => ({ value, showing: false }));

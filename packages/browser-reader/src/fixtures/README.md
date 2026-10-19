@@ -270,3 +270,14 @@ Registration occurs during hand164; no fresh boundary is claimed. SB folds,
 settlement follows, and BB is never activated. DOM read shapes are simulated.
 Completion/raise variations in tests are explicitly synthetic rejection cases,
 not new PokerNow observations. No raw evidence directory files are committed.
+
+## Hand212 accepted SB total (no captured UI input)
+
+pokernow-sb-212.json derives from local sb-raise-5-capture.json. Registration
+is bounded to proof fields; baseline/boundary player records keep id/stack/status
+and card records keep cards. Table/player/hand IDs are substituted. Every field
+of frames3–12, original7c7d, numbers, order and local/source times is preserved.
+Frame11 accepts total5 after SB1; frame12 activates BB. No DOM checkpoint or
+input value is added. Tests simulate the current DOM and label card/control
+variations; these cannot establish which input was submitted in the live hand.
+The raw evidence file is ignored and never staged.
