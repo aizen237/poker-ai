@@ -28,11 +28,18 @@ export function currentSb(read: LiveTableRead | undefined, assessment: LiveState
   return currentOpeningWindow(read, assessment, timeline, "SB");
 }
 
+/** Context-only response window. Does not grant a response action or size. */
+export function currentFacingOpen(read: LiveTableRead | undefined, assessment: LiveStateAssessment,
+  timeline: LiveTimelineDiagnostic | null | undefined) {
+  return currentOpeningWindow(read, assessment, timeline, "HJ_OPEN");
+}
+
 /** Shared live cross-checks; HJ/CO/BTN/SB prefixes are produced by the same reducer.
  * DOM folds can contradict a source witness, never create one. */
 function currentOpeningWindow(read: LiveTableRead | undefined, assessment: LiveStateAssessment,
-  timeline: LiveTimelineDiagnostic | null | undefined, role: "UTG" | "HJ" | "CO" | "BTN" | "SB") {
-  const source = timeline?.sourceStatus, proof = role === "UTG" ? source?.firstUtgProof : role === "HJ" ? source?.hjProof : role === "CO" ? source?.coProof : role === "BTN" ? source?.btnProof : source?.sbProof, w = proof?.witness;
+  timeline: LiveTimelineDiagnostic | null | undefined, role: "UTG" | "HJ" | "CO" | "BTN" | "SB" | "HJ_OPEN") {
+  const facing = role === "HJ_OPEN";
+  const source = timeline?.sourceStatus, proof = facing ? source?.facingOpenProof : role === "UTG" ? source?.firstUtgProof : role === "HJ" ? source?.hjProof : role === "CO" ? source?.coProof : role === "BTN" ? source?.btnProof : source?.sbProof, w = proof?.witness;
   const id = source?.identity, chain = proof?.continuity;
   const foldedPositions = role === "SB" ? ["UTG", "HJ", "CO", "BTN"] : role === "BTN" ? ["UTG", "HJ", "CO"] : role === "CO" ? ["UTG", "HJ"] : role === "HJ" ? ["UTG"] : [];
   const foldedIds = foldedPositions.map(position => w?.players.find(p => p.position === position)?.playerId);
@@ -41,21 +48,25 @@ function currentOpeningWindow(read: LiveTableRead | undefined, assessment: LiveS
       id.tableId !== w.tableId || id.handId !== w.handId || id.handNumber !== w.handNumber || id.heroPlayerId !== w.heroId ||
       (role === "UTG" ? id.frameCursor !== w.cursor : id.frameCursor !== (proof && "anchor" in proof ? proof.anchor.cursor : null)) ||
       timeline.current.handId !== `${w.tableId}:hand:${w.handId}` || timeline.current.handNumber !== w.handNumber ||
-      proof?.scope !== (role === "UTG" ? "first_utg_boundary" : role === "HJ" ? "hj_after_utg_fold" : role === "CO" ? "co_after_utg_hj_folds" : role === "BTN" ? "btn_after_utg_hj_co_folds" : "sb_after_utg_hj_co_btn_folds") || proof.version !== 1 || proof.historyComplete !== false ||
+      proof?.scope !== (facing ? "hj_facing_utg_open5" : role === "UTG" ? "first_utg_boundary" : role === "HJ" ? "hj_after_utg_fold" : role === "CO" ? "co_after_utg_hj_folds" : role === "BTN" ? "btn_after_utg_hj_co_folds" : "sb_after_utg_hj_co_btn_folds") || proof.version !== 1 || proof.historyComplete !== false ||
       (role !== "UTG" && (Date.now() < w.receivedAt || Date.now() >= proof.expiresAt ||
-        w.players.find(p => p.playerId === w.heroId)?.position !== role)) ||
+        w.players.find(p => p.playerId === w.heroId)?.position !== (facing ? "HJ" : role))) ||
       chain?.generation !== w.generation || chain.status !== "validated_prefix" || chain.tableId !== w.tableId ||
       chain.handId !== w.handId || chain.cursor !== w.cursor || chain.throughSequence <= chain.baselineSequence || id.chainGap ||
       timeline.current.coverage.issues.some(i => i.code === "metadata_gap" || i.code === "identity_conflict") ||
       timeline.current.seatMapping.status === "invalid" || read.context.readErrors.length ||
       state.street !== "preflop" || state.board.length || assessment.smallBlind !== w.smallBlind || assessment.bigBlind !== w.bigBlind ||
       read.context.dealerSeatNumber !== w.players.find(p => p.position === "BTN")?.seat) return null;
+  if (facing && source.facingOpenProof?.actor.playerId !== w.heroId) return null;
   // Conflicting log evidence can invalidate this scoped voluntary window, even
   // though missing log rows cannot invalidate its independent first-turn proof.
   if (timeline.current.events.some(e => e.source === "pokernow_log_v3" &&
       !isSourceNonActionMetadata(e) &&
       !["hand_start", "player_stacks", "post"].includes(e.action) &&
+      !(facing && e.action === "raise" && e.actor?.playerId === w.players.find(p => p.position === "UTG")?.playerId &&
+        e.street === "preflop" && e.amountMeaning === "street_total" && e.amount === 5 && e.order !== "ambiguous") &&
       !(role !== "UTG" && e.action === "fold" && !!e.actor?.playerId && foldedIds.includes(e.actor.playerId) && e.street === "preflop"))) return null;
+  if (facing && timeline.current.events.filter(e => e.source === "pokernow_log_v3" && e.action === "raise").length > 1) return null;
   const logFolds = timeline.current.events.filter(e => e.source === "pokernow_log_v3" && e.action === "fold");
   if (role !== "UTG" && (logFolds.length > foldedIds.length ||
       new Set(logFolds.map(e => e.actor?.playerId)).size !== logFolds.length)) return null;
@@ -79,6 +90,7 @@ function currentOpeningWindow(read: LiveTableRead | undefined, assessment: LiveS
     const s = seats.find(s => s.seatNumber === p.seat);
     if (!s || s.isFolded !== foldedPositions.includes(p.position) || s.isAllIn || s.isOffline || s.isSettling || s.betReadError || s.stack === null ||
         s.stack < 100 * w.bigBlind || (s.stack !== p.sourceStack && s.stack !== p.sourceStack - p.contribution) ||
+        (facing && p.position === "UTG" && s.stack !== p.sourceStack - p.contribution) ||
         assessment.positions.get(p.seat) !== p.position ||
         (s.currentBet === null ? p.contribution !== 0 : s.currentBet !== p.contribution) ||
         s.isYou !== (p.playerId === w.heroId) || s.isCurrentToAct !== (p.playerId === w.heroId)) return null;
@@ -87,6 +99,6 @@ function currentOpeningWindow(read: LiveTableRead | undefined, assessment: LiveS
   const ranks = "23456789TJQKA";
   const cards = hero.holeCards.map(c => `${ranks[c.rank - 2]}${c.suit}`).sort();
   if (cards.length !== 2 || JSON.stringify(cards) !== JSON.stringify([...w.heroCards].sort()) ||
-      assessment.amountToCall !== null && assessment.amountToCall !== w.bigBlind - w.players.find(p => p.playerId === w.heroId)!.contribution) return null;
+      assessment.amountToCall !== null && assessment.amountToCall !== (facing ? 5 : w.bigBlind - w.players.find(p => p.playerId === w.heroId)!.contribution)) return null;
   return w;
 }

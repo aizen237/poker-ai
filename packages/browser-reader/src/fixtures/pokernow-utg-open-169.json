@@ -1,0 +1,52 @@
+{
+  "provenance": "Actual hand169 frames66-67 from raise-5-accepted.json; player IDs substituted consistently with pokernow-exact-five-accepted.json. All raw fields, numbers, nulls, arrays and times retained. Baseline/prefix comes from that existing fixture. Observer was UTG; HJ private cards were NOT captured.",
+  "frames": [
+    {
+      "localReceiveSequence": 66,
+      "localReceivedAt": 1792133424717,
+      "connectionGeneration": 2,
+      "event": "gC",
+      "payload": {
+        "mR": 8,
+        "tB": {
+          "PLAYER_1": 5
+        },
+        "cHB": 5,
+        "now": 1792133427393,
+        "pGS": {},
+        "sNA": "NSAA",
+        "cRPI": [
+          "PLAYER_1"
+        ],
+        "pITT": null,
+        "sNAA": 1792133428193,
+        "wBACPI": [],
+        "eventsData": [],
+        "pre": 1792133360029,
+        "mEV": 0,
+        "fV": "0.1.72",
+        "sN": 1792133427408
+      }
+    },
+    {
+      "localReceiveSequence": 67,
+      "localReceivedAt": 1792133425514,
+      "connectionGeneration": 2,
+      "event": "gC",
+      "payload": {
+        "cPI": "PLAYER_2",
+        "now": 1792133428197,
+        "sNA": null,
+        "pASA": 1792133428197,
+        "pITT": "PLAYER_2",
+        "sNAA": null,
+        "mAVTB": 249,
+        "eventsData": [],
+        "pre": 1792133427393,
+        "mEV": 0,
+        "fV": "0.1.72",
+        "sN": 1792133428199
+      }
+    }
+  ]
+}

@@ -4,7 +4,7 @@ import type { LiveStateAssessment } from "@poker-ai/browser-reader";
 import type { LiveTableRead } from "./tableRead.js";
 import type { LiveTimelineDiagnostic } from "./liveTimeline.js";
 import { inspectLiveUnopenedEvidence } from "./unopenedEvidence.js";
-import { currentFirstUtg, currentHj, currentCo, currentBtn, currentSb } from "./firstUtgLive.js";
+import { currentFirstUtg, currentHj, currentCo, currentBtn, currentSb, currentFacingOpen } from "./firstUtgLive.js";
 import { openingSizeEvidence } from "./openingSizeEvidence.js";
 
 /** Translate existing evidence only; socket chronology and observed log rows are never certified as a complete window. */
@@ -100,6 +100,16 @@ export function buildLiveDecisionProofs(read: LiveTableRead, assessment: LiveSta
       JSON.stringify(packet.preflopExecution.exactOpeningSize) !== JSON.stringify(opening.size)) {
     set("raiseLegality", "contradicted", "Dependent sizing/packet cross-check", ["Sizing belongs to a different source, control or epoch."]);
   }
+  const facing = currentFacingOpen(read, assessment, timeline);
+  if (facing) {
+    const proof = source!.facingOpenProof!, continuity = proof.continuity;
+    set("connection", "proven", `Same source authority: generation ${continuity.generation}, baseline ${continuity.baselineSequence}, through ${continuity.throughSequence}, cursor ${continuity.cursor}.`);
+    set("actionWindow", "proven", facing.provenance);
+    set("position", "proven", `${facing.provenance} Frozen HJ seat ${facing.heroSeat}.`);
+    set("roster", "proven", `${facing.provenance} Original six dealt-in IDs; no departures/folds.`);
+    set("stack", "proven", "Source starting capacities + current numeric DOM stacks; UTG remaining equals original minus five.");
+    set("callCost", "proven", "Accepted UTG street total5 minus HJ0 = five chips; within verified HJ capacity. Not a strategy or CALL-control certificate.");
+  }
   const envelope: DecisionProofs = { version: 1, decisionEpoch: epoch,
     binding: "diagnostic-only: no packet",
     handId: source?.identity ? timeline!.current.handId : null, connectionGeneration: source?.firstUtgProof?.continuity.generation ?? source?.hjProof?.continuity.generation ?? source?.coProof?.continuity.generation ?? source?.btnProof?.continuity.generation ?? source?.sbProof?.continuity.generation ?? chain?.generation ?? null, proofs };
@@ -112,7 +122,13 @@ export function buildLiveDecisionProofs(read: LiveTableRead, assessment: LiveSta
     : assessDecisionProofs({ street: state?.street ?? null, opponents: assessment.activeOpponents, amountToCall: assessment.amountToCall,
       preflopSituation: preflop?.situation ?? null, preflopRfiCandidate: unopened?.candidate ?? false,
       preflopAction: chartAction, aggressionPossible: assessment.legality.aggressionReopened }, proofs);
-  return { evidence: envelope, activation, unopened, openingSize: opening.size };
+  if (facing && activation.state !== "unsafe") {
+    activation.allowed = false;
+    activation.state = "unsupported";
+    activation.reasons.push("Source-verified HJ facing UTG open-to-five context only. CALL/FOLD/3-BET strategy and required response legality remain unsupported.");
+  }
+  return { evidence: envelope, activation, unopened, openingSize: opening.size,
+    responseWindow: facing ? source!.facingOpenProof : null };
 }
 
 /** Proof refreshes must invalidate pending recommendations even if DOM values did not change. */
@@ -124,6 +140,7 @@ export function liveProofRevision(timeline: LiveTimelineDiagnostic): string {
     ...(s.coProof ? { co: s.coProof } : {}),
     ...(s.btnProof ? { btn: s.btnProof } : {}),
     ...(s.sbProof ? { sb: s.sbProof } : {}),
+    ...(s.facingOpenProof ? { facingOpen: s.facingOpenProof } : {}),
     generation: s.sourceMetadata.socketContinuity.generation, continuity: s.sourceMetadata.socketContinuity.status,
     gap: s.sourceMetadata.socketContinuity.chainGap, lastCursor: s.sourceMetadata.socket.at(-1)?.metadata.frame,
     events: timeline.current.events.map(e => [e.id, e.order, e.actor?.seat]), coverage: timeline.current.coverage.status,

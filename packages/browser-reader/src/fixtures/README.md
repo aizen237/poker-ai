@@ -1,5 +1,16 @@
 # PokerNow live fixtures
 
+## Phase 4A accepted UTG opening action
+
+`pokernow-utg-open-169.json` preserves all raw fields of local hand 169's
+acceptance (sequence 66) and HJ activation (67). Player IDs use the same substitutions as
+`pokernow-exact-five-accepted.json`, whose first 65 frames supply the baseline
+and hand boundary. Numbers, nulls, array order and receive/source times are
+unchanged. This is a UTG-observer capture; HJ private cards are unavailable.
+Tests explicitly label HJ-observer/private-card changes and simulated DOM reads.
+The real action envelopes are not replaced with fabricated proof objects.
+See `PREFLOP_PHASE4A.md`; no response action is activated.
+
 ## Exact five-chip acceptance and display
 
 `pokernow-exact-five-accepted.json` preserves all 68 incoming frame envelopes

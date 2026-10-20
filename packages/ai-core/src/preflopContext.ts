@@ -26,6 +26,8 @@ export const PreflopInputSchema = z.object({
   historyCoverage: z.enum(["complete", "partial"]),
   /** Independently proven decision-local window, never whole-hand coverage. */
   openingEvidence: z.enum(["first_utg_hand_start", "hj_after_utg_fold", "co_after_utg_hj_folds", "btn_after_utg_hj_co_folds", "sb_after_utg_hj_co_btn_folds"]).optional(),
+  /** Closed source-backed response context; explicitly NOT an RFI permission. */
+  actionWindowEvidence: z.literal("hj_facing_utg_open5").optional(),
   actions: z.array(action), historyNotes: z.array(z.string()),
   tournamentContext: z.enum(["chip_ev_only", "unknown"]),
 });

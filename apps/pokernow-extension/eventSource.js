@@ -143,22 +143,22 @@
     }
     return text.length;
   }
-  function members(object5) {
+  function members(object6) {
     const result = [];
     let i = 1;
-    while (i < object5.length) {
-      while (/\s|,/.test(object5[i] ?? "") && i < object5.length) i++;
-      if (object5[i] === "}") break;
+    while (i < object6.length) {
+      while (/\s|,/.test(object6[i] ?? "") && i < object6.length) i++;
+      if (object6[i] === "}") break;
       const keyStart = i++;
-      while (i < object5.length) {
-        if (object5[i] === "\\") i += 2;
-        else if (object5[i++] === '"') break;
+      while (i < object6.length) {
+        if (object6[i] === "\\") i += 2;
+        else if (object6[i++] === '"') break;
       }
-      const key = JSON.parse(object5.slice(keyStart, i));
-      while (object5[i] !== ":" && i < object5.length) i++;
+      const key = JSON.parse(object6.slice(keyStart, i));
+      while (object6[i] !== ":" && i < object6.length) i++;
       i++;
-      const end = endOfValue(object5, i);
-      result.push({ key, raw: object5.slice(i, end).trim() });
+      const end = endOfValue(object6, i);
+      result.push({ key, raw: object6.slice(i, end).trim() });
       i = end;
     }
     return result;
@@ -303,10 +303,36 @@
     return null;
   }
 
-  // src/firstUtgSource.ts
+  // src/bettingWindow.ts
   var object4 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
-  var token3 = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(v);
+  var integer2 = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
   var same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  function isObservedUtgOpenPatch(raw) {
+    if (!object4(raw)) return false;
+    const keys2 = [
+      "mR",
+      "tB",
+      "cHB",
+      "now",
+      "pGS",
+      "sNA",
+      "cRPI",
+      "pITT",
+      "sNAA",
+      "wBACPI",
+      "eventsData",
+      "pre",
+      "mEV",
+      "fV",
+      "sN"
+    ];
+    return Object.keys(raw).length === keys2.length && keys2.every((k) => Object.hasOwn(raw, k)) && integer2(raw.now) && integer2(raw.pre) && raw.now > raw.pre && integer2(raw.sNAA) && integer2(raw.sN) && raw.mR === 8 && raw.cHB === 5 && raw.mEV === 0 && raw.fV === "0.1.72" && raw.sNA === "NSAA" && raw.pITT === null && same(raw.pGS, {}) && same(raw.wBACPI, []) && same(raw.eventsData, []) && object4(raw.tB) && Object.keys(raw.tB).length === 1 && Object.values(raw.tB)[0] === 5 && same(raw.cRPI, Object.keys(raw.tB));
+  }
+
+  // src/firstUtgSource.ts
+  var object5 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+  var token3 = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(v);
+  var same2 = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   var keys = [
     "id",
     "hI",
@@ -352,21 +378,21 @@
     if (typeof data !== "string" || data.length > 2e6 || !data.startsWith("42[")) return null;
     try {
       const p = JSON.parse(data.slice(2));
-      if (!Array.isArray(p) || p.length !== 2 || !["registered", "gC", "rup"].includes(p[0]) || !object4(p[1])) return null;
+      if (!Array.isArray(p) || p.length !== 2 || !["registered", "gC", "rup"].includes(p[0]) || !object5(p[1])) return null;
       const raw = p[0] === "registered" ? p[1].gameState : p[1];
-      if (!object4(raw)) return null;
-      if (Object.hasOwn(raw, "eventsData") && !same(raw.eventsData, [])) return null;
+      if (!object5(raw)) return null;
+      if (Object.hasOwn(raw, "eventsData") && !same2(raw.eventsData, [])) return null;
       const heroId = p[0] === "registered" ? p[1].currentPlayer?.id : knownHero;
       const frame = {};
       for (const key of keys) if (Object.hasOwn(raw, key)) frame[key] = raw[key];
       if (p[0] === "registered" || frame.gameResult !== "<D>") delete frame.gameResult;
       if (Object.hasOwn(raw, "players")) {
-        if (!object4(raw.players) || Object.keys(raw.players).length > 10) return null;
-        frame.players = Object.fromEntries(Object.entries(raw.players).map(([id, player]) => [id, object4(player) ? Object.fromEntries(["id", "stack", "status", "disconnectedSince"].filter((k) => Object.hasOwn(player, k)).map((k) => [k, player[k]])) : player]));
+        if (!object5(raw.players) || Object.keys(raw.players).length > 10) return null;
+        frame.players = Object.fromEntries(Object.entries(raw.players).map(([id, player]) => [id, object5(player) ? Object.fromEntries(["id", "stack", "status", "disconnectedSince"].filter((k) => Object.hasOwn(player, k)).map((k) => [k, player[k]])) : player]));
       }
       if (Object.hasOwn(raw, "pC")) {
-        if (!object4(raw.pC) || Object.keys(raw.pC).length > 10) return null;
-        if (Object.values(raw.pC).some((hand) => !object4(hand) || !Array.isArray(hand.cards) || hand.cards.length > 2 || hand.cards.some((c) => !object4(c) || !(c.value === null || typeof c.value === "string") || typeof c.showing !== "boolean"))) return null;
+        if (!object5(raw.pC) || Object.keys(raw.pC).length > 10) return null;
+        if (Object.values(raw.pC).some((hand) => !object5(hand) || !Array.isArray(hand.cards) || hand.cards.length > 2 || hand.cards.some((c) => !object5(c) || !(c.value === null || typeof c.value === "string") || typeof c.showing !== "boolean"))) return null;
         frame.pC = Object.fromEntries(Object.entries(raw.pC).map(([id, hand]) => [
           id,
           { cards: hand.cards.map((c) => ({ value: id === heroId ? c.value : null, showing: c.showing })) }
@@ -376,6 +402,7 @@
         event: p[0],
         heroId: token3(heroId) ? heroId : null,
         frame,
+        ...p[0] === "gC" && isObservedUtgOpenPatch(raw) ? { bettingPatch: raw } : {},
         ...p[0] === "gC" && hjPatchKind(raw) ? { hjPatch: raw } : {}
       };
       return JSON.stringify(result).length <= 4e4 ? result : null;

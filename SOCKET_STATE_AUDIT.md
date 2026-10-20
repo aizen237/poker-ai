@@ -785,3 +785,13 @@ is enabled. The production blocker text now acknowledges SB acceptance and
 names the missing paired nonzero-contribution input mapping. See
 [the detailed audit](PREFLOP_SB_212_ACCEPTANCE.md). A saved contemporaneous
 hand212 control observation could resolve this without another accepted raise.
+
+## Phase 4A: accepted UTG open and HJ response context
+
+The full hand169 acceptance/turn patches now support a closed, source-derived
+UTG contribution0->5 transition followed by explicit HJ activation. The existing
+source reducer remains the continuity authority. `facingOpenProof` is context
+only, expires ten seconds after HJ activation and cannot authorize a response.
+No mR minimum/grid semantics, general betting coverage, accounting or strategy
+permission follows. Original observer and simulated HJ-perspective tests are
+distinguished in [PREFLOP_PHASE4A.md](PREFLOP_PHASE4A.md).
