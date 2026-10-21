@@ -1,5 +1,5 @@
 import { assessDecisionProofs, assessPacketDecisionProofs, decisionProofBinding, PROOF_SCOPES,
-  unopenedChartAction, type DecisionPacket, type PreflopContext, type ScopedProof, type ProofScope, type DecisionProofs } from "@poker-ai/ai-core";
+  unopenedChartAction, inspectLiveHjResponseStrategy, type DecisionPacket, type PreflopContext, type ScopedProof, type ProofScope, type DecisionProofs } from "@poker-ai/ai-core";
 import type { LiveStateAssessment } from "@poker-ai/browser-reader";
 import type { LiveTableRead } from "./tableRead.js";
 import type { LiveTimelineDiagnostic } from "./liveTimeline.js";
@@ -101,6 +101,26 @@ export function buildLiveDecisionProofs(read: LiveTableRead, assessment: LiveSta
     set("raiseLegality", "contradicted", "Dependent sizing/packet cross-check", ["Sizing belongs to a different source, control or epoch."]);
   }
   const facing = currentFacingOpen(read, assessment, timeline);
+  // Diagnostics consume the existing authority and its ORIGINAL expiry. No
+  // reference, selected control or classifier result can mint/renew a proof.
+  const responseStrategy = facing ? {
+    ...inspectLiveHjResponseStrategy({ preflop, holeCards: hero?.holeCards }),
+    binding: { decisionEpoch: epoch, tableId: facing.tableId, handId: facing.handId,
+      heroId: facing.heroId, generation: facing.generation, cursor: facing.cursor,
+      receivedAt: facing.receivedAt, expiresAt: source!.facingOpenProof!.expiresAt },
+    call: { contributionGapChips: 5, payableIfCallAuthorizedChips: 5,
+      authorization: "unproven" as const,
+      reason: "HJ has sufficient chips for the five-chip gap, but no certified current CALL control/action contract is installed." },
+    threeBet: { stackCapacityChips: hero!.stack!, fullMinimumRaiseToChips: null,
+      permittedMaximumRaiseToChips: null, chipUnit: null, raiseRights: "unproven" as const,
+      reason: "Observed UTG acceptance and mR=8 do not authorize a future HJ 3-bet or establish its size/grid." },
+    // Requirements still missing in THIS valid context; not another proof gate.
+    remainingRequirements: {
+      FOLD: ["reviewed_response_strategy"],
+      CALL: ["reviewed_response_strategy", "current_call_authorization"],
+      THREE_BET: ["reviewed_response_strategy_and_size", "raise_rights", "minimum_and_maximum_totals", "chip_grid"],
+    },
+  } : null;
   if (facing) {
     const proof = source!.facingOpenProof!, continuity = proof.continuity;
     set("connection", "proven", `Same source authority: generation ${continuity.generation}, baseline ${continuity.baselineSequence}, through ${continuity.throughSequence}, cursor ${continuity.cursor}.`);
@@ -125,10 +145,11 @@ export function buildLiveDecisionProofs(read: LiveTableRead, assessment: LiveSta
   if (facing && activation.state !== "unsafe") {
     activation.allowed = false;
     activation.state = "unsupported";
-    activation.reasons.push("Source-verified HJ facing UTG open-to-five context only. CALL/FOLD/3-BET strategy and required response legality remain unsupported.");
+    activation.reasons.push(...responseStrategy!.reasons);
+    activation.reasons.push("HJ response activation remains disabled; missing CALL/3-BET legality must never substitute FOLD.");
   }
   return { evidence: envelope, activation, unopened, openingSize: opening.size,
-    responseWindow: facing ? source!.facingOpenProof : null };
+    responseWindow: facing ? source!.facingOpenProof : null, responseStrategy };
 }
 
 /** Proof refreshes must invalidate pending recommendations even if DOM values did not change. */

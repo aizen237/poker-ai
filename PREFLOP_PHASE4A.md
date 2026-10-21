@@ -126,6 +126,10 @@ the explicitly sanitized public transition described above.
 
 ## Next slice
 
+Phase 4B's reference review and implementation outcome are recorded in
+[PREFLOP_PHASE4B.md](PREFLOP_PHASE4B.md). It adds reference-contract infrastructure
+and live blocker diagnostics; no response action has been enabled.
+
 Review a bounded HJ-versus-UTG 2.5BB response strategy for the matching profile
 and effective depths, including how its CALL/FOLD/3-BET alternatives are treated.
 Establish any required CALL-control and re-raise bounds/grid/rights independently.

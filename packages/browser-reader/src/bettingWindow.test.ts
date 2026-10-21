@@ -216,6 +216,11 @@ describe("HJ facing recorded UTG open through the production context/display pat
     expect(d.preflop.actions).toEqual([{ seat: 1, action: "raise", totalContributionBB: 2.5, observation: 66, wagerAction: "raise" }]);
     expect(d.handTimeline.current.historyComplete).toBe(false);
     expect(d.decision.scopedProofs.activation).toMatchObject({ allowed: false, state: "unsupported" });
+    expect(d.decision.scopedProofs.responseStrategy).toMatchObject({ status: "reference_missing",
+      chosenAction: null, strategyClass: null, liveAuthorized: false,
+      call: { contributionGapChips: 5, payableIfCallAuthorizedChips: 5, authorization: "unproven" },
+      threeBet: { fullMinimumRaiseToChips: null, permittedMaximumRaiseToChips: null, chipUnit: null, raiseRights: "unproven" } });
+    expect(d.decision.scopedProofs.responseStrategy.binding.expiresAt).toBe(d.handTimeline.sourceStatus.facingOpenProof.expiresAt);
     for (const scope of ["connection", "actionWindow", "position", "roster", "stack", "callCost"])
       expect(d.decision.scopedProofs.evidence.proofs.find((p: any) => p.scope === scope).status).toBe("proven");
     for (const scope of ["raiseLegality", "reopening", "pot", "accounting"])
@@ -249,14 +254,17 @@ describe("HJ facing recorded UTG open through the production context/display pat
       if (variant === "dom-dealer") read.context.dealerSeatNumber = 3;
     });
     expect(f.diagnostic()?.preflop?.actionWindowEvidence).toBeUndefined();
+    expect(f.diagnostic()?.decision.scopedProofs.responseStrategy).toBeNull();
     expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0); expect(f.socket.send).not.toHaveBeenCalled();
   });
   it("unchanged polls do not renew context; expiry and disconnect remove it without producing advice", async () => {
     const f = await live(), expiry = f.diagnostic().handTimeline.sourceStatus.facingOpenProof.expiresAt;
     f.atAge(9000); f.poll();
     expect(f.diagnostic().handTimeline.sourceStatus.facingOpenProof.expiresAt).toBe(expiry);
+    expect(f.diagnostic().decision.scopedProofs.responseStrategy.binding.expiresAt).toBe(expiry);
     f.atAge(10000); f.refresh(); f.poll();
     expect(f.diagnostic().preflop.actionWindowEvidence).toBeUndefined();
+    expect(f.diagnostic().decision.scopedProofs.responseStrategy).toBeNull();
     expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
     f.socket.dispatchEvent(new Event("close")); f.poll();
     expect(f.diagnostic().handTimeline.sourceStatus.facingOpenProof).toBeNull();
@@ -267,6 +275,41 @@ describe("HJ facing recorded UTG open through the production context/display pat
     expect(f.diagnostic().preflop.actionWindowEvidence).toBe("hj_facing_utg_open5");
     expect(f.diagnostic().handTimeline.current.historyComplete).toBe(false);
     expect(f.requests).toHaveLength(0);
+  });
+  it.each([["7h", "2c", "72o"], ["8h", "8d", "88"], ["Ah", "Ad", "AA"]])(
+    "synthetic HJ %s %s remains blocked without a reviewed reference", async (a, b, hand) => {
+      const f = await live((fs, read) => {
+        for (const frame of fs) {
+          const cards = (frame.payload.gameState ?? frame.payload).pC?.PLAYER_2?.cards;
+          if (cards) cards.forEach((c: any, i: number) => { c.value = [a, b][i]; });
+        }
+        read.raw.seats.find((s: any) => s.seatNumber === 2).holeCardClassLists = [a, b].map(c =>
+          ["card-container", `card-${c[1]}`, `card-s-${c[0]}`, "flipped", "med"]);
+      });
+      expect(f.diagnostic().decision.scopedProofs.responseStrategy).toMatchObject({ hand,
+        status: "reference_missing", chosenAction: null, liveAuthorized: false });
+      expect(f.text()).toContain("No reviewed HJ-versus-UTG");
+      expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
+      expect(f.socket.send).not.toHaveBeenCalled();
+    });
+  it.each(["matching-five", "disabled", "contradictory"])("%s Raise controls cannot authorize a response", async variant => {
+    const f = await live((_, read) => {
+      read.raiseControl = { ...read.raiseControl, formVisible: true, amountControlVisible: true,
+        selectedRaiseToChips: variant === "contradictory" ? 3 : 5, selectedRaiseToText: variant === "contradictory" ? "3" : "5",
+        raiseSubmitVisible: true, raiseSubmitEnabled: variant !== "disabled",
+        issues: variant === "contradictory" ? ["Multiple visible raise forms"] : [] };
+    });
+    expect(f.diagnostic().decision.scopedProofs.responseStrategy.liveAuthorized).toBe(false);
+    expect(f.diagnostic().decision.scopedProofs.openingSize).toBeNull();
+    expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
+  });
+  it("insufficient HJ capacity invalidates the live context, not just a proposed CALL", async () => {
+    const f = await live((_, read) => {
+      const hero = read.raw.seats.find((s: any) => s.seatNumber === 2);
+      hero.stackText = hero.stackContainerText = "3";
+    });
+    expect(f.diagnostic().decision.scopedProofs.responseStrategy).toBeNull();
+    expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
   });
   it.each(['"UTG @ PLAYER_1" calls 2', '"UTG @ PLAYER_1" raises to 6', '"HJ @ PLAYER_2" raises to 5',
     '"HJ @ PLAYER_2" folds', 'unrecognized poker event', '"HJ @ PLAYER_2" posts a missed big blind of 2'])(

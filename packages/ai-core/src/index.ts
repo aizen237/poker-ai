@@ -14,3 +14,4 @@ export * from "./decisionPolicy.js";
 export * from "./policyRecommendation.js";
 export * from "./decisionProofs.js";
 export * from "./preflopPolicy.js";
+export * from "./preflopResponsePolicy.js";

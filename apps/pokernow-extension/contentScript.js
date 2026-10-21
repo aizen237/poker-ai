@@ -4444,29 +4444,29 @@
   }
   function rangeComboCount(range) {
     let total = 0;
-    for (const [handStr, weight] of range) {
-      if (!Number.isFinite(weight) || weight < 0 || weight > 1)
+    for (const [handStr, weight2] of range) {
+      if (!Number.isFinite(weight2) || weight2 < 0 || weight2 > 1)
         throw new Error("Invalid range weight");
-      if (weight === 0)
+      if (weight2 === 0)
         continue;
       const combos = expandHandType(parseHandType(handStr)).length;
-      total += combos * weight;
+      total += combos * weight2;
     }
     return total;
   }
   function expandRange(range, excludeCards = []) {
     const excludeIds = new Set(excludeCards.map((c) => `${c.rank}${c.suit}`));
     const result = [];
-    for (const [handStr, weight] of range) {
-      if (!Number.isFinite(weight) || weight < 0 || weight > 1)
+    for (const [handStr, weight2] of range) {
+      if (!Number.isFinite(weight2) || weight2 < 0 || weight2 > 1)
         throw new Error("Invalid range weight");
-      if (weight === 0)
+      if (weight2 === 0)
         continue;
       const combos = expandHandType(parseHandType(handStr));
       for (const combo of combos) {
         const overlaps = combo.some((c) => excludeIds.has(`${c.rank}${c.suit}`));
         if (!overlaps) {
-          result.push({ cards: combo, weight });
+          result.push({ cards: combo, weight: weight2 });
         }
       }
     }
@@ -5190,9 +5190,9 @@
       const score = chenScore(parseHandType(hand));
       if (mass >= target && score < boundary)
         break;
-      const weight = range.get(hand);
-      result.set(hand, weight);
-      mass += rangeComboCount(/* @__PURE__ */ new Map([[hand, weight]]));
+      const weight2 = range.get(hand);
+      result.set(hand, weight2);
+      mass += rangeComboCount(/* @__PURE__ */ new Map([[hand, weight2]]));
       boundary = score;
     }
     return result;
@@ -5202,11 +5202,11 @@
     if (new Set(known2.map((c) => c.rank + c.suit)).size !== known2.length)
       throw new Error("Duplicate known cards");
     let range = input.baseline ? new Map(input.baseline.range) : rangeFromList(allHandTypes().map(formatHandType));
-    for (const [hand, weight] of range) {
+    for (const [hand, weight2] of range) {
       parseHandType(hand);
-      if (!Number.isFinite(weight) || weight < 0 || weight > 1)
+      if (!Number.isFinite(weight2) || weight2 < 0 || weight2 > 1)
         throw new Error("Range weights must be finite and between 0 and 1");
-      if (weight === 0)
+      if (weight2 === 0)
         range.delete(hand);
     }
     let modeled = input.baseline !== void 0;
@@ -5261,8 +5261,8 @@
               if (mass > 0) {
                 const selected = retainStrengthMass(extras, Math.min(1, extraMass / mass));
                 const scale = Math.min(1, extraMass / rangeComboCount(selected));
-                for (const [hand, weight] of selected)
-                  candidate.set(hand, weight * scale);
+                for (const [hand, weight2] of selected)
+                  candidate.set(hand, weight2 * scale);
               }
             } else if (aggressionMultiplier < 1)
               candidate = retainStrengthMass(candidate, aggressionMultiplier);
@@ -5290,7 +5290,7 @@
         } else {
           candidate = retainStrengthMass(range, (event.priorRaises === 1 ? 0.65 : 0.5) * entryMultiplier);
           const premiums = retainStrengthMass(range, 0.1);
-          candidate = new Map([...candidate].map(([hand, weight]) => [hand, weight * (premiums.has(hand) ? 0.5 : 1)]));
+          candidate = new Map([...candidate].map(([hand, weight2]) => [hand, weight2 * (premiums.has(hand) ? 0.5 : 1)]));
           establishesModel = true;
           warn("Flat-call heuristic retains a stronger continuing subset with reduced premium weights; traps remain possible.");
         }
@@ -5655,12 +5655,12 @@
     if (!reference)
       return null;
     const [a, b] = packet.hero.holeCards;
-    const weight = reference.get(formatHandType({
+    const weight2 = reference.get(formatHandType({
       highRank: a.rank >= b.rank ? a.rank : b.rank,
       lowRank: a.rank >= b.rank ? b.rank : a.rank,
       suited: a.suit === b.suit
     })) ?? 0;
-    return weight === 0 ? "FOLD" : weight === 1 ? "RAISE" : null;
+    return weight2 === 0 ? "FOLD" : weight2 === 1 ? "RAISE" : null;
   }
   function evaluatePreflopReference(packet) {
     const fail = (reason) => ({
@@ -5746,10 +5746,10 @@
       lowRank: a.rank >= b.rank ? b.rank : a.rank,
       suited: a.suit === b.suit
     });
-    const weight = reference.get(hand) ?? 0;
-    if (weight !== 0 && weight !== 1)
+    const weight2 = reference.get(hand) ?? 0;
+    if (weight2 !== 0 && weight2 !== 1)
       return fail("Mixed-frequency chart entries are unsupported by this deterministic reference policy.");
-    const action2 = weight === 1 ? "RAISE" : "FOLD";
+    const action2 = weight2 === 1 ? "RAISE" : "FOLD";
     if (!packet.candidateActions.includes(action2))
       return fail("Reference action is absent from the proven legal action set.");
     if (action2 === "FOLD")
@@ -6472,11 +6472,11 @@
   var CLAIM_PREFIX = "\\b(?:hero|you|we)(?:['\\u2019]ve)?\\s+(?:(?:only|just|already|now|currently|still|is|are)\\s+)*(?:has|have|had|hold|holds|holding|made|make|makes|flopped|turned|hit|hits|got|own|owns)";
   var FILLER_WORDS = "only|just|a|an|the|top|middle|bottom|weak|strong|marginal|made|nut|low|high|small|big|solid|decent|current|already|now|still";
   var NOT_A_MADE_HAND = "draws?|possibilit\\w*|potential|outs?|blockers?|equity";
-  function findHeroClaimedHandCategories(text) {
+  function findHeroClaimedHandCategories(text2) {
     const found = [];
     for (const { name, pattern } of CATEGORY_PATTERNS) {
       const claim = new RegExp(`${CLAIM_PREFIX}(?:${SEP}+(?:${FILLER_WORDS})){0,4}${SEP}+(?:${pattern})\\b(?!${SEP}+(?:${NOT_A_MADE_HAND}))`, "i");
-      if (claim.test(text))
+      if (claim.test(text2))
         found.push(name);
     }
     return found;
@@ -6514,6 +6514,148 @@
   }
   function lockedEngineRecommendation(policy) {
     return policy.status === "selected" && policy.activation?.allowed === true && policy.llmMayChoose === false && policy.chosenAction !== null ? engineExplanation(policy) : null;
+  }
+
+  // ../../packages/ai-core/dist/preflopResponsePolicy.js
+  var HJ_RESPONSE_POLICY_VERSION = "hj-vs-utg-2.5bb-reference-v1";
+  var HJ_RESPONSE_PROFILE = "pokernow-0.1.72-th-4fun-1-2-exact5-v1";
+  var positions = ["UTG", "HJ", "CO", "BTN", "SB", "BB"];
+  var handTypes = new Set(allHandTypes().map(formatHandType));
+  var text = external_exports.string().trim().min(1).max(2e3);
+  var weight = external_exports.number().finite().min(0).max(1);
+  var depth = external_exports.number().finite().min(100);
+  var allocation = external_exports.discriminatedUnion("action", [
+    external_exports.object({ action: external_exports.literal("FOLD"), frequency: weight }).strict(),
+    external_exports.object({ action: external_exports.literal("CALL"), frequency: weight }).strict(),
+    external_exports.object({
+      action: external_exports.literal("THREE_BET"),
+      frequency: weight,
+      raiseToBB: external_exports.number().finite().gt(2.5)
+    }).strict()
+  ]);
+  var HjResponseReferenceSchema = external_exports.object({
+    schemaVersion: external_exports.literal(1),
+    id: text,
+    version: text,
+    provenance: external_exports.object({
+      kind: external_exports.enum(["verified_reference", "adaptation", "heuristic", "test_fixture"]),
+      url: external_exports.string().url(),
+      node: text,
+      review: external_exports.enum(["pending", "reviewed"]),
+      reviewNotes: text,
+      assumptions: external_exports.array(text).min(1).max(32)
+    }).strict(),
+    referenceSettings: external_exports.object({
+      players: external_exports.literal(6),
+      hero: external_exports.literal("HJ"),
+      opener: external_exports.literal("UTG"),
+      openToBB: external_exports.literal(2.5),
+      anteBB: external_exports.literal(0),
+      startingCapacitiesBB: external_exports.object({ UTG: depth, HJ: depth, CO: depth, BTN: depth, SB: depth, BB: depth }).strict(),
+      rakeDescription: text,
+      coldCallsAllowed: external_exports.boolean(),
+      threeBetSizesBB: external_exports.array(external_exports.number().finite().gt(2.5)).max(8)
+    }).strict(),
+    application: external_exports.object({
+      profile: external_exports.literal(HJ_RESPONSE_PROFILE),
+      minCapacityBB: external_exports.number().finite().min(100),
+      maxCapacityBB: external_exports.number().finite().min(100),
+      /** Required even for an exact reference: why its rake/tree/depth fits. */
+      rationale: text
+    }).strict(),
+    entries: external_exports.array(external_exports.object({
+      hand: external_exports.string().refine((h) => handTypes.has(h), "Expected canonical hand type"),
+      allocations: external_exports.array(allocation).min(1).max(10)
+    }).strict()).min(1).max(169)
+  }).strict().superRefine((r, ctx) => {
+    const issue = (message) => ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message });
+    const { minCapacityBB: min, maxCapacityBB: max } = r.application;
+    if (max < min)
+      issue("Reversed depth coverage.");
+    const nativeDepths = Object.values(r.referenceSettings.startingCapacitiesBB);
+    if (r.provenance.kind === "verified_reference" && (min !== Math.min(...nativeDepths) || max !== Math.max(...nativeDepths)))
+      issue("Depth coverage different from the native stack vector must be explicitly labeled an adaptation.");
+    if (new Set(r.entries.map((e) => e.hand)).size !== r.entries.length)
+      issue("Duplicate hand entries.");
+    if (new Set(r.referenceSettings.threeBetSizesBB).size !== r.referenceSettings.threeBetSizesBB.length)
+      issue("Duplicate reference sizes.");
+    for (const e of r.entries) {
+      if (Math.abs(e.allocations.reduce((sum, a) => sum + a.frequency, 0) - 1) > 1e-9)
+        issue(`Frequencies for ${e.hand} must sum to one; do not invent a residual fold frequency.`);
+      const keys = e.allocations.map((a) => a.action === "THREE_BET" ? `${a.action}:${a.raiseToBB}` : a.action);
+      if (new Set(keys).size !== keys.length)
+        issue(`Duplicate action/size for ${e.hand}.`);
+      if (e.allocations.some((a) => a.action === "CALL" && a.frequency > 0) && !r.referenceSettings.coldCallsAllowed)
+        issue("CALL frequencies contradict the reference tree.");
+      if (e.allocations.some((a) => a.action === "THREE_BET" && !r.referenceSettings.threeBetSizesBB.includes(a.raiseToBB)))
+        issue("3-bet entry lacks a documented reference size.");
+    }
+  });
+  function reviewHjResponseReference(input, reference) {
+    const result = {
+      policyVersion: HJ_RESPONSE_POLICY_VERSION,
+      status: "invalid_context",
+      hand: null,
+      strategyClass: null,
+      raiseToBB: null,
+      allocations: null,
+      reference: null,
+      chosenAction: null,
+      liveAuthorized: false,
+      reasons: []
+    };
+    const fail = (status, reason) => ({ ...result, status, reasons: [reason] });
+    const parsed = PreflopInputSchema.safeParse(input.preflop);
+    const cards = external_exports.array(external_exports.object({ rank: external_exports.number().int().min(2).max(14), suit: external_exports.enum(["s", "h", "d", "c"]) }).strict()).length(2).safeParse(input.holeCards);
+    if (!parsed.success || !cards.success || new Set(cards.data.map((c) => `${c.rank}${c.suit}`)).size !== 2)
+      return fail("invalid_context", "Invalid response context/cards.");
+    let context;
+    try {
+      context = buildPreflopContext(parsed.data);
+    } catch {
+      return fail("invalid_context", "Response seats or context are contradictory.");
+    }
+    const [a, b] = cards.data;
+    result.hand = formatHandType({
+      highRank: a.rank >= b.rank ? a.rank : b.rank,
+      lowRank: a.rank >= b.rank ? b.rank : a.rank,
+      suited: a.suit === b.suit
+    });
+    const utg = context.players.find((p) => p.position === "UTG"), action2 = context.actions[0];
+    if (context.actionWindowEvidence !== "hj_facing_utg_open5" || context.openingEvidence !== void 0 || context.situation !== "facing_open" || context.heroPosition !== "HJ" || context.playersDealtIn !== 6 || context.players.length !== 6 || positions.some((pos) => context.players.filter((p) => p.position === pos).length !== 1) || context.historyCoverage !== "complete" || context.contributionMeaning !== "street_total" || context.tournamentContext !== "chip_ev_only" || context.amountToCallBB !== 2.5 || context.actions.length !== 1 || action2?.action !== "raise" || action2.wagerAction !== "raise" || action2.seat !== utg?.seat || action2.totalContributionBB !== 2.5 || context.players.some((p) => p.folded || p.allIn || p.remainingStackBB === null || p.contributionBB !== (p.position === "UTG" ? 2.5 : p.position === "SB" ? 0.5 : p.position === "BB" ? 1 : 0)))
+      return fail("invalid_context", "Only the certified six-player HJ first response to UTG 2.5BB is covered.");
+    const capacities = context.players.map((p) => p.remainingStackBB + p.contributionBB);
+    if (capacities.some((n) => n < 100))
+      return fail("invalid_context", "Every starting capacity must be known and at least 100BB.");
+    if (reference === null)
+      return fail("reference_missing", "No reviewed HJ-versus-UTG 2.5BB response reference is installed. Frequencies, cold-call tree, rake/profile applicability and bounded stack coverage are required; no fallback FOLD.");
+    const checked = HjResponseReferenceSchema.safeParse(reference);
+    if (!checked.success)
+      return fail("invalid_reference", "Response reference metadata, coverage or frequencies are invalid.");
+    const r = checked.data;
+    result.reference = { id: r.id, version: r.version, provenance: r.provenance, referenceSettings: r.referenceSettings, application: r.application };
+    if (r.provenance.kind === "verified_reference" && context.players.some((p) => p.remainingStackBB + p.contributionBB !== r.referenceSettings.startingCapacitiesBB[p.position]))
+      return fail("out_of_scope", "Exact reference requires its full position-specific starting stack vector; an interval is not extrapolation permission.");
+    if (capacities.some((n) => n < r.application.minCapacityBB || n > r.application.maxCapacityBB))
+      return fail("out_of_scope", "Stack capacities lie outside the explicitly reviewed reference/adaptation interval.");
+    const entry = r.entries.find((e) => e.hand === result.hand);
+    if (!entry)
+      return fail("uncovered", "Hand is not explicitly covered; absence is not FOLD.");
+    result.allocations = entry.allocations;
+    const positive = entry.allocations.filter((a2) => a2.frequency > 0);
+    if (positive.length !== 1 || positive[0].frequency !== 1)
+      return { ...result, status: "mixed", reasons: ["Mixed frequencies/sizes retained; no pure action or random sample selected."] };
+    const pure = positive[0];
+    return {
+      ...result,
+      status: "pure",
+      strategyClass: pure.action,
+      raiseToBB: pure.action === "THREE_BET" ? pure.raiseToBB : null,
+      reasons: ["Reference classification only. Review status and source/action legality must be independently enforced before any live activation."]
+    };
+  }
+  function inspectLiveHjResponseStrategy(input) {
+    return reviewHjResponseReference(input, null);
   }
 
   // ../../packages/browser-reader/dist/cardParsing.js
@@ -6600,19 +6742,19 @@
     }
     return { rank, suit };
   }
-  function normalizeSuitText(text) {
-    return text.trim().replace(/[\uFE0E\uFE0F]/g, "").toLowerCase();
+  function normalizeSuitText(text2) {
+    return text2.trim().replace(/[\uFE0E\uFE0F]/g, "").toLowerCase();
   }
   function parseBoardCardFromEvidence(evidence) {
     const ranks = /* @__PURE__ */ new Set();
     const suits2 = /* @__PURE__ */ new Set();
-    for (const text of evidence.valueTexts) {
-      if (text.trim())
-        ranks.add(parseBoardCardFromText(text, "s").rank);
+    for (const text2 of evidence.valueTexts) {
+      if (text2.trim())
+        ranks.add(parseBoardCardFromText(text2, "s").rank);
     }
-    for (const text of evidence.suitTexts) {
-      if (text.trim())
-        suits2.add(parseBoardCardFromText("2", text).suit);
+    for (const text2 of evidence.suitTexts) {
+      if (text2.trim())
+        suits2.add(parseBoardCardFromText("2", text2).suit);
     }
     if (ranks.size > 0 || suits2.size > 0 || evidence.classList.includes("flipped")) {
       for (const cls of evidence.classList) {
@@ -6630,13 +6772,13 @@
 
   // ../../packages/browser-reader/dist/tableInfoParsing.js
   function parseChipsValueText(normalValueText) {
-    const text = normalValueText.trim();
-    const cleaned = text.replace(/,/g, "");
+    const text2 = normalValueText.trim();
+    const cleaned = text2.replace(/,/g, "");
     if (cleaned.length === 0) {
       throw new Error(`Chips value text is empty (expected a number, got an empty string)`);
     }
     const value = Number(cleaned);
-    if (!/^(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$/.test(text) || !Number.isFinite(value) || value < 0) {
+    if (!/^(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$/.test(text2) || !Number.isFinite(value) || value < 0) {
       throw new Error(`Unrecognized chips value text: "${normalValueText}"`);
     }
     return value;
@@ -6648,15 +6790,15 @@
     };
   }
   var ALL_IN_STACK_TEXT = "all in";
-  function isAllInStackText(text) {
-    return text?.trim().replace(/\s+/g, " ").toLowerCase() === ALL_IN_STACK_TEXT;
+  function isAllInStackText(text2) {
+    return text2?.trim().replace(/\s+/g, " ").toLowerCase() === ALL_IN_STACK_TEXT;
   }
   function parseBlindValues(texts) {
-    const parse = (text) => {
-      if (text == null)
+    const parse = (text2) => {
+      if (text2 == null)
         return null;
       try {
-        const value = parseChipsValueText(text);
+        const value = parseChipsValueText(text2);
         return value > 0 ? value : null;
       } catch {
         return null;
@@ -7049,12 +7191,12 @@
   // ../../packages/browser-reader/dist/position.js
   function assignPositions(seats, dealerSeatNumber) {
     const occupied = seats.filter((s) => s.isOccupied).sort((a, b) => a.seatNumber - b.seatNumber);
-    const positions = /* @__PURE__ */ new Map();
+    const positions2 = /* @__PURE__ */ new Map();
     if (occupied.length === 0)
-      return positions;
+      return positions2;
     const dealerIndex = occupied.findIndex((s) => s.seatNumber === dealerSeatNumber);
     if (dealerIndex === -1) {
-      return positions;
+      return positions2;
     }
     const clockwise = [...occupied.slice(dealerIndex), ...occupied.slice(0, dealerIndex)];
     const n = clockwise.length;
@@ -7075,18 +7217,18 @@
       } else {
         position2 = "UTG";
       }
-      positions.set(seat.seatNumber, position2);
+      positions2.set(seat.seatNumber, position2);
     });
-    return positions;
+    return positions2;
   }
 
   // ../../packages/browser-reader/dist/potSemantics.js
   function readPotProvenance(raw) {
-    const parse = (text) => {
-      if (text === null)
+    const parse = (text2) => {
+      if (text2 === null)
         return null;
       try {
-        return parseChipsValueText(text);
+        return parseChipsValueText(text2);
       } catch {
         return null;
       }
@@ -7345,7 +7487,7 @@
         confidence: { level: "low", reasons: [...readErrors, error instanceof Error ? error.message : String(error)] }
       };
     }
-    const positions = context.dealerSeatNumber === null ? /* @__PURE__ */ new Map() : assignPositions(state.seats, context.dealerSeatNumber);
+    const positions2 = context.dealerSeatNumber === null ? /* @__PURE__ */ new Map() : assignPositions(state.seats, context.dealerSeatNumber);
     const hero = state.seats.find((s) => s.isYou);
     const monetary = assessScopedMonetary(state, pot, readErrors);
     const betting = proveScopedLiveBetting(readErrors.length ? null : state, context.bettingEvidence, blinds.bigBlind);
@@ -7362,14 +7504,14 @@
     const confidence = computeDataConfidence(state, {
       amountToCall,
       bigBlindWasDefaulted: blinds.bigBlind === null,
-      isPositionKnown: hero !== void 0 && positions.has(hero.seatNumber),
+      isPositionKnown: hero !== void 0 && positions2.has(hero.seatNumber),
       potSemanticsVerified: pot.isPotSemanticsVerified,
       contributionSemanticsVerified: monetary.contributionSemantics.status === "proven"
     });
     return {
       state,
       ...blinds,
-      positions,
+      positions: positions2,
       amountToCall,
       decisionPot: pot.decisionPot,
       pot,
@@ -7457,13 +7599,13 @@
   }
 
   // ../../packages/browser-reader/dist/playerSeatMapping.js
-  function parsePlayerStacks(text) {
-    if (!/^Player stacks\b/.test(text))
+  function parsePlayerStacks(text2) {
+    if (!/^Player stacks\b/.test(text2))
       return { kind: "not_row" };
     const invalid = (reason) => ({ kind: "invalid", reason });
-    if (text.length > 4e3 || /[\r\n]/.test(text) || !text.startsWith("Player stacks: "))
+    if (text2.length > 4e3 || /[\r\n]/.test(text2) || !text2.startsWith("Player stacks: "))
       return invalid("Malformed Player stacks header or row bounds.");
-    const parts = text.slice("Player stacks: ".length).split(" | ");
+    const parts = text2.slice("Player stacks: ".length).split(" | ");
     if (!parts.length || parts.length > 10)
       return invalid("Unsupported Player stacks entry count.");
     const entries = [];
@@ -7841,13 +7983,13 @@
     return event.source === "pokernow_log_v3" && (event.action === "player_join" || event.action === "hole_cards");
   }
   function normalizeLogRow(row, observedAt) {
-    const text = row.msg;
+    const text2 = row.msg;
     const timestamp = timestampKey(row.createdAt);
-    const joined = /^The player "([^"\r\n]{1,160}) @ ([A-Za-z0-9_-]{1,160})" joined the game with a stack of ((?:0|[1-9][0-9]{0,15})(?:\.[0-9]{1,8})?)\.$/.exec(text);
-    const cards = /^Your hand is ((?:[2-9TJQKA]|10)[\u2663\u2666\u2665\u2660]), ((?:[2-9TJQKA]|10)[\u2663\u2666\u2665\u2660])$/.exec(text);
-    const returned = /^Uncalled bet of ((?:0|[1-9][0-9]{0,15})(?:\.[0-9]{1,8})?) returned to "([^"\r\n]{1,160}) @ ([A-Za-z0-9_-]{1,160})"$/.exec(text);
+    const joined = /^The player "([^"\r\n]{1,160}) @ ([A-Za-z0-9_-]{1,160})" joined the game with a stack of ((?:0|[1-9][0-9]{0,15})(?:\.[0-9]{1,8})?)\.$/.exec(text2);
+    const cards = /^Your hand is ((?:[2-9TJQKA]|10)[\u2663\u2666\u2665\u2660]), ((?:[2-9TJQKA]|10)[\u2663\u2666\u2665\u2660])$/.exec(text2);
+    const returned = /^Uncalled bet of ((?:0|[1-9][0-9]{0,15})(?:\.[0-9]{1,8})?) returned to "([^"\r\n]{1,160}) @ ([A-Za-z0-9_-]{1,160})"$/.exec(text2);
     const event = {
-      id: `${timestamp}:${text}`,
+      id: `${timestamp}:${text2}`,
       sequence: 0,
       street: null,
       actor: null,
@@ -7865,32 +8007,32 @@
       sourceTimestampRaw: row.createdAt,
       observation: null,
       observedAt,
-      evidence: text
+      evidence: text2
     };
-    if (returned && returned[0] === text && returned[2].trim() && Number(returned[1]) > 0 && Number.isSafeInteger(Number(returned[1].replace(".", "")))) {
+    if (returned && returned[0] === text2 && returned[2].trim() && Number(returned[1]) > 0 && Number.isSafeInteger(Number(returned[1].replace(".", "")))) {
       event.action = "uncalled_return";
       event.amount = Number(returned[1]);
       event.amountMeaning = "return_reported";
       event.actor = { seat: null, name: returned[2], playerId: returned[3], isHero: null };
-    } else if (joined && joined[0] === text && joined[1].trim() && Number.isSafeInteger(Number(joined[3].replace(".", "")))) {
+    } else if (joined && joined[0] === text2 && joined[1].trim() && Number.isSafeInteger(Number(joined[3].replace(".", "")))) {
       event.action = "player_join";
       event.actor = { seat: null, name: joined[1], playerId: joined[2], isHero: null };
-    } else if (cards && cards[0] === text && cards[1].replace("10", "T") !== cards[2].replace("10", "T")) {
+    } else if (cards && cards[0] === text2 && cards[1].replace("10", "T") !== cards[2].replace("10", "T")) {
       event.action = "hole_cards";
-    } else if (/^-- starting\b/.test(text)) {
+    } else if (/^-- starting\b/.test(text2)) {
       event.action = "hand_start";
       event.street = "preflop";
-    } else if (/^-- ending\b/.test(text))
+    } else if (/^-- ending\b/.test(text2))
       event.action = "hand_end";
-    else if (parsePlayerStacks(text).kind === "valid")
+    else if (parsePlayerStacks(text2).kind === "valid")
       event.action = "player_stacks";
     else {
-      const street = /^(flop|turn|river):/i.exec(text);
+      const street = /^(flop|turn|river):/i.exec(text2);
       if (street) {
         event.action = "street";
         event.street = street[1].toLowerCase();
       }
-      const actor = /^"(.+) @ ([^"\r\n]+)" (.+)$/.exec(text);
+      const actor = /^"(.+) @ ([^"\r\n]+)" (.+)$/.exec(text2);
       if (actor) {
         event.actor = { seat: null, name: actor[1], playerId: actor[2], isHero: null };
         const action2 = actor[3];
@@ -7898,7 +8040,7 @@
         const numeric = /^(bets|raises to|calls|posts (?:a |the )?(?:small blind|big blind|ante) of) ([0-9]+(?:\.[0-9]+)?)( and go all in)?$/.exec(action2);
         if (action2 === "checks" || action2 === "folds")
           event.action = action2 === "checks" ? "check" : "fold";
-        else if (missedBlind && actor[0] === text && missedBlind[0] === action2 && Number(missedBlind[1]) > 0 && Number.isSafeInteger(Number(missedBlind[1].replace(".", "")))) {
+        else if (missedBlind && actor[0] === text2 && missedBlind[0] === action2 && Number(missedBlind[1]) > 0 && Number.isSafeInteger(Number(missedBlind[1].replace(".", "")))) {
           event.action = "post";
           event.wagerAction = "post";
           event.amount = Number(missedBlind[1]);
@@ -8184,7 +8326,7 @@
     };
   }
   function buildLivePreflopContext(assessment, actionHistory2, timeline, read) {
-    const { state, bigBlind, positions, decisionPot, amountToCall } = assessment;
+    const { state, bigBlind, positions: positions2, decisionPot, amountToCall } = assessment;
     if (bigBlind === null || !Number.isFinite(bigBlind) || bigBlind <= 0) return null;
     const hero = state?.seats.find((s) => s.isYou);
     try {
@@ -8257,7 +8399,7 @@
         heroSeat: hero.seatNumber,
         players: state.seats.filter((s) => s.isOccupied).map((s) => ({
           seat: s.seatNumber,
-          position: positions.get(s.seatNumber) ?? null,
+          position: positions2.get(s.seatNumber) ?? null,
           remainingStackBB: s.stack === null ? null : s.stack / bigBlind,
           contributionBB: s.betReadError || s.currentBet === null ? null : s.currentBet / bigBlind,
           folded: s.isFolded,
@@ -8363,9 +8505,9 @@
     let awardText = null;
     let awardChips = null;
     let reason = null;
-    const numeric = (text) => {
+    const numeric = (text2) => {
       try {
-        return text === null ? null : parseChipsValueText(text);
+        return text2 === null ? null : parseChipsValueText(text2);
       } catch {
         return null;
       }
@@ -8844,6 +8986,39 @@
       set("raiseLegality", "contradicted", "Dependent sizing/packet cross-check", ["Sizing belongs to a different source, control or epoch."]);
     }
     const facing = currentFacingOpen(read, assessment, timeline);
+    const responseStrategy = facing ? {
+      ...inspectLiveHjResponseStrategy({ preflop, holeCards: hero?.holeCards }),
+      binding: {
+        decisionEpoch: epoch,
+        tableId: facing.tableId,
+        handId: facing.handId,
+        heroId: facing.heroId,
+        generation: facing.generation,
+        cursor: facing.cursor,
+        receivedAt: facing.receivedAt,
+        expiresAt: source.facingOpenProof.expiresAt
+      },
+      call: {
+        contributionGapChips: 5,
+        payableIfCallAuthorizedChips: 5,
+        authorization: "unproven",
+        reason: "HJ has sufficient chips for the five-chip gap, but no certified current CALL control/action contract is installed."
+      },
+      threeBet: {
+        stackCapacityChips: hero.stack,
+        fullMinimumRaiseToChips: null,
+        permittedMaximumRaiseToChips: null,
+        chipUnit: null,
+        raiseRights: "unproven",
+        reason: "Observed UTG acceptance and mR=8 do not authorize a future HJ 3-bet or establish its size/grid."
+      },
+      // Requirements still missing in THIS valid context; not another proof gate.
+      remainingRequirements: {
+        FOLD: ["reviewed_response_strategy"],
+        CALL: ["reviewed_response_strategy", "current_call_authorization"],
+        THREE_BET: ["reviewed_response_strategy_and_size", "raise_rights", "minimum_and_maximum_totals", "chip_grid"]
+      }
+    } : null;
     if (facing) {
       const proof = source.facingOpenProof, continuity = proof.continuity;
       set("connection", "proven", `Same source authority: generation ${continuity.generation}, baseline ${continuity.baselineSequence}, through ${continuity.throughSequence}, cursor ${continuity.cursor}.`);
@@ -8875,14 +9050,16 @@
     if (facing && activation.state !== "unsafe") {
       activation.allowed = false;
       activation.state = "unsupported";
-      activation.reasons.push("Source-verified HJ facing UTG open-to-five context only. CALL/FOLD/3-BET strategy and required response legality remain unsupported.");
+      activation.reasons.push(...responseStrategy.reasons);
+      activation.reasons.push("HJ response activation remains disabled; missing CALL/3-BET legality must never substitute FOLD.");
     }
     return {
       evidence: envelope,
       activation,
       unopened,
       openingSize: opening.size,
-      responseWindow: facing ? source.facingOpenProof : null
+      responseWindow: facing ? source.facingOpenProof : null,
+      responseStrategy
     };
   }
   function liveProofRevision(timeline) {
@@ -9120,7 +9297,7 @@
   };
   function inspectMetadataFields(input) {
     const result = { fields: [], truncated: false };
-    const visit = (value, prefix, depth) => {
+    const visit = (value, prefix, depth2) => {
       if (!object2(value)) return;
       for (const [key, field] of Object.entries(value)) {
         if (result.fields.length === FIELD_LIMIT) {
@@ -9132,7 +9309,7 @@
         if (allowedPath(path) && scalar(field)) entry.value = field;
         result.fields.push(entry);
         if (containers.has(key) && object2(field)) {
-          if (depth < 2) visit(field, path + ".", depth + 1);
+          if (depth2 < 2) visit(field, path + ".", depth2 + 1);
           else result.truncated = true;
         }
       }
@@ -10252,10 +10429,10 @@
           }
           if (!response.ok) throw new Error(`Log request HTTP ${response.status}`);
           if (Number(response.headers.get("content-length") ?? 0) > 2e6) throw new Error("Log response exceeds capture limit");
-          const text = await response.text();
-          if (text.length > 2e6) throw new Error("Log response exceeds capture limit");
+          const text2 = await response.text();
+          if (text2.length > 2e6) throw new Error("Log response exceeds capture limit");
           if (hands.get(target.handId) !== target) return;
-          const payload = JSON.parse(text);
+          const payload = JSON.parse(text2);
           try {
             if (metadata) sourceMetadata.payload(metadata, payload);
           } catch {
@@ -10346,7 +10523,7 @@
   var RAISE_CAPTURE_KEY = "poker-ai:raise-evidence-capture";
   var CHANNEL = "poker-ai:raise-evidence-diagnostics:v1";
   var LIMITS = { checkpoints: 8, bytes: 128 * 1024 };
-  var bytes = (text) => new TextEncoder().encode(text).byteLength;
+  var bytes = (text2) => new TextEncoder().encode(text2).byteLength;
   var enabled = (target) => {
     try {
       return target.sessionStorage.getItem(RAISE_CAPTURE_KEY) === "1";
@@ -10435,8 +10612,8 @@
     document.body.appendChild(el);
     return el;
   }
-  function escapeHtml(text) {
-    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  function escapeHtml(text2) {
+    return text2.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
   var AI_STATUS_COLORS = {
     idle: "#888888",
@@ -10799,7 +10976,7 @@
         lastStateJson = stateJson;
         lastRecommendationRequestKey = null;
         requestSequence++;
-        const { state, confidence, bigBlind, amountToCall: parsedAmountToCall, positions, decisionPot } = assessment;
+        const { state, confidence, bigBlind, amountToCall: parsedAmountToCall, positions: positions2, decisionPot } = assessment;
         const amountToCall = (preflop?.openingEvidence === "first_utg_hand_start" || preflop?.openingEvidence === "hj_after_utg_fold" || preflop?.openingEvidence === "co_after_utg_hj_folds" || preflop?.openingEvidence === "btn_after_utg_hj_co_folds" || preflop?.openingEvidence === "sb_after_utg_hj_co_btn_folds") && bigBlind !== null ? preflop.amountToCallBB * bigBlind : parsedAmountToCall;
         overlayState.street = state?.street ?? "unreadable";
         overlayState.opponentStatsLine = state ? state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded).map((s) => {
@@ -10823,7 +11000,7 @@
           return;
         }
         const hero = state.seats.find((s) => s.isYou);
-        const heroPosition = hero ? positions.get(hero.seatNumber) : void 0;
+        const heroPosition = hero ? positions2.get(hero.seatNumber) : void 0;
         if (preflop) {
           overlayState.preflopLine = "Preflop: " + preflop.situation + (preflop.decisionSupport === "uncertain" ? " - insufficient strategic model / uncertain" : "");
           overlayState.aiWarnings = [...confidence.reasons, ...preflop.reasons];
@@ -10855,7 +11032,7 @@
             preflop,
             preflopExecution: buildLivePreflopExecution(read, assessment, liveProofRevision(timelineSnapshot), scoped.openingSize ?? void 0),
             potEvidence: { ...assessment.pot, bigBlind },
-            opponentContext: { opponents: state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded).map((s) => ({ seat: s.seatNumber, position: positions.get(s.seatNumber) ?? null, rangeBasis: "Preflop context remains uncertain", rangeConfidence: "low", rangeStatus: "prior_only", ...opponentStats.profile(s.playerName) ?? {} })) }
+            opponentContext: { opponents: state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded).map((s) => ({ seat: s.seatNumber, position: positions2.get(s.seatNumber) ?? null, rangeBasis: "Preflop context remains uncertain", rangeConfidence: "low", rangeStatus: "prior_only", ...opponentStats.profile(s.playerName) ?? {} })) }
           };
           packet.decisionProofs = buildLiveDecisionProofs(read, assessment, timelineSnapshot, preflop, String(requestSequence), packet).evidence;
           const policy = evaluateDecisionPolicy(packet);
@@ -10886,7 +11063,7 @@
             const estimates = opponents.map((opponent) => {
               const records = actionHistory.records.get(opponent.seatNumber) ?? [];
               return estimateOpponentRange({
-                position: positions.get(opponent.seatNumber) ?? null,
+                position: positions2.get(opponent.seatNumber) ?? null,
                 // Missing hero actions prevent counting observed raises as a complete sequence.
                 actions: records.map((r) => ({
                   street: r.street,
@@ -10919,7 +11096,7 @@
               rangeFallbacks: [...estimates.flatMap((e, i) => e.fallbacks.map((reason) => "Seat " + opponents[i].seatNumber + ": " + reason)), ...selection.reason ? [selection.reason] : []],
               opponents: estimates.map((estimate, i) => ({
                 seat: opponents[i].seatNumber,
-                position: positions.get(opponents[i].seatNumber) ?? null,
+                position: positions2.get(opponents[i].seatNumber) ?? null,
                 rangeBasis: estimate.basis,
                 rangeConfidence: estimate.confidence,
                 rangeStatus: estimate.status,
