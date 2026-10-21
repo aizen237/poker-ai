@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseHTML } from "linkedom";
 import { createFirstUtgSource, projectFirstUtgSource } from "../../../apps/pokernow-extension/src/firstUtgSource.js";
 import { isObservedUtgOpenPatch } from "../../../apps/pokernow-extension/src/bettingWindow.js";
+import { callLegalityEvidence } from "../../../apps/pokernow-extension/src/callLegalityEvidence.js";
+import { assessLiveState } from "./liveState.js";
 
 const mocks = vi.hoisted(() => ({ read: vi.fn() }));
 vi.mock("../../../apps/pokernow-extension/src/tableRead.js", () => ({ readLiveTable: mocks.read }));
@@ -130,7 +132,7 @@ describe("recorded hand169 accepted opening transition", () => {
 
 // Real MAIN bridge -> source runtime -> context/proofs -> overlay. Only the
 // observer's unavailable private-card view and DOM cross-check are simulated.
-async function live(change?: (fs: any[], read: any) => void, originalObserver = false, logActions?: string[]) {
+async function live(change?: (fs: any[], read: any) => void, originalObserver = false, logActions?: string[], callMarkup = "") {
   vi.resetModules();
   const fs = frames(!originalObserver), start = fs.at(-3).payload, turn = fs.at(-1);
   const read = load("utg-reader-cross-check.json").read;
@@ -152,7 +154,7 @@ async function live(change?: (fs: any[], read: any) => void, originalObserver = 
   read.context.dealerSeatNumber = start.dealerSeat;
   read.raw.potMainValueText = "0"; read.raw.potTotalValueText = "8";
   change?.(fs, read);
-  const { document } = parseHTML("<html><body></body></html>");
+  const { document } = parseHTML(`<html><body>${callMarkup}</body></html>`);
   const location = new URL("https://www.pokernow.com/games/TABLE_TEST");
   const listeners: Array<(e: any) => void> = [];
   let now = fs[0].localReceivedAt, poll = () => {}, refresh = () => {};
@@ -174,7 +176,13 @@ async function live(change?: (fs: any[], read: any) => void, originalObserver = 
   vi.spyOn(console, "log").mockImplementation((...args) => { logs.push(args); });
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
-  mocks.read.mockImplementation(() => read);
+  const { readCallControl } = await import("../../../apps/pokernow-extension/src/callControlRead.js");
+  // Synthetic CALL DOM variants use the production observer. Linkedom has no
+  // layout; only visibility is supplied. No captured HJ CALL browser is claimed.
+  mocks.read.mockImplementation(() => {
+    read.callControl = readCallControl(document, el => !el.closest("[hidden]"));
+    return read;
+  });
   const requests: unknown[] = [];
   vi.stubGlobal("fetch", vi.fn((url: string) => {
     if (url.endsWith("/recommendation")) requests.push(url);
@@ -200,7 +208,7 @@ async function live(change?: (fs: any[], read: any) => void, originalObserver = 
     const row = logs.filter(args => String(args[0]).includes("Copyable snapshot JSON")).at(-1);
     return row ? JSON.parse(row[1]) : null;
   };
-  return { read, requests, socket, poll, refresh, incoming, turn, diagnostic,
+  return { read, document, requests, socket, poll, refresh, incoming, turn, diagnostic,
     atAge: (age: number) => { now = turn.localReceivedAt + age; },
     text: () => document.getElementById("poker-ai-reader-overlay")!.textContent!,
     action: () => document.querySelector('#poker-ai-reader-overlay [style*="font-size:16px"]')?.textContent ?? null };
@@ -255,6 +263,7 @@ describe("HJ facing recorded UTG open through the production context/display pat
     });
     expect(f.diagnostic()?.preflop?.actionWindowEvidence).toBeUndefined();
     expect(f.diagnostic()?.decision.scopedProofs.responseStrategy).toBeNull();
+    expect(f.diagnostic()?.decision.scopedProofs.callLegality).toBeNull();
     expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0); expect(f.socket.send).not.toHaveBeenCalled();
   });
   it("unchanged polls do not renew context; expiry and disconnect remove it without producing advice", async () => {
@@ -265,6 +274,7 @@ describe("HJ facing recorded UTG open through the production context/display pat
     f.atAge(10000); f.refresh(); f.poll();
     expect(f.diagnostic().preflop.actionWindowEvidence).toBeUndefined();
     expect(f.diagnostic().decision.scopedProofs.responseStrategy).toBeNull();
+    expect(f.diagnostic().decision.scopedProofs.callLegality).toBeNull();
     expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
     f.socket.dispatchEvent(new Event("close")); f.poll();
     expect(f.diagnostic().handTimeline.sourceStatus.facingOpenProof).toBeNull();
@@ -309,6 +319,82 @@ describe("HJ facing recorded UTG open through the production context/display pat
       hero.stackText = hero.stackContainerText = "3";
     });
     expect(f.diagnostic().decision.scopedProofs.responseStrategy).toBeNull();
+    expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
+  });
+  it("binds source cost/capacity and matching synthetic CALL UI without certifying server legality", async () => {
+    const f = await live(undefined, false, undefined, '<button type="button">Call 5</button>');
+    const d = f.diagnostic(), c = d.decision.scopedProofs.callLegality;
+    expect(c).toMatchObject({ version: 1, scope: "hj_facing_utg_open5_call", authorized: false, historyComplete: false,
+      binding: { handNumber: 169, heroId: "PLAYER_2", heroSeat: 2, generation: 2, activationSequence: 67,
+        receivedAt: f.turn.localReceivedAt, expiresAt: f.turn.localReceivedAt + 10000 },
+      facts: { units: "chips", bigBlindChips: 2, utgContributionChips: 5, heroContributionChips: 0,
+        contributionGapChips: 5, payableIfCallAuthorizedChips: 5, resultingContributionIfCalledChips: 5,
+        remainingStackChips: 249, capacitySufficient: true },
+      costProof: { status: "proven" }, ui: { status: "observed_matching", observation: { amountChips: 5 } },
+      serverLegality: { status: "unproven" }, legalActionsProof: { status: "insufficient" } });
+    expect(d.decision.scopedProofs.responseStrategy.status).toBe("reference_missing");
+    expect(d.decision.scopedProofs.activation.allowed).toBe(false);
+    expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0); expect(f.socket.send).not.toHaveBeenCalled();
+  });
+  it.each([
+    ['', "unobserved"], ['<button type="button" hidden>Call 5</button>', "unobserved"],
+    ['<button type="button" disabled>Call 5</button>', "unusable"],
+    ['<button type="button">Call 6</button>', "contradicted"],
+    ['<button type="button">Call 0</button>', "contradicted"],
+    ['<button type="button">Call 5BB</button>', "unusable"],
+    ['<button type="button">Call 5</button><button type="button">Call 5</button>', "contradicted"],
+  ])("keeps CALL readiness separate for %s", async (html, status) => {
+    const f = await live(undefined, false, undefined, html);
+    const c = f.diagnostic().decision.scopedProofs.callLegality;
+    expect(c.ui.status).toBe(status); expect(c.facts.contributionGapChips).toBe(5);
+    expect(c.authorized).toBe(false); expect(c.serverLegality.status).toBe("unproven");
+    expect(f.diagnostic().decision.scopedProofs.activation.state).toBe(status === "contradicted" ? "unsafe" : "unsupported");
+    expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
+  });
+  it.each(["pre-activation", "future", "missing-time", "empty-epoch"])("does not manufacture readiness/proof for %s", async variant => {
+    const f = await live(undefined, false, undefined, '<button type="button">Call 5</button>');
+    const r = structuredClone(f.read);
+    r.callControl.observedAt = variant === "pre-activation" ? f.turn.localReceivedAt - 1 :
+      variant === "future" ? Date.now() + 1 : variant === "missing-time" ? null : Date.now();
+    const c = callLegalityEvidence(r, assessLiveState(r.raw, r.context), f.diagnostic().handTimeline, variant === "empty-epoch" ? "" : "current-test-epoch");
+    if (variant === "empty-epoch") expect(c).toBeNull();
+    else { expect(c!.ui.status).toBe("unusable"); expect(c!.authorized).toBe(false); }
+  });
+  it("retains the original deadline across new control observations and drops facts at expiry", async () => {
+    const f = await live(undefined, false, undefined, '<button type="button">Call 5</button>');
+    const deadline = f.diagnostic().decision.scopedProofs.callLegality.binding.expiresAt;
+    f.atAge(9999); f.poll();
+    expect(f.diagnostic().decision.scopedProofs.callLegality).toMatchObject({ binding: { expiresAt: deadline }, ui: { status: "observed_matching" } });
+    f.atAge(10000); f.refresh(); f.poll();
+    expect(f.diagnostic().decision.scopedProofs.callLegality).toBeNull();
+    expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
+  });
+  it.each(["actor", "same-actor-update", "disconnect"])("invalidates dependent CALL facts on %s", async variant => {
+    const f = await live(undefined, false, undefined, '<button type="button">Call 5</button>');
+    if (variant === "disconnect") f.socket.dispatchEvent(new Event("close"));
+    else f.incoming({ ...f.turn, localReceivedAt: f.turn.localReceivedAt + 2000,
+      payload: { ...f.turn.payload, pre: f.turn.payload.now, now: f.turn.payload.now + 1,
+        cPI: variant === "actor" ? "PLAYER_3" : "PLAYER_2", pITT: variant === "actor" ? "PLAYER_3" : "PLAYER_2" } });
+    f.poll();
+    expect(f.diagnostic().decision.scopedProofs.callLegality).toBeNull();
+    expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
+  });
+  it.each(["4", "5", "199", "All In"])("does not expand the deep-stack CALL scope to stack %s", async stack => {
+    const f = await live((_, read) => {
+      const hj = read.raw.seats.find((s: any) => s.seatNumber === 2);
+      hj.stackText = hj.stackContainerText = stack;
+    }, false, undefined, '<button type="button">Call 5</button>');
+    expect(f.diagnostic().decision.scopedProofs.callLegality).toBeNull();
+    expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
+  });
+  it.each(["hero-contribution", "hero-identity", "hero-settling"])("rejects %s despite a matching button", async variant => {
+    const f = await live((_, read) => {
+      const hj = read.raw.seats.find((s: any) => s.seatNumber === 2);
+      if (variant === "hero-contribution") hj.betValueText = "1";
+      if (variant === "hero-identity") hj.isYou = false;
+      if (variant === "hero-settling") hj.stackIsSettlement = true;
+    }, false, undefined, '<button type="button">Call 5</button>');
+    expect(f.diagnostic().decision.scopedProofs.callLegality).toBeNull();
     expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
   });
   it.each(['"UTG @ PLAYER_1" calls 2', '"UTG @ PLAYER_1" raises to 6', '"HJ @ PLAYER_2" raises to 5',

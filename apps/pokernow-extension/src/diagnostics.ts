@@ -6,6 +6,7 @@ import type { LiveTableRead } from "./tableRead.js";
 import type { LiveTimelineDiagnostic } from "./liveTimeline.js";
 import { buildLiveDecisionProofs, liveProofRevision } from "./decisionProofs.js";
 import { buildLivePreflopExecution } from "./preflop.js";
+import { CALL_OBSERVATION_SOURCE } from "./callControlRead.js";
 
 const DIAGNOSTICS_KEY = "poker-ai:diagnostics";
 let lastSnapshot: string | null = null;
@@ -56,7 +57,7 @@ export function buildLiveDiagnosticSnapshot(
       smallBlind: assessment.smallBlind, bigBlind: assessment.bigBlind, rawBlindTexts: read.context.blindTexts,
       allInCallCostIfGapIsCorrect: hero?.stack == null || assessment.amountToCall === null ? null : Math.min(hero.stack, assessment.amountToCall),
     },
-    legality: { ...assessment.legality, proof: assessLiveLegalityEvidence(read.raw, assessment, history), raiseControl: read.raiseControl, unclassifiedControls,
+    legality: { ...assessment.legality, proof: assessLiveLegalityEvidence(read.raw, assessment, history), raiseControl: read.raiseControl, callControl: read.callControl ?? null, unclassifiedControls,
       controlsMeaning: "Selected raise-to is input evidence, not a legal minimum. Slider attributes and unclassified controls do not verify legality." },
     decision: {
       scopedProofs: buildLiveDecisionProofs(read, assessment, handTimeline, preflop, packet?.decisionProofs?.decisionEpoch ?? "diagnostic", packet),
@@ -110,8 +111,12 @@ export function logLiveDiagnostics(
   if (mode !== "1" && mode !== "once") { lastSnapshot = null; return; }
   const snapshot = buildLiveDiagnosticSnapshot(read, assessment, history, preflop, packet, readUnclassifiedControls(), handTimeline);
   const serialized = JSON.stringify(snapshot);
-  if (mode !== "once" && serialized === lastSnapshot) return;
-  lastSnapshot = serialized;
+  // A new local UI observation time is not a new decision or renewed proof.
+  // Preserve it in exports but don't spam unchanged diagnostic snapshots.
+  const comparison = JSON.stringify(snapshot, (_key, value) => value?.source === CALL_OBSERVATION_SOURCE
+    ? { ...value, observedAt: undefined } : value);
+  if (mode !== "once" && comparison === lastSnapshot) return;
+  lastSnapshot = comparison;
   const captured = { capturedAt: new Date().toISOString(), ...JSON.parse(serialized) };
   console.groupCollapsed("[Poker AI State] " + captured.capturedAt + " | " + snapshot.street + " | confidence=" + assessment.confidence.level);
   console.log("Monetary/legality snapshot", captured);

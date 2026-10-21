@@ -155,4 +155,20 @@ describe("diagnostic toggle and change-only logging", () => {
     expect(console.groupCollapsed).toHaveBeenCalledTimes(1);
     expect(storage.has("poker-ai:diagnostics")).toBe(false);
   });
+  it("preserves CALL observation times in exports without logging each identical poll", async () => {
+    const { readCallControl } = await import("../../../apps/pokernow-extension/src/callControlRead.js");
+    storage.set("poker-ai:diagnostics", "1");
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1000);
+    const observe = () => {
+      const r = { ...read(), callControl: readCallControl() };
+      logLiveDiagnostics(r, assessLiveState(r.raw, r.context), emptyActionHistory());
+    };
+    observe(); clock.mockReturnValue(2000); observe();
+    expect(console.groupCollapsed).toHaveBeenCalledTimes(1);
+    const copy = vi.mocked(console.log).mock.calls.find(call => call[0] === "Copyable snapshot JSON")![1];
+    expect(JSON.parse(copy).legality.callControl.observedAt).toBe(1000);
+    storage.set("poker-ai:diagnostics", "once"); observe();
+    const latest = vi.mocked(console.log).mock.calls.filter(call => call[0] === "Copyable snapshot JSON").at(-1)![1];
+    expect(JSON.parse(latest).legality.callControl.observedAt).toBe(2000);
+  });
 });

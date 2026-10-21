@@ -1,0 +1,7 @@
+{
+  "provenance": "Exact legality.unclassifiedControls[8] observation from local hand-133-early.json (also present in hands 62, 68, 80, 103, 115, 121 and 127). No DOM hierarchy/classes or server acceptance were captured by this observation. This was CALL 2 in an unopened spot, NOT HJ CALL 5.",
+  "control": {
+    "tag": "BUTTON", "text": "Call 2", "ariaLabel": null, "disabled": false,
+    "ariaDisabled": null, "type": "button", "value": null, "min": null, "max": null, "step": null
+  }
+}

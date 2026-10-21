@@ -6,6 +6,7 @@ import type { LiveTimelineDiagnostic } from "./liveTimeline.js";
 import { inspectLiveUnopenedEvidence } from "./unopenedEvidence.js";
 import { currentFirstUtg, currentHj, currentCo, currentBtn, currentSb, currentFacingOpen } from "./firstUtgLive.js";
 import { openingSizeEvidence } from "./openingSizeEvidence.js";
+import { callLegalityEvidence } from "./callLegalityEvidence.js";
 
 /** Translate existing evidence only; socket chronology and observed log rows are never certified as a complete window. */
 export function buildLiveDecisionProofs(read: LiveTableRead, assessment: LiveStateAssessment,
@@ -101,6 +102,7 @@ export function buildLiveDecisionProofs(read: LiveTableRead, assessment: LiveSta
     set("raiseLegality", "contradicted", "Dependent sizing/packet cross-check", ["Sizing belongs to a different source, control or epoch."]);
   }
   const facing = currentFacingOpen(read, assessment, timeline);
+  const callLegality = callLegalityEvidence(read, assessment, timeline, epoch);
   // Diagnostics consume the existing authority and its ORIGINAL expiry. No
   // reference, selected control or classifier result can mint/renew a proof.
   const responseStrategy = facing ? {
@@ -108,9 +110,10 @@ export function buildLiveDecisionProofs(read: LiveTableRead, assessment: LiveSta
     binding: { decisionEpoch: epoch, tableId: facing.tableId, handId: facing.handId,
       heroId: facing.heroId, generation: facing.generation, cursor: facing.cursor,
       receivedAt: facing.receivedAt, expiresAt: source!.facingOpenProof!.expiresAt },
-    call: { contributionGapChips: 5, payableIfCallAuthorizedChips: 5,
+    call: { contributionGapChips: callLegality?.facts.contributionGapChips ?? null,
+      payableIfCallAuthorizedChips: callLegality?.facts.payableIfCallAuthorizedChips ?? null,
       authorization: "unproven" as const,
-      reason: "HJ has sufficient chips for the five-chip gap, but no certified current CALL control/action contract is installed." },
+      reason: "See dependent callLegality: cost, capacity and UI agreement are separate from unproven server CALL authorization." },
     threeBet: { stackCapacityChips: hero!.stack!, fullMinimumRaiseToChips: null,
       permittedMaximumRaiseToChips: null, chipUnit: null, raiseRights: "unproven" as const,
       reason: "Observed UTG acceptance and mR=8 do not authorize a future HJ 3-bet or establish its size/grid." },
@@ -128,7 +131,10 @@ export function buildLiveDecisionProofs(read: LiveTableRead, assessment: LiveSta
     set("position", "proven", `${facing.provenance} Frozen HJ seat ${facing.heroSeat}.`);
     set("roster", "proven", `${facing.provenance} Original six dealt-in IDs; no departures/folds.`);
     set("stack", "proven", "Source starting capacities + current numeric DOM stacks; UTG remaining equals original minus five.");
-    set("callCost", "proven", "Accepted UTG street total5 minus HJ0 = five chips; within verified HJ capacity. Not a strategy or CALL-control certificate.");
+    if (callLegality) {
+      proofs[PROOF_SCOPES.indexOf("callCost")] = callLegality.costProof;
+      proofs[PROOF_SCOPES.indexOf("legalActions")] = callLegality.legalActionsProof;
+    }
   }
   const envelope: DecisionProofs = { version: 1, decisionEpoch: epoch,
     binding: "diagnostic-only: no packet",
@@ -142,14 +148,18 @@ export function buildLiveDecisionProofs(read: LiveTableRead, assessment: LiveSta
     : assessDecisionProofs({ street: state?.street ?? null, opponents: assessment.activeOpponents, amountToCall: assessment.amountToCall,
       preflopSituation: preflop?.situation ?? null, preflopRfiCandidate: unopened?.candidate ?? false,
       preflopAction: chartAction, aggressionPossible: assessment.legality.aggressionReopened }, proofs);
-  if (facing && activation.state !== "unsafe") {
+  if (facing && callLegality?.ui.status === "contradicted") {
+    activation.allowed = false;
+    activation.state = "unsafe";
+    activation.reasons.push(...callLegality.ui.reasons);
+  } else if (facing && activation.state !== "unsafe") {
     activation.allowed = false;
     activation.state = "unsupported";
     activation.reasons.push(...responseStrategy!.reasons);
     activation.reasons.push("HJ response activation remains disabled; missing CALL/3-BET legality must never substitute FOLD.");
   }
   return { evidence: envelope, activation, unopened, openingSize: opening.size,
-    responseWindow: facing ? source!.facingOpenProof : null, responseStrategy };
+    responseWindow: facing ? source!.facingOpenProof : null, responseStrategy, callLegality };
 }
 
 /** Proof refreshes must invalidate pending recommendations even if DOM values did not change. */

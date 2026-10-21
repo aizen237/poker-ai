@@ -1,6 +1,7 @@
 import { parseBoardCardFromEvidence, type LiveReadContext, type RawTableInput, type BoardCardEvidence } from "@poker-ai/browser-reader";
 import { formatCard } from "@poker-ai/shared";
 import { readRaiseControl } from "./raiseControlRead.js";
+import { readCallControl } from "./callControlRead.js";
 import { readStackDisplay } from "./stackRead.js";
 
 // Existing PokerNow selectors, kept together for inspection. No alternate DOM
@@ -111,6 +112,7 @@ export function readLiveTable() {
   return {
     raw, context,
     raiseControl: readRaiseControl(),
+    callControl: readCallControl(),
     evidence: {
       selectors: TABLE_SELECTORS, seatEvidence, dealerClasses, boardCardEvidence,
       boardContainerFound: board !== null, boardCardElementCount: boardCards.length,
@@ -120,4 +122,8 @@ export function readLiveTable() {
   };
 }
 
-export type LiveTableRead = ReturnType<typeof readLiveTable>;
+// Older saved reader fixtures have no CALL observation. Missing stays unknown;
+// the current live reader always supplies it, without deriving authorization.
+export type LiveTableRead = Omit<ReturnType<typeof readLiveTable>, "callControl"> & {
+  callControl?: ReturnType<typeof readCallControl>;
+};

@@ -1,5 +1,9 @@
 # Phase 4B: HJ response reference review and activation blockers
 
+Phase 4C's dependent CALL-cost/capacity and observational control work is recorded
+in [PREFLOP_PHASE4C.md](PREFLOP_PHASE4C.md). Server CALL authorization and an
+approved response policy remain unproven; no HJ response action is activated.
+
 ## Outcome
 
 **No HJ response action is activated.** The authorized fallback in task item 3

@@ -8496,6 +8496,40 @@
     };
   }
 
+  // src/callControlRead.ts
+  var CALL_OBSERVATION_SOURCE = "visible native CALL label; observation only";
+  function readCallControl(root = document, isVisible = isControlVisible) {
+    const observedAt = Date.now();
+    const candidates = [...root.querySelectorAll('button, input[type="button"], input[type="submit"], [role="button"]')].filter((el2) => isVisible(el2) && /^call\b/i.test((el2.tagName === "INPUT" ? el2.value : el2.textContent ?? "").trim()));
+    const issues = [];
+    const contradictions = [];
+    if (candidates.length > 1) contradictions.push("Multiple visible CALL-labeled controls; no unique readiness observation.");
+    const el = candidates.length === 1 ? candidates[0] : null;
+    const rawText = el ? el.tagName === "INPUT" ? el.value : el.textContent : null;
+    const supported = el?.tagName === "BUTTON" && el.getAttribute("type") === "button";
+    if (el && !supported) issues.push("CALL control structure is outside the observed native button/type=button shape.");
+    const match = rawText?.trim().match(/^call\s+(\d+(?:\.\d+)?)$/i);
+    const amount = match ? Number(match[1]) : null;
+    const amountChips = supported && amount !== null && Number.isFinite(amount) && amount <= Number.MAX_SAFE_INTEGER ? amount : null;
+    if (el && amountChips === null) issues.push("CALL label does not provide one supported chip amount.");
+    const aria = el?.getAttribute("aria-label");
+    if (aria && aria.trim().replace(/\s+/g, " ").toLowerCase() !== rawText?.trim().replace(/\s+/g, " ").toLowerCase())
+      contradictions.push("CALL accessibility label contradicts or differs from its visible text.");
+    return {
+      source: CALL_OBSERVATION_SOURCE,
+      observedAt,
+      serverAuthorization: "unproven",
+      visibleCount: candidates.length,
+      tag: el?.tagName ?? null,
+      type: el?.getAttribute("type") ?? null,
+      rawText,
+      amountChips,
+      enabled: el ? !el.disabled && !el.hasAttribute("disabled") && !el.closest('fieldset[disabled], [inert], [aria-disabled="true"]') : null,
+      issues: [...contradictions, ...issues],
+      contradictions
+    };
+  }
+
   // src/stackRead.ts
   function readStackDisplay(container, winner) {
     const values = [...container?.querySelectorAll(".normal-value") ?? []];
@@ -8688,6 +8722,7 @@
       raw,
       context,
       raiseControl: readRaiseControl(),
+      callControl: readCallControl(),
       evidence: {
         selectors: TABLE_SELECTORS,
         seatEvidence,
@@ -8868,6 +8903,95 @@
     } };
   }
 
+  // src/callLegalityEvidence.ts
+  function callLegalityEvidence(read, assessment, timeline, epoch) {
+    const source = currentFacingOpen(read, assessment, timeline);
+    const proof = timeline?.sourceStatus.facingOpenProof;
+    const now = Date.now();
+    if (!source || !proof || !epoch || source.openingSizeProfile !== "pokernow-0.1.72-th-4fun-1-2-exact5-v1" || proof.expiresAt !== source.receivedAt + 1e4 || now < source.receivedAt || now >= proof.expiresAt) return null;
+    const hero = source.players.find((p) => p.playerId === source.heroId);
+    const utg = source.players.find((p) => p.position === "UTG");
+    const remaining = assessment.state.seats.find((s) => s.isYou).stack;
+    const gap = Math.max(...source.players.filter((p) => p.playerId !== source.heroId).map((p) => p.contribution)) - hero.contribution;
+    if (hero.position !== "HJ" || hero.contribution !== 0 || utg.contribution !== 5 || gap !== 5 || !Number.isFinite(remaining) || remaining < gap) return null;
+    const provenance = `Phase 4A ${proof.scope}; accepted UTG total ${utg.contribution}, HJ total ${hero.contribution}; original six-player source/DOM cross-check, numeric HJ remaining ${remaining}. No server CALL authorization inferred.`;
+    const costProof = {
+      scope: "callCost",
+      status: "proven",
+      confidence: "high",
+      provenance: [provenance],
+      reasons: []
+    };
+    const control = read.callControl ?? null;
+    let readiness = "unobserved";
+    const reasons = [];
+    if (!control) reasons.push("No CALL-control observation in this read.");
+    else if (!Number.isSafeInteger(control.observedAt) || control.observedAt < source.receivedAt || control.observedAt > now || now - control.observedAt >= 1e4) {
+      readiness = "unusable";
+      reasons.push("CALL observation is stale, pre-activation or from a future clock; it cannot refresh source proof.");
+    } else if (control.issues.length) {
+      readiness = control.contradictions.length ? "contradicted" : "unusable";
+      reasons.push(...control.issues);
+    } else if (control.visibleCount === 0) reasons.push("No visible CALL control; absence does not prove an action is illegal.");
+    else if (control.amountChips !== gap) {
+      readiness = "contradicted";
+      reasons.push("Observed CALL amount disagrees with the certified five-chip source gap.");
+    } else if (control.enabled !== true) {
+      readiness = "unusable";
+      reasons.push("CALL control is not enabled; readiness is unavailable.");
+    } else {
+      readiness = "observed_matching";
+      reasons.push("One enabled native CALL label agrees with the source gap; UI readiness is not server authorization.");
+    }
+    return {
+      version: 1,
+      scope: "hj_facing_utg_open5_call",
+      binding: {
+        decisionEpoch: epoch,
+        profile: source.openingSizeProfile,
+        tableId: source.tableId,
+        handId: source.handId,
+        handNumber: source.handNumber,
+        heroId: source.heroId,
+        heroSeat: source.heroSeat,
+        heroCards: [...source.heroCards],
+        generation: source.generation,
+        cursor: source.cursor,
+        activationSequence: proof.activation.sequence,
+        receivedAt: source.receivedAt,
+        expiresAt: proof.expiresAt
+      },
+      facts: {
+        units: "chips",
+        bigBlindChips: source.bigBlind,
+        utgContributionChips: utg.contribution,
+        heroContributionChips: hero.contribution,
+        contributionGapChips: gap,
+        remainingStackChips: remaining,
+        capacitySufficient: true,
+        payableIfCallAuthorizedChips: Math.min(gap, remaining),
+        resultingContributionIfCalledChips: hero.contribution + gap,
+        provenance
+      },
+      costProof,
+      ui: { status: readiness, observation: control, reasons },
+      serverLegality: {
+        status: "unproven",
+        confidence: "low",
+        reasons: ["Recorded hand169 establishes UTG acceptance and HJ turn, not HJ CALL acceptance or a reviewed server CALL permission contract."]
+      },
+      legalActionsProof: {
+        scope: "legalActions",
+        status: readiness === "contradicted" ? "contradicted" : "insufficient",
+        confidence: "low",
+        provenance: [provenance],
+        reasons: readiness === "contradicted" ? reasons : ["CALL server authorization and the full action set remain unproven; matching UI/cost/capacity alone cannot authorize advice."]
+      },
+      authorized: false,
+      historyComplete: false
+    };
+  }
+
   // src/decisionProofs.ts
   function buildLiveDecisionProofs(read, assessment, timeline, preflop, epoch, packet = null) {
     const proofs = PROOF_SCOPES.map((scope) => ({
@@ -8986,6 +9110,7 @@
       set("raiseLegality", "contradicted", "Dependent sizing/packet cross-check", ["Sizing belongs to a different source, control or epoch."]);
     }
     const facing = currentFacingOpen(read, assessment, timeline);
+    const callLegality = callLegalityEvidence(read, assessment, timeline, epoch);
     const responseStrategy = facing ? {
       ...inspectLiveHjResponseStrategy({ preflop, holeCards: hero?.holeCards }),
       binding: {
@@ -8999,10 +9124,10 @@
         expiresAt: source.facingOpenProof.expiresAt
       },
       call: {
-        contributionGapChips: 5,
-        payableIfCallAuthorizedChips: 5,
+        contributionGapChips: callLegality?.facts.contributionGapChips ?? null,
+        payableIfCallAuthorizedChips: callLegality?.facts.payableIfCallAuthorizedChips ?? null,
         authorization: "unproven",
-        reason: "HJ has sufficient chips for the five-chip gap, but no certified current CALL control/action contract is installed."
+        reason: "See dependent callLegality: cost, capacity and UI agreement are separate from unproven server CALL authorization."
       },
       threeBet: {
         stackCapacityChips: hero.stack,
@@ -9026,7 +9151,10 @@
       set("position", "proven", `${facing.provenance} Frozen HJ seat ${facing.heroSeat}.`);
       set("roster", "proven", `${facing.provenance} Original six dealt-in IDs; no departures/folds.`);
       set("stack", "proven", "Source starting capacities + current numeric DOM stacks; UTG remaining equals original minus five.");
-      set("callCost", "proven", "Accepted UTG street total5 minus HJ0 = five chips; within verified HJ capacity. Not a strategy or CALL-control certificate.");
+      if (callLegality) {
+        proofs[PROOF_SCOPES.indexOf("callCost")] = callLegality.costProof;
+        proofs[PROOF_SCOPES.indexOf("legalActions")] = callLegality.legalActionsProof;
+      }
     }
     const envelope = {
       version: 1,
@@ -9047,7 +9175,11 @@
       preflopAction: chartAction,
       aggressionPossible: assessment.legality.aggressionReopened
     }, proofs);
-    if (facing && activation.state !== "unsafe") {
+    if (facing && callLegality?.ui.status === "contradicted") {
+      activation.allowed = false;
+      activation.state = "unsafe";
+      activation.reasons.push(...callLegality.ui.reasons);
+    } else if (facing && activation.state !== "unsafe") {
       activation.allowed = false;
       activation.state = "unsupported";
       activation.reasons.push(...responseStrategy.reasons);
@@ -9059,7 +9191,8 @@
       unopened,
       openingSize: opening.size,
       responseWindow: facing ? source.facingOpenProof : null,
-      responseStrategy
+      responseStrategy,
+      callLegality
     };
   }
   function liveProofRevision(timeline) {
@@ -9154,6 +9287,7 @@
         ...assessment.legality,
         proof: assessLiveLegalityEvidence(read.raw, assessment, history),
         raiseControl: read.raiseControl,
+        callControl: read.callControl ?? null,
         unclassifiedControls,
         controlsMeaning: "Selected raise-to is input evidence, not a legal minimum. Slider attributes and unclassified controls do not verify legality."
       },
@@ -9216,8 +9350,9 @@
     }
     const snapshot = buildLiveDiagnosticSnapshot(read, assessment, history, preflop, packet, readUnclassifiedControls(), handTimeline2);
     const serialized = JSON.stringify(snapshot);
-    if (mode !== "once" && serialized === lastSnapshot) return;
-    lastSnapshot = serialized;
+    const comparison = JSON.stringify(snapshot, (_key, value) => value?.source === CALL_OBSERVATION_SOURCE ? { ...value, observedAt: void 0 } : value);
+    if (mode !== "once" && comparison === lastSnapshot) return;
+    lastSnapshot = comparison;
     const captured = { capturedAt: (/* @__PURE__ */ new Date()).toISOString(), ...JSON.parse(serialized) };
     console.groupCollapsed("[Poker AI State] " + captured.capturedAt + " | " + snapshot.street + " | confidence=" + assessment.confidence.level);
     console.log("Monetary/legality snapshot", captured);
