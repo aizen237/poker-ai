@@ -9,3 +9,5 @@ export * from "./multiwayEquity.js";
 export * from "./estimatedEquity.js";
 export * from "./comboRange.js";
 export * from "./boardRangeUpdate.js";
+export * from "./boardComboFeatures.js";
+export * from "./offlineConditioning.js";
