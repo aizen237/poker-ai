@@ -112,15 +112,15 @@ export function buildLiveDecisionProofs(read: LiveTableRead, assessment: LiveSta
       receivedAt: facing.receivedAt, expiresAt: source!.facingOpenProof!.expiresAt },
     call: { contributionGapChips: callLegality?.facts.contributionGapChips ?? null,
       payableIfCallAuthorizedChips: callLegality?.facts.payableIfCallAuthorizedChips ?? null,
-      authorization: "unproven" as const,
-      reason: "See dependent callLegality: cost, capacity and UI agreement are separate from unproven server CALL authorization." },
+      authorization: callLegality?.permission ? "proven" as const : "unproven" as const,
+      reason: "See dependent callLegality: scoped empirical permission, current control readiness and strategy authorization are separate." },
     threeBet: { stackCapacityChips: hero!.stack!, fullMinimumRaiseToChips: null,
       permittedMaximumRaiseToChips: null, chipUnit: null, raiseRights: "unproven" as const,
       reason: "Observed UTG acceptance and mR=8 do not authorize a future HJ 3-bet or establish its size/grid." },
     // Requirements still missing in THIS valid context; not another proof gate.
     remainingRequirements: {
       FOLD: ["reviewed_response_strategy"],
-      CALL: ["reviewed_response_strategy", "current_call_authorization"],
+      CALL: ["reviewed_response_strategy", ...(callLegality?.permission ? [] : ["current_call_authorization"])],
       THREE_BET: ["reviewed_response_strategy_and_size", "raise_rights", "minimum_and_maximum_totals", "chip_grid"],
     },
   } : null;

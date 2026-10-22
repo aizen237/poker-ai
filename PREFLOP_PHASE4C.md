@@ -1,5 +1,10 @@
 # Phase 4C: dependent HJ CALL cost, capacity and readiness evidence
 
+Phase 4D's review of paired hand-238 evidence and narrowly scoped empirical
+CALL permission is recorded in [PREFLOP_PHASE4D.md](PREFLOP_PHASE4D.md). The
+unproven-server-legality statements below describe the Phase 4C checkpoint.
+Response strategy and recommendation activation remain blocked.
+
 ## Outcome
 
 **CALL recommendations remain blocked.** The existing evidence proves the

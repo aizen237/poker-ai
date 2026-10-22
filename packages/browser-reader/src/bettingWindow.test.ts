@@ -132,21 +132,23 @@ describe("recorded hand169 accepted opening transition", () => {
 
 // Real MAIN bridge -> source runtime -> context/proofs -> overlay. Only the
 // observer's unavailable private-card view and DOM cross-check are simulated.
-async function live(change?: (fs: any[], read: any) => void, originalObserver = false, logActions?: string[], callMarkup = "") {
+async function live(change?: (fs: any[], read: any) => void, originalObserver = false, logActions?: string[], callMarkup = "", hand238 = false) {
   vi.resetModules();
-  const fs = frames(!originalObserver), start = fs.at(-3).payload, turn = fs.at(-1);
+  const fs = hand238 ? load("pokernow-hj-call-238.json").frames.slice(0, 14) : frames(!originalObserver);
+  const start = fs.at(-3).payload, turn = fs.at(-1);
   const read = load("utg-reader-cross-check.json").read;
-  const hero = originalObserver ? "PLAYER_1" : "PLAYER_2";
+  const hero = hand238 ? "PLAYER_1" : originalObserver ? "PLAYER_1" : "PLAYER_2";
+  const utg = hand238 ? "PLAYER_10" : "PLAYER_1", hj = hand238 ? "PLAYER_1" : "PLAYER_2";
   const stacks: Record<string, number> = {};
   for (const f of fs) for (const [id, p] of Object.entries((f.payload.gameState ?? f.payload).players ?? {}) as [string, any][]) {
     if (p.stack !== undefined) stacks[id] = p.stack;
   }
   for (const s of read.raw.seats) if (s.isOccupied) {
-    const id = `PLAYER_${s.seatNumber}`, total = id === "PLAYER_1" ? 5 : start.tB[id] ?? 0;
+    const id = `PLAYER_${s.seatNumber}`, total = id === utg ? 5 : start.tB[id] ?? 0;
     s.isYou = id === hero;
-    s.statusClasses = ["table-player", ...(s.isYou ? ["you-player"] : []), ...(id === "PLAYER_2" ? ["decision-current"] : [])];
+    s.statusClasses = ["table-player", ...(s.isYou ? ["you-player"] : []), ...(id === hj ? ["decision-current"] : [])];
     // Same class used by existing recorded reader scaffolding.
-    s.holeCardClassLists = s.isYou ? (originalObserver ? ["8h", "Qd"] : ["Ah", "Kd"])
+    s.holeCardClassLists = s.isYou ? (hand238 ? ["7h", "Kd"] : originalObserver ? ["8h", "Qd"] : ["Ah", "Kd"])
       .map(c => ["card-container", `card-${c[1]}`, `card-s-${c[0]}`, "flipped", "med"]) : [];
     s.stackText = s.stackContainerText = String(stacks[id] - total);
     s.betValueText = total ? String(total) : null;
@@ -178,7 +180,8 @@ async function live(change?: (fs: any[], read: any) => void, originalObserver = 
   vi.spyOn(console, "error").mockImplementation(() => {});
   const { readCallControl } = await import("../../../apps/pokernow-extension/src/callControlRead.js");
   // Synthetic CALL DOM variants use the production observer. Linkedom has no
-  // layout; only visibility is supplied. No captured HJ CALL browser is claimed.
+  // layout; only visibility is supplied. Hand238's screenshot supports the label,
+  // not these DOM attributes or a precisely timed within-window observation.
   mocks.read.mockImplementation(() => {
     read.callControl = readCallControl(document, el => !el.closest("[hidden]"));
     return read;
@@ -404,4 +407,139 @@ describe("HJ facing recorded UTG open through the production context/display pat
       expect(f.diagnostic().preflop.actionWindowEvidence).toBeUndefined();
       expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
     });
+});
+
+describe("hand238 scoped empirical CALL permission through production", () => {
+  const markup = '<button type="button">CALL 5</button>';
+  const run = (change?: (fs: any[], read: any) => void, html = markup) => live(change, false, undefined, html, true);
+  const noAdvice = (f: Awaited<ReturnType<typeof live>>) => {
+    expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
+    expect(f.socket.send).not.toHaveBeenCalled();
+    expect(f.diagnostic().handTimeline.current.historyComplete).toBe(false);
+    expect(f.diagnostic().decision.scopedProofs.activation.allowed).toBe(false);
+  };
+  it("binds CALL-only permission to the actual HJ observer, original positions and fresh opportunity", async () => {
+    const f = await run(), d = f.diagnostic(), c = d.decision.scopedProofs.callLegality;
+    expect(d.preflop).toMatchObject({ heroPosition: "HJ", situation: "facing_open", lastAggressorSeat: 10, amountToCallBB: 2.5 });
+    expect(c).toMatchObject({ authorized: false, historyComplete: false,
+      facts: { contributionGapChips: 5, remainingStackChips: 253, payableIfCallAuthorizedChips: 5 },
+      serverLegality: { status: "proven", authority: "scoped_empirical_acceptance" },
+      legalActionsProof: { status: "insufficient" },
+      permission: { action: "CALL", status: "proven", callCostChips: 5, priorContributionChips: 0,
+        resultingContributionChips: 5, remainingStackAfterCallChips: 248, fullActionSetCertified: false,
+        recommendationAuthorized: false,
+        binding: { tableId: "TABLE_TEST", handId: "HAND_238", handNumber: 238, heroId: "PLAYER_1", heroSeat: 1,
+          heroCards: ["7h", "Kd"], generation: 1, cursor: 1792581151977, activationSequence: 14,
+          receivedAt: 1792581149857, expiresAt: 1792581159857 },
+        continuity: { generation: 1, baselineSequence: 1, throughSequence: 14 },
+        control: { rawText: "CALL 5", enabled: true, amountChips: 5 } } });
+    expect(c.permission.binding).toEqual(c.binding);
+    expect(c.binding.decisionEpoch).toBe(d.decision.scopedProofs.responseStrategy.binding.decisionEpoch);
+    expect(c.permission.players.map((p: any) => [p.position, p.seat, p.sourceStack, p.contribution])).toEqual([
+      ["BTN", 3, 244, 0], ["SB", 5, 254, 1], ["BB", 9, 246, 2],
+      ["UTG", 10, 265, 5], ["HJ", 1, 253, 0], ["CO", 2, 240, 0] ]);
+    expect(d.decision.scopedProofs.responseStrategy).toMatchObject({ status: "reference_missing", hand: "K7o",
+      chosenAction: null, liveAuthorized: false, call: { authorization: "proven" },
+      remainingRequirements: { CALL: ["reviewed_response_strategy"] } });
+    for (const scope of ["legalActions", "raiseLegality", "reopening", "pot", "accounting"])
+      expect(d.decision.scopedProofs.evidence.proofs.find((p: any) => p.scope === scope).status).toBe("insufficient");
+    noAdvice(f);
+  });
+  it("retains the deadline and cannot revive permission with the historical accepted CALL or CO turn", async () => {
+    const f = await run();
+    const recorded = load("pokernow-hj-call-238.json").frames;
+    const call = recorded[14], co = recorded[15];
+    // All raw acceptance fields are preserved: cRPI includes both players but
+    // only HJ's contribution changes, to the existing highest (not above it).
+    expect(call.payload.tB).toEqual({ PLAYER_1: 5 });
+    expect(call.payload.cRPI).toEqual(["PLAYER_10", "PLAYER_1"]);
+    expect(call.payload).not.toHaveProperty("cHB");
+    expect(call.payload.pre).toBe(f.turn.payload.now);
+    expect(co.payload.pre).toBe(call.payload.now);
+    expect(co.payload.cPI).toBe("PLAYER_2"); expect(co.payload.pITT).toBe("PLAYER_2");
+    expect(call.localReceivedAt - f.turn.localReceivedAt).toBe(14806);
+    f.atAge(9999); f.poll();
+    expect(f.diagnostic().decision.scopedProofs.callLegality.permission.binding.expiresAt).toBe(1792581159857);
+    f.atAge(10000); f.refresh(); f.poll();
+    expect(f.diagnostic().decision.scopedProofs.callLegality).toBeNull();
+    for (const frame of [call, co]) {
+      f.incoming(frame); f.poll();
+      expect(f.diagnostic().handTimeline.sourceStatus.facingOpenProof).toBeNull();
+      expect(f.diagnostic().decision.scopedProofs.callLegality).toBeNull(); noAdvice(f);
+    }
+  });
+  it.each([
+    ['', "unobserved"], ['<button type="button" hidden>Call 5</button>', "unobserved"],
+    ['<button type="button" disabled>Call 5</button>', "unusable"],
+    ['<button type="button">Call 6</button>', "contradicted"],
+    ['<button type="button">Call 0</button>', "contradicted"],
+    ['<button type="button">Call 5BB</button>', "unusable"],
+    ['<button type="button">Call 5</button><button type="button">Call 5</button>', "contradicted"],
+  ])("withholds ready permission for control %s", async (html, status) => {
+    const f = await run(undefined, html), c = f.diagnostic().decision.scopedProofs.callLegality;
+    expect(c.ui.status).toBe(status); expect(c.permission).toBeNull();
+    expect(c.serverLegality.status).toBe("proven");
+    expect(f.diagnostic().decision.scopedProofs.responseStrategy.remainingRequirements.CALL).toContain("current_call_authorization");
+    noAdvice(f);
+  });
+  it.each(["wrong-amount", "wrong-actor", "reconnect", "predecessor", "missing-open", "unknown-open-field",
+    "profile", "hand", "hero-contribution", "short-stack", "dom-actor", "cards", "settling"])("rejects %s", async variant => {
+    const f = await run((fs, read) => {
+      const start = fs[11], open = fs[12], turn = fs[13], hero = read.raw.seats.find((s: any) => s.seatNumber === 1);
+      if (variant === "wrong-amount") open.payload.tB.PLAYER_10 = open.payload.cHB = 6;
+      if (variant === "wrong-actor") turn.payload.cPI = turn.payload.pITT = "PLAYER_2";
+      if (variant === "reconnect") turn.connectionGeneration++;
+      if (variant === "predecessor") turn.payload.pre++;
+      if (variant === "missing-open") fs.splice(12, 1);
+      if (variant === "unknown-open-field") open.payload.unknownAction = true;
+      if (variant === "profile") start.payload.fV = "0.1.73";
+      if (variant === "hand") turn.payload.hI = "OTHER_HAND";
+      if (variant === "hero-contribution") hero.betValueText = "1";
+      if (variant === "short-stack") { fs[0].payload.gameState.players.PLAYER_1.stack = 4; hero.stackText = hero.stackContainerText = "4"; }
+      if (variant === "dom-actor") hero.statusClasses = ["table-player", "you-player"];
+      if (variant === "cards") hero.holeCardClassLists = [["card-h", "card-s-A"], ["card-d", "card-s-A"]];
+      if (variant === "settling") hero.stackIsSettlement = true;
+    });
+    expect(f.diagnostic().decision.scopedProofs.callLegality).toBeNull(); noAdvice(f);
+  });
+  it.each([1, 2, 3, 5, 9, 10])("does not extrapolate empirical coverage to a changed stack at seat %s", async seat => {
+    const f = await run((fs, read) => {
+      const id = `PLAYER_${seat}`;
+      for (const frame of fs) {
+        const p = (frame.payload.gameState ?? frame.payload).players?.[id];
+        if (p?.stack !== undefined) p.stack++;
+      }
+      const s = read.raw.seats.find((s: any) => s.seatNumber === seat);
+      s.stackText = s.stackContainerText = String(Number(s.stackText) + 1);
+    });
+    const c = f.diagnostic().decision.scopedProofs.callLegality;
+    expect(c).not.toBeNull(); expect(c.costProof.status).toBe("proven");
+    expect(c.serverLegality.status).toBe("unproven"); expect(c.permission).toBeNull(); noAdvice(f);
+  });
+  it.each(["actor", "contradictory-total", "same-actor", "disconnect"])("invalidates permission on later %s", async variant => {
+    const f = await run();
+    expect(f.diagnostic().decision.scopedProofs.callLegality.permission).not.toBeNull();
+    if (variant === "disconnect") f.socket.dispatchEvent(new Event("close"));
+    else f.incoming({ ...f.turn, localReceivedAt: f.turn.localReceivedAt + 2000,
+      payload: { ...f.turn.payload, pre: f.turn.payload.now, now: f.turn.payload.now + 1,
+        ...(variant === "contradictory-total" ? { tB: { PLAYER_10: 6 } } : {}),
+        cPI: variant === "actor" ? "PLAYER_2" : "PLAYER_1", pITT: variant === "actor" ? "PLAYER_2" : "PLAYER_1" } });
+    f.poll(); expect(f.diagnostic().decision.scopedProofs.callLegality).toBeNull(); noAdvice(f);
+  });
+  it.each(["pre-activation", "future", "clock-regression", "empty-epoch"])("withholds permission for %s", async variant => {
+    const f = await run(), r = structuredClone(f.read), timeline = f.diagnostic().handTimeline;
+    if (variant === "pre-activation") r.callControl.observedAt = f.turn.localReceivedAt - 1;
+    if (variant === "future") r.callControl.observedAt = Date.now() + 1;
+    if (variant === "clock-regression") f.atAge(-1);
+    const c = callLegalityEvidence(r, assessLiveState(r.raw, r.context), timeline, variant === "empty-epoch" ? "" : "test-epoch");
+    expect(c?.permission ?? null).toBeNull(); noAdvice(f);
+  });
+  it("rebinds a new epoch without reusing or extending the prior permission", async () => {
+    const f = await run(), timeline = f.diagnostic().handTimeline;
+    const a = callLegalityEvidence(f.read, assessLiveState(f.read.raw, f.read.context), timeline, "epoch-a")!;
+    const b = callLegalityEvidence(f.read, assessLiveState(f.read.raw, f.read.context), timeline, "epoch-b")!;
+    expect(a.permission!.binding.decisionEpoch).toBe("epoch-a");
+    expect(b.permission!.binding.decisionEpoch).toBe("epoch-b");
+    expect(a.permission!.binding.expiresAt).toBe(b.permission!.binding.expiresAt); noAdvice(f);
+  });
 });

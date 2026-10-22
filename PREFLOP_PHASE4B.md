@@ -2,7 +2,9 @@
 
 Phase 4C's dependent CALL-cost/capacity and observational control work is recorded
 in [PREFLOP_PHASE4C.md](PREFLOP_PHASE4C.md). Server CALL authorization and an
-approved response policy remain unproven; no HJ response action is activated.
+approved response policy remained unproven at that checkpoint. Phase 4D adds
+[scoped hand-238 empirical CALL permission](PREFLOP_PHASE4D.md); no HJ response
+action is activated and the reviewed response policy is still missing.
 
 ## Outcome
 

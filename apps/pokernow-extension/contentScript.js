@@ -8904,6 +8904,9 @@
   }
 
   // src/callLegalityEvidence.ts
+  var HAND238_CAPACITIES = { UTG: 265, HJ: 253, CO: 240, BTN: 244, SB: 254, BB: 246 };
+  var CALL_RULE = "pokernow-0.1.72-th-4fun-1-2-hj-call5-hand238-v1";
+  var CALL_PROVENANCE = "Empirical hand238 paired evidence: frame13 UTG total0->5; frame14 HJ actor/total0; screenshot CALL5 and HJ 7h/Kd/253; frame15 HJ total0->5 with opposing highest unchanged at5; frame16 CO actor. Matching the highest contribution is CALL, not RAISE; cRPI is not an action classifier. Only the observed starting stack vector is covered. Historical acceptance at activation+14806ms cannot renew a live proof.";
   function callLegalityEvidence(read, assessment, timeline, epoch) {
     const source = currentFacingOpen(read, assessment, timeline);
     const proof = timeline?.sourceStatus.facingOpenProof;
@@ -8943,24 +8946,50 @@
       readiness = "observed_matching";
       reasons.push("One enabled native CALL label agrees with the source gap; UI readiness is not server authorization.");
     }
+    const binding = {
+      decisionEpoch: epoch,
+      profile: source.openingSizeProfile,
+      tableId: source.tableId,
+      handId: source.handId,
+      handNumber: source.handNumber,
+      heroId: source.heroId,
+      heroSeat: source.heroSeat,
+      heroCards: [...source.heroCards],
+      generation: source.generation,
+      cursor: source.cursor,
+      activationSequence: proof.activation.sequence,
+      receivedAt: source.receivedAt,
+      expiresAt: proof.expiresAt
+    };
+    const covered = source.players.every((p) => p.sourceStack === HAND238_CAPACITIES[p.position]);
+    const permission = covered && readiness === "observed_matching" ? {
+      version: 1,
+      rule: CALL_RULE,
+      action: "CALL",
+      status: "proven",
+      confidence: "high",
+      authority: "scoped_empirical_acceptance",
+      binding,
+      decisionWindow: proof.scope,
+      street: "preflop",
+      actor: structuredClone(proof.actor),
+      units: "chips",
+      callCostChips: 5,
+      priorContributionChips: 0,
+      resultingContributionChips: 5,
+      remainingStackChips: remaining,
+      remainingStackAfterCallChips: remaining - gap,
+      players: structuredClone(source.players),
+      continuity: structuredClone(proof.continuity),
+      control: structuredClone(control),
+      provenance: CALL_PROVENANCE,
+      fullActionSetCertified: false,
+      recommendationAuthorized: false
+    } : null;
     return {
       version: 1,
       scope: "hj_facing_utg_open5_call",
-      binding: {
-        decisionEpoch: epoch,
-        profile: source.openingSizeProfile,
-        tableId: source.tableId,
-        handId: source.handId,
-        handNumber: source.handNumber,
-        heroId: source.heroId,
-        heroSeat: source.heroSeat,
-        heroCards: [...source.heroCards],
-        generation: source.generation,
-        cursor: source.cursor,
-        activationSequence: proof.activation.sequence,
-        receivedAt: source.receivedAt,
-        expiresAt: proof.expiresAt
-      },
+      binding,
       facts: {
         units: "chips",
         bigBlindChips: source.bigBlind,
@@ -8975,17 +9004,28 @@
       },
       costProof,
       ui: { status: readiness, observation: control, reasons },
-      serverLegality: {
+      serverLegality: covered ? {
+        status: "proven",
+        confidence: "high",
+        rule: CALL_RULE,
+        authority: "scoped_empirical_acceptance",
+        provenance: CALL_PROVENANCE,
+        reasons: []
+      } : {
         status: "unproven",
         confidence: "low",
-        reasons: ["Recorded hand169 establishes UTG acceptance and HJ turn, not HJ CALL acceptance or a reviewed server CALL permission contract."]
+        rule: null,
+        authority: null,
+        provenance: CALL_PROVENANCE,
+        reasons: ["Starting stacks are outside the exact hand238 empirical CALL contract; sufficient capacity alone does not extend coverage."]
       },
+      permission,
       legalActionsProof: {
         scope: "legalActions",
         status: readiness === "contradicted" ? "contradicted" : "insufficient",
         confidence: "low",
         provenance: [provenance],
-        reasons: readiness === "contradicted" ? reasons : ["CALL server authorization and the full action set remain unproven; matching UI/cost/capacity alone cannot authorize advice."]
+        reasons: readiness === "contradicted" ? reasons : [permission ? "Scoped CALL legality is certified; the full action set and response strategy remain unproven." : "No ready scoped CALL permission; the full action set remains unproven. Matching UI/cost/capacity alone cannot authorize advice."]
       },
       authorized: false,
       historyComplete: false
@@ -9126,8 +9166,8 @@
       call: {
         contributionGapChips: callLegality?.facts.contributionGapChips ?? null,
         payableIfCallAuthorizedChips: callLegality?.facts.payableIfCallAuthorizedChips ?? null,
-        authorization: "unproven",
-        reason: "See dependent callLegality: cost, capacity and UI agreement are separate from unproven server CALL authorization."
+        authorization: callLegality?.permission ? "proven" : "unproven",
+        reason: "See dependent callLegality: scoped empirical permission, current control readiness and strategy authorization are separate."
       },
       threeBet: {
         stackCapacityChips: hero.stack,
@@ -9140,7 +9180,7 @@
       // Requirements still missing in THIS valid context; not another proof gate.
       remainingRequirements: {
         FOLD: ["reviewed_response_strategy"],
-        CALL: ["reviewed_response_strategy", "current_call_authorization"],
+        CALL: ["reviewed_response_strategy", ...callLegality?.permission ? [] : ["current_call_authorization"]],
         THREE_BET: ["reviewed_response_strategy_and_size", "raise_rights", "minimum_and_maximum_totals", "chip_grid"]
       }
     } : null;
