@@ -1,5 +1,10 @@
 # Phase 4D: empirical HJ CALL permission from hand 238
 
+Phase 4E extends the existing source recognizer through the accepted HJ CALL
+and CO activation: [PREFLOP_PHASE4E.md](PREFLOP_PHASE4E.md). The Phase 4D
+authorization limits below remain unchanged; historical tracking is separate
+from fresh action permission and strategy.
+
 ## Outcome
 
 **Narrow CALL legality is certified; no response recommendation is enabled.**

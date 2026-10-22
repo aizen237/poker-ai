@@ -3,11 +3,10 @@ import type { LiveStateAssessment } from "@poker-ai/browser-reader";
 import type { LiveTableRead } from "./tableRead.js";
 import type { LiveTimelineDiagnostic } from "./liveTimeline.js";
 import { currentFacingOpen } from "./firstUtgLive.js";
+import { HJ_CALL_RULE as CALL_RULE, matchesHjCallContract } from "./bettingWindow.js";
 
 /** Empirical coverage is deliberately no wider than hand238's starting stack
  * vector. This is not a general sufficient-stack rule or a strategy reference. */
-const HAND238_CAPACITIES = { UTG: 265, HJ: 253, CO: 240, BTN: 244, SB: 254, BB: 246 } as const;
-const CALL_RULE = "pokernow-0.1.72-th-4fun-1-2-hj-call5-hand238-v1";
 const CALL_PROVENANCE = "Empirical hand238 paired evidence: frame13 UTG total0->5; frame14 HJ actor/total0; " +
   "screenshot CALL5 and HJ 7h/Kd/253; frame15 HJ total0->5 with opposing highest unchanged at5; frame16 CO actor. " +
   "Matching the highest contribution is CALL, not RAISE; cRPI is not an action classifier. " +
@@ -57,7 +56,7 @@ export function callLegalityEvidence(read: LiveTableRead, assessment: LiveStateA
       handId: source.handId, handNumber: source.handNumber, heroId: source.heroId, heroSeat: source.heroSeat,
       heroCards: [...source.heroCards], generation: source.generation, cursor: source.cursor,
       activationSequence: proof.activation.sequence, receivedAt: source.receivedAt, expiresAt: proof.expiresAt };
-  const covered = source.players.every(p => p.sourceStack === HAND238_CAPACITIES[p.position]);
+  const covered = matchesHjCallContract(source);
   // CALL-only evidence must never stand in for the complete legal action set.
   // It is freshly derived, not accepted from a packet, control or external input.
   const permission = covered && readiness === "observed_matching" ? {

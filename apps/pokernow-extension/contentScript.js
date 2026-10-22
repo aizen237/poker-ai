@@ -5458,7 +5458,7 @@
     /** Independently proven decision-local window, never whole-hand coverage. */
     openingEvidence: external_exports.enum(["first_utg_hand_start", "hj_after_utg_fold", "co_after_utg_hj_folds", "btn_after_utg_hj_co_folds", "sb_after_utg_hj_co_btn_folds"]).optional(),
     /** Closed source-backed response context; explicitly NOT an RFI permission. */
-    actionWindowEvidence: external_exports.literal("hj_facing_utg_open5").optional(),
+    actionWindowEvidence: external_exports.enum(["hj_facing_utg_open5", "co_facing_utg_open5_hj_call5"]).optional(),
     actions: external_exports.array(action),
     historyNotes: external_exports.array(external_exports.string()),
     tournamentContext: external_exports.enum(["chip_ev_only", "unknown"])
@@ -8271,17 +8271,27 @@
   function currentFacingOpen(read, assessment, timeline) {
     return currentOpeningWindow(read, assessment, timeline, "HJ_OPEN");
   }
+  function currentCoFacingOpen(read, assessment, timeline) {
+    return currentOpeningWindow(read, assessment, timeline, "CO_OPEN_CALL");
+  }
   function currentOpeningWindow(read, assessment, timeline, role) {
-    const facing = role === "HJ_OPEN";
-    const source = timeline?.sourceStatus, proof = facing ? source?.facingOpenProof : role === "UTG" ? source?.firstUtgProof : role === "HJ" ? source?.hjProof : role === "CO" ? source?.coProof : role === "BTN" ? source?.btnProof : source?.sbProof, w = proof?.witness;
+    const coFacing = role === "CO_OPEN_CALL", facing = role === "HJ_OPEN" || coFacing;
+    const source = timeline?.sourceStatus, proof = coFacing ? source?.coFacingOpenProof : facing ? source?.facingOpenProof : role === "UTG" ? source?.firstUtgProof : role === "HJ" ? source?.hjProof : role === "CO" ? source?.coProof : role === "BTN" ? source?.btnProof : source?.sbProof, w = proof?.witness;
     const id = source?.identity, chain = proof?.continuity;
     const foldedPositions = role === "SB" ? ["UTG", "HJ", "CO", "BTN"] : role === "BTN" ? ["UTG", "HJ", "CO"] : role === "CO" ? ["UTG", "HJ"] : role === "HJ" ? ["UTG"] : [];
     const foldedIds = foldedPositions.map((position2) => w?.players.find((p) => p.position === position2)?.playerId);
     const state = assessment.state;
-    if (!read || !timeline || !w || !source?.connected || !id || !state || id.tableId !== w.tableId || id.handId !== w.handId || id.handNumber !== w.handNumber || id.heroPlayerId !== w.heroId || (role === "UTG" ? id.frameCursor !== w.cursor : id.frameCursor !== (proof && "anchor" in proof ? proof.anchor.cursor : null)) || timeline.current.handId !== `${w.tableId}:hand:${w.handId}` || timeline.current.handNumber !== w.handNumber || proof?.scope !== (facing ? "hj_facing_utg_open5" : role === "UTG" ? "first_utg_boundary" : role === "HJ" ? "hj_after_utg_fold" : role === "CO" ? "co_after_utg_hj_folds" : role === "BTN" ? "btn_after_utg_hj_co_folds" : "sb_after_utg_hj_co_btn_folds") || proof.version !== 1 || proof.historyComplete !== false || role !== "UTG" && (Date.now() < w.receivedAt || Date.now() >= proof.expiresAt || w.players.find((p) => p.playerId === w.heroId)?.position !== (facing ? "HJ" : role)) || chain?.generation !== w.generation || chain.status !== "validated_prefix" || chain.tableId !== w.tableId || chain.handId !== w.handId || chain.cursor !== w.cursor || chain.throughSequence <= chain.baselineSequence || id.chainGap || timeline.current.coverage.issues.some((i) => i.code === "metadata_gap" || i.code === "identity_conflict") || timeline.current.seatMapping.status === "invalid" || read.context.readErrors.length || state.street !== "preflop" || state.board.length || assessment.smallBlind !== w.smallBlind || assessment.bigBlind !== w.bigBlind || read.context.dealerSeatNumber !== w.players.find((p) => p.position === "BTN")?.seat) return null;
-    if (facing && source.facingOpenProof?.actor.playerId !== w.heroId) return null;
-    if (timeline.current.events.some((e) => e.source === "pokernow_log_v3" && !isSourceNonActionMetadata(e) && !["hand_start", "player_stacks", "post"].includes(e.action) && !(facing && e.action === "raise" && e.actor?.playerId === w.players.find((p) => p.position === "UTG")?.playerId && e.street === "preflop" && e.amountMeaning === "street_total" && e.amount === 5 && e.order !== "ambiguous") && !(role !== "UTG" && e.action === "fold" && !!e.actor?.playerId && foldedIds.includes(e.actor.playerId) && e.street === "preflop"))) return null;
+    if (!read || !timeline || !w || !source?.connected || !id || !state || id.tableId !== w.tableId || id.handId !== w.handId || id.handNumber !== w.handNumber || id.heroPlayerId !== w.heroId || (role === "UTG" ? id.frameCursor !== w.cursor : id.frameCursor !== (proof && "anchor" in proof ? proof.anchor.cursor : null)) || timeline.current.handId !== `${w.tableId}:hand:${w.handId}` || timeline.current.handNumber !== w.handNumber || proof?.scope !== (coFacing ? "co_facing_utg_open5_hj_call5" : facing ? "hj_facing_utg_open5" : role === "UTG" ? "first_utg_boundary" : role === "HJ" ? "hj_after_utg_fold" : role === "CO" ? "co_after_utg_hj_folds" : role === "BTN" ? "btn_after_utg_hj_co_folds" : "sb_after_utg_hj_co_btn_folds") || proof.version !== 1 || proof.historyComplete !== false || role !== "UTG" && (Date.now() < w.receivedAt || Date.now() >= proof.expiresAt || w.players.find((p) => p.playerId === w.heroId)?.position !== (coFacing ? "CO" : facing ? "HJ" : role)) || chain?.generation !== w.generation || chain.status !== "validated_prefix" || chain.tableId !== w.tableId || chain.handId !== w.handId || chain.cursor !== w.cursor || chain.throughSequence <= chain.baselineSequence || id.chainGap || timeline.current.coverage.issues.some((i) => i.code === "metadata_gap" || i.code === "identity_conflict") || timeline.current.seatMapping.status === "invalid" || read.context.readErrors.length || state.street !== "preflop" || state.board.length || assessment.smallBlind !== w.smallBlind || assessment.bigBlind !== w.bigBlind || read.context.dealerSeatNumber !== w.players.find((p) => p.position === "BTN")?.seat) return null;
+    if (facing && (coFacing ? source.coFacingOpenProof : source.facingOpenProof)?.actor.playerId !== w.heroId) return null;
+    if (timeline.current.events.some((e) => e.source === "pokernow_log_v3" && !isSourceNonActionMetadata(e) && !["hand_start", "player_stacks", "post"].includes(e.action) && !(facing && e.action === "raise" && e.actor?.playerId === w.players.find((p) => p.position === "UTG")?.playerId && e.street === "preflop" && e.amountMeaning === "street_total" && e.amount === 5 && e.order !== "ambiguous") && !(coFacing && e.action === "call" && e.actor?.playerId === w.players.find((p) => p.position === "HJ")?.playerId && // From source-proven zero, reported CALL5 matches both total and delta;
+    // this does not change the generic log parser's unspecified semantics.
+    e.street === "preflop" && e.amountMeaning === "reported_unspecified" && e.amount === 5 && e.order !== "ambiguous") && !(role !== "UTG" && e.action === "fold" && !!e.actor?.playerId && foldedIds.includes(e.actor.playerId) && e.street === "preflop"))) return null;
     if (facing && timeline.current.events.filter((e) => e.source === "pokernow_log_v3" && e.action === "raise").length > 1) return null;
+    if (coFacing) {
+      const calls = timeline.current.events.filter((e) => e.source === "pokernow_log_v3" && e.action === "call");
+      const raise = timeline.current.events.find((e) => e.source === "pokernow_log_v3" && e.action === "raise");
+      if (calls.length > 1 || raise && calls[0] && (raise.sourceTimestamp === null || calls[0].sourceTimestamp === null || raise.sourceTimestamp >= calls[0].sourceTimestamp)) return null;
+    }
     const logFolds = timeline.current.events.filter((e) => e.source === "pokernow_log_v3" && e.action === "fold");
     if (role !== "UTG" && (logFolds.length > foldedIds.length || new Set(logFolds.map((e) => e.actor?.playerId)).size !== logFolds.length)) return null;
     if ((role === "CO" || role === "BTN" || role === "SB") && logFolds.length > 1 && (logFolds.some((e) => e.order === "ambiguous") || logFolds.some((e, i) => i > 0 && foldedIds.indexOf(e.actor?.playerId ?? void 0) <= foldedIds.indexOf(logFolds[i - 1].actor?.playerId ?? void 0)))) return null;
@@ -8298,7 +8308,7 @@
     if (seats.length !== 6 || new Set(seats.map((s) => s.seatNumber)).size !== 6 || seats.filter((s) => s.isYou).length !== 1 || seats.filter((s) => s.isCurrentToAct).length !== 1) return null;
     for (const p of w.players) {
       const s = seats.find((s2) => s2.seatNumber === p.seat);
-      if (!s || s.isFolded !== foldedPositions.includes(p.position) || s.isAllIn || s.isOffline || s.isSettling || s.betReadError || s.stack === null || s.stack < 100 * w.bigBlind || s.stack !== p.sourceStack && s.stack !== p.sourceStack - p.contribution || facing && p.position === "UTG" && s.stack !== p.sourceStack - p.contribution || assessment.positions.get(p.seat) !== p.position || (s.currentBet === null ? p.contribution !== 0 : s.currentBet !== p.contribution) || s.isYou !== (p.playerId === w.heroId) || s.isCurrentToAct !== (p.playerId === w.heroId)) return null;
+      if (!s || s.isFolded !== foldedPositions.includes(p.position) || s.isAllIn || s.isOffline || s.isSettling || s.betReadError || s.stack === null || s.stack < 100 * w.bigBlind || s.stack !== p.sourceStack && s.stack !== p.sourceStack - p.contribution || facing && (p.position === "UTG" || coFacing && p.position === "HJ") && s.stack !== p.sourceStack - p.contribution || assessment.positions.get(p.seat) !== p.position || (s.currentBet === null ? p.contribution !== 0 : s.currentBet !== p.contribution) || s.isYou !== (p.playerId === w.heroId) || s.isCurrentToAct !== (p.playerId === w.heroId)) return null;
     }
     const hero = seats.find((s) => s.isYou);
     const ranks = "23456789TJQKA";
@@ -8330,9 +8340,10 @@
     if (bigBlind === null || !Number.isFinite(bigBlind) || bigBlind <= 0) return null;
     const hero = state?.seats.find((s) => s.isYou);
     try {
-      const response = currentFacingOpen(read, assessment, timeline);
+      const coResponse = currentCoFacingOpen(read, assessment, timeline);
+      const response = currentFacingOpen(read, assessment, timeline) ?? coResponse;
       if (response) {
-        const proof = timeline.sourceStatus.facingOpenProof, action2 = proof.transitions[0];
+        const proof = coResponse ? timeline.sourceStatus.coFacingOpenProof : timeline.sourceStatus.facingOpenProof;
         return buildPreflopContext({
           heroSeat: response.heroSeat,
           playersDealtIn: 6,
@@ -8348,16 +8359,16 @@
           amountToCallBB: 5 / bigBlind,
           contributionMeaning: "street_total",
           historyCoverage: "complete",
-          actionWindowEvidence: "hj_facing_utg_open5",
-          actions: [{
+          actionWindowEvidence: proof.scope,
+          actions: proof.transitions.map((action2) => ({
             seat: action2.actor.seat,
-            action: "raise",
+            action: action2.action,
             totalContributionBB: action2.newContributionChips / bigBlind,
             observation: action2.sequence,
-            wagerAction: "raise"
-          }],
+            wagerAction: action2.action
+          })),
           historyNotes: [
-            "Complete only for the closed boundary -> UTG open5 -> HJ activation window. Global historyComplete=false.",
+            `Complete only for the closed ${proof.scope} decision prefix. Global historyComplete=false.`,
             "Response strategy, re-raise legality/grid/reopening and contestable pot remain unproven."
           ],
           tournamentContext: "chip_ev_only"
@@ -8903,9 +8914,238 @@
     } };
   }
 
-  // src/callLegalityEvidence.ts
+  // src/hjWindow.ts
+  var object = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+  var integer = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+  var token = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(v);
+  var common = ["now", "pre", "eventsData", "mEV", "fV", "sN"];
+  function hjPatchKind(raw) {
+    if (!object(raw) || !integer(raw.now) || !integer(raw.pre) || raw.now <= raw.pre || !integer(raw.sN) || raw.mEV !== 0 || raw.fV !== "0.1.72" || !Array.isArray(raw.eventsData) || raw.eventsData.length) return null;
+    const exact = (fields) => Object.keys(raw).length === fields.length && fields.every((k) => Object.hasOwn(raw, k));
+    if (exact([...common, "pGS", "sNA", "pITT", "sNAA", "wBACPI"]) && object(raw.pGS) && Object.keys(raw.pGS).length === 1 && token(Object.keys(raw.pGS)[0]) && Object.values(raw.pGS)[0] === "fold" && raw.sNA === "NSAF" && raw.pITT === null && integer(raw.sNAA) && Array.isArray(raw.wBACPI) && raw.wBACPI.length === 1 && token(raw.wBACPI[0])) return "fold";
+    if (exact([...common, "cPI", "pITT", "sNA", "pASA", "sNAA", "mAVTB"]) && token(raw.cPI) && raw.pITT === raw.cPI && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now && integer(raw.mAVTB)) return "turn";
+    return null;
+  }
+  function validatedOpeningPatch(data, heroId) {
+    const raw = data.hjPatch, kind2 = hjPatchKind(raw);
+    const projectedKeys = ["now", "pre", "eventsData", "fV", "pITT", kind2 === "fold" ? "pGS" : "cPI"];
+    if (!raw || !kind2 || data.event !== "gC" || data.heroId !== heroId || Object.keys(data.frame).length !== projectedKeys.length || !projectedKeys.every((k) => Object.hasOwn(data.frame, k)) || Object.entries(data.frame).some(([k, v]) => JSON.stringify(raw[k]) !== JSON.stringify(v))) return null;
+    return { raw, kind: kind2 };
+  }
+  function advanceHjWindow(pending, data, sequence, at) {
+    const w = pending.witness, patch = validatedOpeningPatch(data, w.heroId);
+    if (!patch) return null;
+    const { raw, kind: kind2 } = patch;
+    const utg = w.players.find((p) => p.position === "UTG"), bb = w.players.find((p) => p.position === "BB");
+    if (!pending.fold) {
+      if (kind2 !== "fold" || sequence !== pending.anchor.sequence + 1 || raw.pre !== pending.anchor.cursor || Object.keys(raw.pGS)[0] !== utg.playerId || raw.wBACPI[0] !== bb.playerId) return null;
+      return { pending: { ...pending, fold: {
+        sequence,
+        cursor: raw.now,
+        previousCursor: raw.pre,
+        receivedAt: at,
+        playerId: utg.playerId,
+        seat: utg.seat,
+        sourcePatch: structuredClone(raw)
+      } } };
+    }
+    if (kind2 !== "turn" || sequence !== pending.fold.sequence + 1 || raw.pre !== pending.fold.cursor || raw.cPI !== w.heroId) return null;
+    const witness = {
+      ...w,
+      cursor: raw.now,
+      previousCursor: raw.pre,
+      receivedAt: at,
+      provenance: `${w.provenance} Explicit UTG fold at ${pending.fold.cursor}; immediately linked first HJ activation at ${raw.now}. Closed hands-150/168 patch contract; no generic action coverage.`
+    };
+    return { pending, proof: {
+      version: 1,
+      scope: "hj_after_utg_fold",
+      historyComplete: false,
+      expiresAt: at + 1e4,
+      witness,
+      anchor: structuredClone(pending.anchor),
+      fold: structuredClone(pending.fold),
+      activation: { sequence, sourcePatch: structuredClone(raw) }
+    } };
+  }
+
+  // src/bettingWindow.ts
+  var object2 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+  var integer2 = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+  var same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  var HJ_CALL_RULE = "pokernow-0.1.72-th-4fun-1-2-hj-call5-hand238-v1";
   var HAND238_CAPACITIES = { UTG: 265, HJ: 253, CO: 240, BTN: 244, SB: 254, BB: 246 };
-  var CALL_RULE = "pokernow-0.1.72-th-4fun-1-2-hj-call5-hand238-v1";
+  function matchesHjCallContract(w) {
+    return w.openingSizeProfile === "pokernow-0.1.72-th-4fun-1-2-exact5-v1" && w.players.length === 6 && w.players.every((p) => p.sourceStack === HAND238_CAPACITIES[p.position]);
+  }
+  function isObservedHjCallPatch(raw) {
+    if (!object2(raw)) return false;
+    const keys = ["tB", "now", "pGS", "sNA", "cRPI", "pITT", "sNAA", "wBACPI", "eventsData", "pre", "mEV", "fV", "sN"];
+    return Object.keys(raw).length === keys.length && keys.every((k) => Object.hasOwn(raw, k)) && integer2(raw.now) && integer2(raw.pre) && raw.now > raw.pre && integer2(raw.sNAA) && integer2(raw.sN) && raw.mEV === 0 && raw.fV === "0.1.72" && raw.sNA === "NSAA" && raw.pITT === null && same(raw.pGS, {}) && same(raw.wBACPI, []) && same(raw.eventsData, []) && object2(raw.tB) && Object.keys(raw.tB).length === 1 && Object.values(raw.tB)[0] === 5 && Array.isArray(raw.cRPI) && raw.cRPI.length === 2 && raw.cRPI[0] !== raw.cRPI[1] && raw.cRPI[1] === Object.keys(raw.tB)[0];
+  }
+  function isObservedUtgOpenPatch(raw) {
+    if (!object2(raw)) return false;
+    const keys = [
+      "mR",
+      "tB",
+      "cHB",
+      "now",
+      "pGS",
+      "sNA",
+      "cRPI",
+      "pITT",
+      "sNAA",
+      "wBACPI",
+      "eventsData",
+      "pre",
+      "mEV",
+      "fV",
+      "sN"
+    ];
+    return Object.keys(raw).length === keys.length && keys.every((k) => Object.hasOwn(raw, k)) && integer2(raw.now) && integer2(raw.pre) && raw.now > raw.pre && integer2(raw.sNAA) && integer2(raw.sN) && raw.mR === 8 && raw.cHB === 5 && raw.mEV === 0 && raw.fV === "0.1.72" && raw.sNA === "NSAA" && raw.pITT === null && same(raw.pGS, {}) && same(raw.wBACPI, []) && same(raw.eventsData, []) && object2(raw.tB) && Object.keys(raw.tB).length === 1 && Object.values(raw.tB)[0] === 5 && same(raw.cRPI, Object.keys(raw.tB));
+  }
+  function advanceFacingOpenWindow(pending, data, previous, next, sequence, at) {
+    const w = pending.witness, utg = w.players.find((p) => p.position === "UTG"), hj = w.players.find((p) => p.position === "HJ");
+    if (!w.openingSizeProfile || data.heroId !== w.heroId || data.event !== "gC" || previous.hI !== w.handId || next.hI !== w.handId || next.gN !== w.handNumber || !same(next.gT, [1, 0])) return null;
+    if (pending.hjActivation) {
+      if (!matchesHjCallContract(w) || previous.cPI !== hj.playerId) return null;
+      const t2 = pending.transition, activation = pending.hjActivation;
+      const totalsMatch = (state, called) => w.players.every((p) => (state.tB[p.playerId] ?? 0) === (p.playerId === utg.playerId || called && p.playerId === hj.playerId ? 5 : p.contribution));
+      if (!pending.call) {
+        const raw = data.bettingPatch;
+        const fields = ["tB", "now", "pGS", "cRPI", "pITT", "eventsData", "pre", "fV"];
+        if (!isObservedHjCallPatch(raw) || Object.keys(data.frame).length !== fields.length || !fields.every((k) => Object.hasOwn(data.frame, k) && same(data.frame[k], raw[k])) || sequence !== activation.sequence + 1 || raw.pre !== activation.sourcePatch.now || previous.pITT !== hj.playerId || hj.contribution !== 0 || Object.keys(raw.tB)[0] !== hj.playerId || !same(raw.cRPI, [utg.playerId, hj.playerId]) || !totalsMatch(previous, false) || !totalsMatch(next, true) || next.pITT !== null || next.cPI !== hj.playerId) return null;
+        const call2 = {
+          id: `${w.tableId}:${w.handId}:${w.generation}:${raw.now}:call`,
+          tableId: w.tableId,
+          handId: w.handId,
+          handNumber: w.handNumber,
+          generation: w.generation,
+          sequence,
+          cursor: raw.now,
+          previousCursor: raw.pre,
+          receivedAt: at,
+          street: "preflop",
+          action: "call",
+          actor: { playerId: hj.playerId, seat: hj.seat, position: "HJ" },
+          priorContributionChips: 0,
+          newContributionChips: 5,
+          investmentChips: 5,
+          previousHighestContributionChips: 5,
+          observedRaiseIncrementChips: 0,
+          originalRoster: structuredClone(w.players),
+          evidence: { source: "pokernow_gC", contract: HJ_CALL_RULE, raw: structuredClone(raw) }
+        };
+        return { pending: { ...pending, call: call2 } };
+      }
+      const patch2 = validatedOpeningPatch(data, w.heroId), call = pending.call;
+      const co = w.players.find((p) => p.position === "CO");
+      if (!patch2 || patch2.kind !== "turn" || sequence !== call.sequence + 1 || patch2.raw.pre !== call.cursor || previous.pITT !== null || next.cPI !== co.playerId || next.pITT !== co.playerId || !totalsMatch(previous, true) || !totalsMatch(next, true)) return null;
+      const players = w.players.map((p) => ({
+        ...p,
+        contribution: p.playerId === utg.playerId || p.playerId === hj.playerId ? 5 : p.contribution
+      }));
+      const contributions = players.map((p) => ({
+        playerId: p.playerId,
+        seat: p.seat,
+        position: p.position,
+        forcedChips: w.players.find((original) => original.playerId === p.playerId).contribution,
+        voluntaryInvestmentChips: p.position === "UTG" || p.position === "HJ" ? 5 : 0,
+        streetTotalChips: p.contribution,
+        remainingCapacityChips: p.sourceStack - p.contribution
+      }));
+      return { pending, coProof: {
+        version: 1,
+        scope: "co_facing_utg_open5_hj_call5",
+        historyComplete: false,
+        expiresAt: at + 1e4,
+        witness: {
+          ...w,
+          players,
+          cursor: next.now,
+          previousCursor: previous.now,
+          receivedAt: at,
+          provenance: `${w.provenance} Closed hand238 prefix: UTG raise0->5, HJ turn, HJ call0->5 matching highest5, then CO activation. Historical facts only; no CO action permission or whole-hand coverage.`
+        },
+        anchor: structuredClone(pending.anchor),
+        transitions: [structuredClone(t2), structuredClone(call)],
+        hjActivation: structuredClone(activation),
+        activation: { sequence, sourcePatch: structuredClone(patch2.raw) },
+        actor: { playerId: co.playerId, seat: co.seat, position: "CO" },
+        facts: {
+          amountToCallChips: 5,
+          acceptedRaiseToChips: 5,
+          nextMinimumRaiseToChips: null,
+          aggressionReopened: null,
+          contestablePotChips: null
+        },
+        accounting: {
+          units: "chips",
+          contributions,
+          streetContributionSumChips: contributions.reduce((sum, p) => sum + p.streetTotalChips, 0),
+          contestablePotChips: null,
+          provenance: "Original forced posts plus two distinct accepted additional investments, cross-checked against source street totals. Remaining capacity is arithmetic, not an observed stack decrement; no pot/returns/rake/settlement proof."
+        }
+      } };
+    }
+    if (previous.cPI !== utg.playerId) return null;
+    if (!pending.transition) {
+      const raw = data.bettingPatch;
+      const fields = ["tB", "now", "pGS", "cRPI", "pITT", "eventsData", "pre", "fV"];
+      if (!isObservedUtgOpenPatch(raw) || Object.keys(data.frame).length !== fields.length || !fields.every((k) => Object.hasOwn(data.frame, k) && same(data.frame[k], raw[k])) || sequence !== pending.anchor.sequence + 1 || raw.pre !== pending.anchor.cursor || previous.pITT !== utg.playerId || Object.keys(raw.tB)[0] !== utg.playerId || !w.players.every((p) => (previous.tB[p.playerId] ?? 0) === p.contribution) || utg.contribution !== 0 || next.tB[utg.playerId] !== 5 || next.pITT !== null || next.cPI !== utg.playerId) return null;
+      const transition = {
+        id: `${w.tableId}:${w.handId}:${w.generation}:${raw.now}:raise`,
+        tableId: w.tableId,
+        handId: w.handId,
+        handNumber: w.handNumber,
+        generation: w.generation,
+        sequence,
+        cursor: raw.now,
+        previousCursor: raw.pre,
+        receivedAt: at,
+        street: "preflop",
+        action: "raise",
+        actor: { playerId: utg.playerId, seat: utg.seat, position: "UTG" },
+        priorContributionChips: 0,
+        newContributionChips: 5,
+        investmentChips: 5,
+        previousHighestContributionChips: 2,
+        observedRaiseIncrementChips: 3,
+        originalRoster: structuredClone(w.players),
+        evidence: { source: "pokernow_gC", contract: "hand169_utg_open5_v1", raw: structuredClone(raw) }
+      };
+      return { pending: { ...pending, transition } };
+    }
+    const patch = validatedOpeningPatch(data, w.heroId), t = pending.transition;
+    if (!patch || patch.kind !== "turn" || sequence !== t.sequence + 1 || patch.raw.pre !== t.cursor || previous.pITT !== null || next.cPI !== hj.playerId || next.pITT !== hj.playerId || !w.players.every((p) => (next.tB[p.playerId] ?? 0) === (p.playerId === utg.playerId ? 5 : p.contribution))) return null;
+    return { pending: { ...pending, hjActivation: { sequence, sourcePatch: structuredClone(patch.raw), receivedAt: at } }, proof: {
+      version: 1,
+      scope: "hj_facing_utg_open5",
+      historyComplete: false,
+      expiresAt: at + 1e4,
+      witness: {
+        ...w,
+        cursor: next.now,
+        previousCursor: previous.now,
+        receivedAt: at,
+        players: w.players.map((p) => ({ ...p, contribution: p.playerId === utg.playerId ? 5 : p.contribution })),
+        provenance: `${w.provenance} Hand169 closed acceptance: UTG total0->5, then separate HJ activation. Decision-local action context only; no response strategy, general legality or whole-hand coverage.`
+      },
+      anchor: structuredClone(pending.anchor),
+      transitions: [structuredClone(t)],
+      actor: { playerId: hj.playerId, seat: hj.seat, position: "HJ" },
+      activation: { sequence, sourcePatch: structuredClone(patch.raw) },
+      facts: {
+        amountToCallChips: 5,
+        acceptedRaiseToChips: 5,
+        nextMinimumRaiseToChips: null,
+        aggressionReopened: null,
+        contestablePotChips: null
+      }
+    } };
+  }
+
+  // src/callLegalityEvidence.ts
   var CALL_PROVENANCE = "Empirical hand238 paired evidence: frame13 UTG total0->5; frame14 HJ actor/total0; screenshot CALL5 and HJ 7h/Kd/253; frame15 HJ total0->5 with opposing highest unchanged at5; frame16 CO actor. Matching the highest contribution is CALL, not RAISE; cRPI is not an action classifier. Only the observed starting stack vector is covered. Historical acceptance at activation+14806ms cannot renew a live proof.";
   function callLegalityEvidence(read, assessment, timeline, epoch) {
     const source = currentFacingOpen(read, assessment, timeline);
@@ -8961,10 +9201,10 @@
       receivedAt: source.receivedAt,
       expiresAt: proof.expiresAt
     };
-    const covered = source.players.every((p) => p.sourceStack === HAND238_CAPACITIES[p.position]);
+    const covered = matchesHjCallContract(source);
     const permission = covered && readiness === "observed_matching" ? {
       version: 1,
-      rule: CALL_RULE,
+      rule: HJ_CALL_RULE,
       action: "CALL",
       status: "proven",
       confidence: "high",
@@ -9007,7 +9247,7 @@
       serverLegality: covered ? {
         status: "proven",
         confidence: "high",
-        rule: CALL_RULE,
+        rule: HJ_CALL_RULE,
         authority: "scoped_empirical_acceptance",
         provenance: CALL_PROVENANCE,
         reasons: []
@@ -9150,6 +9390,7 @@
       set("raiseLegality", "contradicted", "Dependent sizing/packet cross-check", ["Sizing belongs to a different source, control or epoch."]);
     }
     const facing = currentFacingOpen(read, assessment, timeline);
+    const coFacing = currentCoFacingOpen(read, assessment, timeline);
     const callLegality = callLegalityEvidence(read, assessment, timeline, epoch);
     const responseStrategy = facing ? {
       ...inspectLiveHjResponseStrategy({ preflop, holeCards: hero?.holeCards }),
@@ -9184,13 +9425,16 @@
         THREE_BET: ["reviewed_response_strategy_and_size", "raise_rights", "minimum_and_maximum_totals", "chip_grid"]
       }
     } : null;
-    if (facing) {
-      const proof = source.facingOpenProof, continuity = proof.continuity;
+    const response = facing ?? coFacing;
+    const responseWindow = facing ? source.facingOpenProof : coFacing ? source.coFacingOpenProof : null;
+    if (response && responseWindow) {
+      const continuity = responseWindow.continuity;
       set("connection", "proven", `Same source authority: generation ${continuity.generation}, baseline ${continuity.baselineSequence}, through ${continuity.throughSequence}, cursor ${continuity.cursor}.`);
-      set("actionWindow", "proven", facing.provenance);
-      set("position", "proven", `${facing.provenance} Frozen HJ seat ${facing.heroSeat}.`);
-      set("roster", "proven", `${facing.provenance} Original six dealt-in IDs; no departures/folds.`);
-      set("stack", "proven", "Source starting capacities + current numeric DOM stacks; UTG remaining equals original minus five.");
+      set("actionWindow", "proven", response.provenance);
+      set("position", "proven", `${response.provenance} Frozen ${coFacing ? "CO" : "HJ"} seat ${response.heroSeat}.`);
+      set("roster", "proven", `${response.provenance} Original six dealt-in IDs; no departures/folds.`);
+      set("stack", "proven", "Source starting capacities + current numeric DOM stacks; accepted voluntary wagers deducted from the actors' starting capacities.");
+      if (coFacing) set("callCost", "proven", `${coFacing.provenance} Highest total5 minus CO total0 is five chips, covered by numeric CO capacity; no CO CALL permission.`);
       if (callLegality) {
         proofs[PROOF_SCOPES.indexOf("callCost")] = callLegality.costProof;
         proofs[PROOF_SCOPES.indexOf("legalActions")] = callLegality.legalActionsProof;
@@ -9224,15 +9468,37 @@
       activation.state = "unsupported";
       activation.reasons.push(...responseStrategy.reasons);
       activation.reasons.push("HJ response activation remains disabled; missing CALL/3-BET legality must never substitute FOLD.");
+    } else if (coFacing && activation.state !== "unsafe") {
+      activation.allowed = false;
+      activation.state = "unsupported";
+      activation.reasons.push("CO facing UTG open plus HJ caller: no reviewed response strategy or independent CO action permission. Unsupported CALL/3-BET must never substitute FOLD.");
     }
     return {
       evidence: envelope,
       activation,
       unopened,
       openingSize: opening.size,
-      responseWindow: facing ? source.facingOpenProof : null,
+      responseWindow,
       responseStrategy,
-      callLegality
+      callLegality,
+      coResponse: coFacing && responseWindow ? {
+        binding: {
+          decisionEpoch: epoch,
+          tableId: coFacing.tableId,
+          handId: coFacing.handId,
+          heroId: coFacing.heroId,
+          heroCards: coFacing.heroCards,
+          generation: coFacing.generation,
+          cursor: coFacing.cursor,
+          receivedAt: coFacing.receivedAt,
+          expiresAt: responseWindow.expiresAt
+        },
+        chosenAction: null,
+        liveAuthorized: false,
+        strategy: "missing",
+        legality: "unproven",
+        accounting: source.coFacingOpenProof.accounting
+      } : null
     };
   }
   function liveProofRevision(timeline) {
@@ -9247,6 +9513,7 @@
       ...s.btnProof ? { btn: s.btnProof } : {},
       ...s.sbProof ? { sb: s.sbProof } : {},
       ...s.facingOpenProof ? { facingOpen: s.facingOpenProof } : {},
+      ...s.coFacingOpenProof ? { coFacingOpen: s.coFacingOpenProof } : {},
       generation: s.sourceMetadata.socketContinuity.generation,
       continuity: s.sourceMetadata.socketContinuity.status,
       gap: s.sourceMetadata.socketContinuity.chainGap,
@@ -9417,13 +9684,13 @@
 
   // src/pokerNowTransport.ts
   var TIMELINE_CHANNEL = "poker-ai:hand-source:v1";
-  var object = (value) => !!value && typeof value === "object" && !Array.isArray(value);
-  var token = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(v);
+  var object3 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
+  var token2 = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(v);
   function tableIdFromPath(path) {
     return /^\/games\/([A-Za-z0-9_-]{1,160})\/?$/.exec(path)?.[1] ?? null;
   }
   function validHandIdentity(value, tableId) {
-    return object(value) && value.tableId === tableId && token(value.handId) && Number.isSafeInteger(value.handNumber) && Number(value.handNumber) > 0 && (value.heroPlayerId === null || token(value.heroPlayerId)) && (value.frameCursor === null || typeof value.frameCursor === "string" && value.frameCursor.length < 160 || typeof value.frameCursor === "number" && Number.isSafeInteger(value.frameCursor)) && typeof value.chainGap === "boolean" && ["registered.gameState", "rup", "gC"].includes(String(value.source));
+    return object3(value) && value.tableId === tableId && token2(value.handId) && Number.isSafeInteger(value.handNumber) && Number(value.handNumber) > 0 && (value.heroPlayerId === null || token2(value.heroPlayerId)) && (value.frameCursor === null || typeof value.frameCursor === "string" && value.frameCursor.length < 160 || typeof value.frameCursor === "number" && Number.isSafeInteger(value.frameCursor)) && typeof value.chainGap === "boolean" && ["registered.gameState", "rup", "gC"].includes(String(value.source));
   }
 
   // src/sourceMetadata.ts
@@ -9463,7 +9730,7 @@
     "complete"
   ]);
   var containers = /* @__PURE__ */ new Set(["meta", "metadata", "pagination", "coverage"]);
-  var object2 = (x) => !!x && typeof x === "object" && !Array.isArray(x);
+  var object4 = (x) => !!x && typeof x === "object" && !Array.isArray(x);
   var kind = (x) => x === null ? "null" : Array.isArray(x) ? "array" : typeof x;
   var scalar = (x) => x === null || typeof x === "boolean" || typeof x === "number" && Number.isFinite(x) || typeof x === "string" && x.length <= VALUE_LIMIT;
   var allowedPath = (path) => {
@@ -9473,7 +9740,7 @@
   function inspectMetadataFields(input) {
     const result = { fields: [], truncated: false };
     const visit = (value, prefix, depth2) => {
-      if (!object2(value)) return;
+      if (!object4(value)) return;
       for (const [key, field] of Object.entries(value)) {
         if (result.fields.length === FIELD_LIMIT) {
           result.truncated = true;
@@ -9483,7 +9750,7 @@
         const entry = { path, type: kind(field) };
         if (allowedPath(path) && scalar(field)) entry.value = field;
         result.fields.push(entry);
-        if (containers.has(key) && object2(field)) {
+        if (containers.has(key) && object4(field)) {
           if (depth2 < 2) visit(field, path + ".", depth2 + 1);
           else result.truncated = true;
         }
@@ -9493,12 +9760,12 @@
     return result;
   }
   function validateSocketMetadata(value) {
-    if (!object2(value) || typeof value.event !== "string" || !["registered", "rup", "gC"].includes(value.event) || !Number.isSafeInteger(value.wrapperLength) || Number(value.wrapperLength) < 2 || !Array.isArray(value.extraWrapperItems) || value.extraWrapperItems.length > 2) return null;
+    if (!object4(value) || typeof value.event !== "string" || !["registered", "rup", "gC"].includes(value.event) || !Number.isSafeInteger(value.wrapperLength) || Number(value.wrapperLength) < 2 || !Array.isArray(value.extraWrapperItems) || value.extraWrapperItems.length > 2) return null;
     const inventory = (raw) => {
-      if (!object2(raw) || !Array.isArray(raw.fields) || raw.fields.length > FIELD_LIMIT || typeof raw.truncated !== "boolean") return null;
+      if (!object4(raw) || !Array.isArray(raw.fields) || raw.fields.length > FIELD_LIMIT || typeof raw.truncated !== "boolean") return null;
       const fields = [];
       for (const entry of raw.fields) {
-        if (!object2(entry) || typeof entry.path !== "string" || entry.path.length > 200 || typeof entry.type !== "string" || !["null", "array", "string", "number", "boolean", "object", "undefined"].includes(entry.type)) return null;
+        if (!object4(entry) || typeof entry.path !== "string" || entry.path.length > 200 || typeof entry.type !== "string" || !["null", "array", "string", "number", "boolean", "object", "undefined"].includes(entry.type)) return null;
         const field = { path: entry.path, type: entry.type };
         if (Object.hasOwn(entry, "value")) {
           if (!allowedPath(entry.path) || !scalar(entry.value) || kind(entry.value) !== entry.type) return null;
@@ -9739,22 +10006,22 @@
   }
 
   // src/firstUtgState.ts
-  var object3 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
-  var token2 = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(v) && !["__proto__", "prototype", "constructor"].includes(v);
-  var integer = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+  var object5 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+  var token3 = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(v) && !["__proto__", "prototype", "constructor"].includes(v);
+  var integer3 = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
   var chips3 = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= Number.MAX_SAFE_INTEGER;
-  var dictionary = (v) => object3(v) && Object.keys(v).length <= 10 && Object.keys(v).every(token2);
-  var ids = (v) => Array.isArray(v) && v.length <= 10 && v.every(token2) && new Set(v).size === v.length;
+  var dictionary = (v) => object5(v) && Object.keys(v).length <= 10 && Object.keys(v).every(token3);
+  var ids = (v) => Array.isArray(v) && v.length <= 10 && v.every(token3) && new Set(v).size === v.length;
   var allowed = new Set("id hI gN now pre r gT seats iHPI dealerID dealerSeat sBPI bBPI tB pGS cPI pITT smallBlind bigBlind ante deadButton gM mode aD aS cM cR players pC cRPI eventsData rHP rHC oTC gameResult version fV nR mTB rIT sPM".split(" "));
   function validateFrame(frame) {
-    if (!object3(frame) || JSON.stringify(frame).length > 4e4) throw new Error("Malformed or oversized source projection.");
+    if (!object5(frame) || JSON.stringify(frame).length > 4e4) throw new Error("Malformed or oversized source projection.");
     for (const [k, v] of Object.entries(frame)) {
       if (!allowed.has(k)) throw new Error(`Unsupported projected field ${k}.`);
       let valid2 = true;
-      if (["id", "hI", "dealerID", "sBPI", "bBPI"].includes(k)) valid2 = token2(v);
-      if (["cPI", "pITT"].includes(k)) valid2 = v === null || token2(v);
-      if (["gN", "now", "pre"].includes(k)) valid2 = integer(v);
-      if (k === "dealerSeat") valid2 = integer(v) && v >= 1 && v <= 10;
+      if (["id", "hI", "dealerID", "sBPI", "bBPI"].includes(k)) valid2 = token3(v);
+      if (["cPI", "pITT"].includes(k)) valid2 = v === null || token3(v);
+      if (["gN", "now", "pre"].includes(k)) valid2 = integer3(v);
+      if (k === "dealerSeat") valid2 = integer3(v) && v >= 1 && v <= 10;
       if (["smallBlind", "bigBlind"].includes(k)) valid2 = chips3(v) && v > 0;
       if (k === "ante") valid2 = v === null || chips3(v);
       if (["r", "deadButton", "aD", "aS", "cM", "cR"].includes(k)) valid2 = typeof v === "boolean";
@@ -9762,30 +10029,30 @@
       if (["version", "fV", "rIT"].includes(k)) valid2 = typeof v === "string" && v.length <= 32;
       if (k === "sPM") valid2 = typeof v === "boolean";
       if (k === "mTB") valid2 = v === null || chips3(v);
-      if (k === "nR") valid2 = Array.isArray(v) && v.length <= 10 && v.every(integer);
-      if (k === "gT") valid2 = Array.isArray(v) && v.length === 2 && v.every(integer);
+      if (k === "nR") valid2 = Array.isArray(v) && v.length <= 10 && v.every(integer3);
+      if (k === "gT") valid2 = Array.isArray(v) && v.length === 2 && v.every(integer3);
       if (["iHPI", "cRPI", "rHP"].includes(k)) valid2 = ids(v);
       if (k === "rHC") valid2 = v === null;
       if (k === "eventsData") valid2 = Array.isArray(v) && v.length === 0;
       if (k === "gameResult") valid2 = v === "<D>";
-      if (k === "seats") valid2 = Array.isArray(v) && v.length <= 10 && v.every((s, i) => Array.isArray(s) && s.length === 2 && integer(s[0]) && s[0] >= 1 && s[0] <= 10 && token2(s[1]) && (i === 0 || v[i - 1][0] < s[0])) && new Set(v.map((s) => s[1])).size === v.length;
-      if (k === "oTC") valid2 = object3(v) && Object.keys(v).length === 1 && Array.isArray(v["1"]) && v["1"].length <= 5 && v["1"].every((c) => typeof c === "string" && /^[2-9TJQKA][shdc]$/.test(c));
+      if (k === "seats") valid2 = Array.isArray(v) && v.length <= 10 && v.every((s, i) => Array.isArray(s) && s.length === 2 && integer3(s[0]) && s[0] >= 1 && s[0] <= 10 && token3(s[1]) && (i === 0 || v[i - 1][0] < s[0])) && new Set(v.map((s) => s[1])).size === v.length;
+      if (k === "oTC") valid2 = object5(v) && Object.keys(v).length === 1 && Array.isArray(v["1"]) && v["1"].length <= 5 && v["1"].every((c) => typeof c === "string" && /^[2-9TJQKA][shdc]$/.test(c));
       if (k === "tB") valid2 = dictionary(v) && Object.values(v).every((x) => x === "<D>" || chips3(x));
       if (k === "pGS") valid2 = dictionary(v) && Object.values(v).every((x) => typeof x === "string" && ["inGame", "fold", "allIn", "<D>"].includes(x));
-      if (k === "players") valid2 = dictionary(v) && Object.entries(v).every(([id, p]) => p === "<D>" || object3(p) && Object.entries(p).every(([field, value]) => field === "id" ? value === id : field === "stack" ? chips3(value) : field === "status" ? typeof value === "string" && value.length <= 32 : field === "disconnectedSince" ? integer(value) || value === "<D>" : false));
-      if (k === "pC") valid2 = dictionary(v) && Object.values(v).every((h) => object3(h) && Object.keys(h).length === 1 && Array.isArray(h.cards) && h.cards.length === 2 && h.cards.every((c) => object3(c) && Object.keys(c).every((f) => ["value", "showing"].includes(f)) && typeof c.showing === "boolean" && (c.value === null || typeof c.value === "string" && /^[2-9TJQKA][shdc]$/.test(c.value))));
+      if (k === "players") valid2 = dictionary(v) && Object.entries(v).every(([id, p]) => p === "<D>" || object5(p) && Object.entries(p).every(([field, value]) => field === "id" ? value === id : field === "stack" ? chips3(value) : field === "status" ? typeof value === "string" && value.length <= 32 : field === "disconnectedSince" ? integer3(value) || value === "<D>" : false));
+      if (k === "pC") valid2 = dictionary(v) && Object.values(v).every((h) => object5(h) && Object.keys(h).length === 1 && Array.isArray(h.cards) && h.cards.length === 2 && h.cards.every((c) => object5(c) && Object.keys(c).every((f) => ["value", "showing"].includes(f)) && typeof c.showing === "boolean" && (c.value === null || typeof c.value === "string" && /^[2-9TJQKA][shdc]$/.test(c.value))));
       if (!valid2) throw new Error(`Malformed or unsupported source ${k}.`);
     }
   }
   function validateState(state, tableId, heroId) {
     validateFrame(state);
-    if (state.id !== tableId || !token2(state.hI) || !integer(state.gN) || state.gN < 1 || !integer(state.now) || !Array.isArray(state.seats) || !dictionary(state.players) || !object3(state.pGS) || !Array.isArray(state.gT) || !ids(state.iHPI) || !object3(state.pC) || !Object.hasOwn(state.players, heroId)) throw new Error("Incomplete registered/carried source identity or player state.");
-    for (const [id, p] of Object.entries(state.players)) if (!object3(p) || p.id !== id || !chips3(p.stack) || typeof p.status !== "string") {
+    if (state.id !== tableId || !token3(state.hI) || !integer3(state.gN) || state.gN < 1 || !integer3(state.now) || !Array.isArray(state.seats) || !dictionary(state.players) || !object5(state.pGS) || !Array.isArray(state.gT) || !ids(state.iHPI) || !object5(state.pC) || !Object.hasOwn(state.players, heroId)) throw new Error("Incomplete registered/carried source identity or player state.");
+    for (const [id, p] of Object.entries(state.players)) if (!object5(p) || p.id !== id || !chips3(p.stack) || typeof p.status !== "string") {
       throw new Error("Incomplete or contradictory source player identity/stack.");
     }
     if (state.seats.some((s) => !Object.hasOwn(state.players, s[1]))) throw new Error("Seat references an unavailable source player.");
     for (const key of ["pGS", "tB", "pC"]) {
-      const missing = object3(state[key]) && Object.keys(state[key]).find((id) => !Object.hasOwn(state.players, id));
+      const missing = object5(state[key]) && Object.keys(state[key]).find((id) => !Object.hasOwn(state.players, id));
       if (missing) throw new Error(`Player-keyed source ${key}.${missing} references an unavailable player.`);
     }
     if (state.dealerID !== void 0 && state.dealerSeat !== void 0 && !state.seats.some((s) => s[0] === state.dealerSeat && s[1] === state.dealerID)) {
@@ -9801,17 +10068,17 @@
   function advanceUtgState(previous, patch, tableId, heroId) {
     validateFrame(patch);
     if (patch.r === true) throw new Error("Full-refresh/backfill continuity is not supported by the carried proof.");
-    if (!integer(patch.now) || patch.now <= previous.now || patch.pre !== previous.now) throw new Error("Source predecessor mismatch, stale or replayed update.");
+    if (!integer3(patch.now) || patch.now <= previous.now || patch.pre !== previous.now) throw new Error("Source predecessor mismatch, stale or replayed update.");
     if (Object.hasOwn(patch, "id") && patch.id !== tableId) throw new Error("Conflicting source table identity.");
     const changedHand = Object.hasOwn(patch, "hI") && patch.hI !== previous.hI || Object.hasOwn(patch, "gN") && patch.gN !== previous.gN;
-    if (changedHand && (!token2(patch.hI) || patch.hI === previous.hI || patch.gN !== previous.gN + 1 || !Array.isArray(patch.iHPI) || !object3(patch.pC) || !object3(patch.tB) || JSON.stringify(patch.gT) !== "[1,0]")) {
+    if (changedHand && (!token3(patch.hI) || patch.hI === previous.hI || patch.gN !== previous.gN + 1 || !Array.isArray(patch.iHPI) || !object5(patch.pC) || !object5(patch.tB) || JSON.stringify(patch.gT) !== "[1,0]")) {
       throw new Error("Conflicting or incomplete new-hand transition.");
     }
     const next = structuredClone(previous);
     const removed = Object.entries(patch.players ?? {}).filter(([, p]) => p === "<D>").map(([id]) => id);
     if (removed.length) {
       const roster = patch.iHPI;
-      if (!Array.isArray(roster) || !Array.isArray(patch.seats) || !object3(patch.pC) || Object.keys(patch.pC).length !== roster.length || patch.seats.length !== roster.length || !roster.every((id) => Object.hasOwn(patch.pC, id) && patch.seats.some((s) => s[1] === id)) || removed.some((id) => id === heroId || !Object.hasOwn(previous.players, id) || roster.includes(id) || patch.pGS?.[id] !== "<D>" || Object.hasOwn(patch.pC, id))) {
+      if (!Array.isArray(roster) || !Array.isArray(patch.seats) || !object5(patch.pC) || Object.keys(patch.pC).length !== roster.length || patch.seats.length !== roster.length || !roster.every((id) => Object.hasOwn(patch.pC, id) && patch.seats.some((s) => s[1] === id)) || removed.some((id) => id === heroId || !Object.hasOwn(previous.players, id) || roster.includes(id) || patch.pGS?.[id] !== "<D>" || Object.hasOwn(patch.pC, id))) {
         throw new Error("Player deletion lacks a consistent explicit roster/card snapshot and status deletion.");
       }
       next.pC = {};
@@ -9846,61 +10113,6 @@
       }
     }
     return next;
-  }
-
-  // src/hjWindow.ts
-  var object4 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
-  var integer2 = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
-  var token3 = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(v);
-  var common = ["now", "pre", "eventsData", "mEV", "fV", "sN"];
-  function hjPatchKind(raw) {
-    if (!object4(raw) || !integer2(raw.now) || !integer2(raw.pre) || raw.now <= raw.pre || !integer2(raw.sN) || raw.mEV !== 0 || raw.fV !== "0.1.72" || !Array.isArray(raw.eventsData) || raw.eventsData.length) return null;
-    const exact = (fields) => Object.keys(raw).length === fields.length && fields.every((k) => Object.hasOwn(raw, k));
-    if (exact([...common, "pGS", "sNA", "pITT", "sNAA", "wBACPI"]) && object4(raw.pGS) && Object.keys(raw.pGS).length === 1 && token3(Object.keys(raw.pGS)[0]) && Object.values(raw.pGS)[0] === "fold" && raw.sNA === "NSAF" && raw.pITT === null && integer2(raw.sNAA) && Array.isArray(raw.wBACPI) && raw.wBACPI.length === 1 && token3(raw.wBACPI[0])) return "fold";
-    if (exact([...common, "cPI", "pITT", "sNA", "pASA", "sNAA", "mAVTB"]) && token3(raw.cPI) && raw.pITT === raw.cPI && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now && integer2(raw.mAVTB)) return "turn";
-    return null;
-  }
-  function validatedOpeningPatch(data, heroId) {
-    const raw = data.hjPatch, kind2 = hjPatchKind(raw);
-    const projectedKeys = ["now", "pre", "eventsData", "fV", "pITT", kind2 === "fold" ? "pGS" : "cPI"];
-    if (!raw || !kind2 || data.event !== "gC" || data.heroId !== heroId || Object.keys(data.frame).length !== projectedKeys.length || !projectedKeys.every((k) => Object.hasOwn(data.frame, k)) || Object.entries(data.frame).some(([k, v]) => JSON.stringify(raw[k]) !== JSON.stringify(v))) return null;
-    return { raw, kind: kind2 };
-  }
-  function advanceHjWindow(pending, data, sequence, at) {
-    const w = pending.witness, patch = validatedOpeningPatch(data, w.heroId);
-    if (!patch) return null;
-    const { raw, kind: kind2 } = patch;
-    const utg = w.players.find((p) => p.position === "UTG"), bb = w.players.find((p) => p.position === "BB");
-    if (!pending.fold) {
-      if (kind2 !== "fold" || sequence !== pending.anchor.sequence + 1 || raw.pre !== pending.anchor.cursor || Object.keys(raw.pGS)[0] !== utg.playerId || raw.wBACPI[0] !== bb.playerId) return null;
-      return { pending: { ...pending, fold: {
-        sequence,
-        cursor: raw.now,
-        previousCursor: raw.pre,
-        receivedAt: at,
-        playerId: utg.playerId,
-        seat: utg.seat,
-        sourcePatch: structuredClone(raw)
-      } } };
-    }
-    if (kind2 !== "turn" || sequence !== pending.fold.sequence + 1 || raw.pre !== pending.fold.cursor || raw.cPI !== w.heroId) return null;
-    const witness = {
-      ...w,
-      cursor: raw.now,
-      previousCursor: raw.pre,
-      receivedAt: at,
-      provenance: `${w.provenance} Explicit UTG fold at ${pending.fold.cursor}; immediately linked first HJ activation at ${raw.now}. Closed hands-150/168 patch contract; no generic action coverage.`
-    };
-    return { pending, proof: {
-      version: 1,
-      scope: "hj_after_utg_fold",
-      historyComplete: false,
-      expiresAt: at + 1e4,
-      witness,
-      anchor: structuredClone(pending.anchor),
-      fold: structuredClone(pending.fold),
-      activation: { sequence, sourcePatch: structuredClone(raw) }
-    } };
   }
 
   // src/coWindow.ts
@@ -9982,90 +10194,6 @@
     } };
   }
 
-  // src/bettingWindow.ts
-  var object5 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
-  var integer3 = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
-  var same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-  function isObservedUtgOpenPatch(raw) {
-    if (!object5(raw)) return false;
-    const keys = [
-      "mR",
-      "tB",
-      "cHB",
-      "now",
-      "pGS",
-      "sNA",
-      "cRPI",
-      "pITT",
-      "sNAA",
-      "wBACPI",
-      "eventsData",
-      "pre",
-      "mEV",
-      "fV",
-      "sN"
-    ];
-    return Object.keys(raw).length === keys.length && keys.every((k) => Object.hasOwn(raw, k)) && integer3(raw.now) && integer3(raw.pre) && raw.now > raw.pre && integer3(raw.sNAA) && integer3(raw.sN) && raw.mR === 8 && raw.cHB === 5 && raw.mEV === 0 && raw.fV === "0.1.72" && raw.sNA === "NSAA" && raw.pITT === null && same(raw.pGS, {}) && same(raw.wBACPI, []) && same(raw.eventsData, []) && object5(raw.tB) && Object.keys(raw.tB).length === 1 && Object.values(raw.tB)[0] === 5 && same(raw.cRPI, Object.keys(raw.tB));
-  }
-  function advanceFacingOpenWindow(pending, data, previous, next, sequence, at) {
-    const w = pending.witness, utg = w.players.find((p) => p.position === "UTG"), hj = w.players.find((p) => p.position === "HJ");
-    if (!w.openingSizeProfile || data.heroId !== w.heroId || data.event !== "gC" || previous.hI !== w.handId || next.hI !== w.handId || next.gN !== w.handNumber || !same(next.gT, [1, 0]) || previous.cPI !== utg.playerId) return null;
-    if (!pending.transition) {
-      const raw = data.bettingPatch;
-      const fields = ["tB", "now", "pGS", "cRPI", "pITT", "eventsData", "pre", "fV"];
-      if (!isObservedUtgOpenPatch(raw) || Object.keys(data.frame).length !== fields.length || !fields.every((k) => Object.hasOwn(data.frame, k) && same(data.frame[k], raw[k])) || sequence !== pending.anchor.sequence + 1 || raw.pre !== pending.anchor.cursor || previous.pITT !== utg.playerId || Object.keys(raw.tB)[0] !== utg.playerId || !w.players.every((p) => (previous.tB[p.playerId] ?? 0) === p.contribution) || utg.contribution !== 0 || next.tB[utg.playerId] !== 5 || next.pITT !== null || next.cPI !== utg.playerId) return null;
-      const transition = {
-        id: `${w.tableId}:${w.handId}:${w.generation}:${raw.now}:raise`,
-        tableId: w.tableId,
-        handId: w.handId,
-        handNumber: w.handNumber,
-        generation: w.generation,
-        sequence,
-        cursor: raw.now,
-        previousCursor: raw.pre,
-        receivedAt: at,
-        street: "preflop",
-        action: "raise",
-        actor: { playerId: utg.playerId, seat: utg.seat, position: "UTG" },
-        priorContributionChips: 0,
-        newContributionChips: 5,
-        investmentChips: 5,
-        previousHighestContributionChips: 2,
-        observedRaiseIncrementChips: 3,
-        originalRoster: structuredClone(w.players),
-        evidence: { source: "pokernow_gC", contract: "hand169_utg_open5_v1", raw: structuredClone(raw) }
-      };
-      return { pending: { ...pending, transition } };
-    }
-    const patch = validatedOpeningPatch(data, w.heroId), t = pending.transition;
-    if (!patch || patch.kind !== "turn" || sequence !== t.sequence + 1 || patch.raw.pre !== t.cursor || previous.pITT !== null || next.cPI !== hj.playerId || next.pITT !== hj.playerId || !w.players.every((p) => (next.tB[p.playerId] ?? 0) === (p.playerId === utg.playerId ? 5 : p.contribution))) return null;
-    return { pending, proof: {
-      version: 1,
-      scope: "hj_facing_utg_open5",
-      historyComplete: false,
-      expiresAt: at + 1e4,
-      witness: {
-        ...w,
-        cursor: next.now,
-        previousCursor: previous.now,
-        receivedAt: at,
-        players: w.players.map((p) => ({ ...p, contribution: p.playerId === utg.playerId ? 5 : p.contribution })),
-        provenance: `${w.provenance} Hand169 closed acceptance: UTG total0->5, then separate HJ activation. Decision-local action context only; no response strategy, general legality or whole-hand coverage.`
-      },
-      anchor: structuredClone(pending.anchor),
-      transitions: [structuredClone(t)],
-      actor: { playerId: hj.playerId, seat: hj.seat, position: "HJ" },
-      activation: { sequence, sourcePatch: structuredClone(patch.raw) },
-      facts: {
-        amountToCallChips: 5,
-        acceptedRaiseToChips: 5,
-        nextMinimumRaiseToChips: null,
-        aggressionReopened: null,
-        contestablePotChips: null
-      }
-    } };
-  }
-
   // src/firstUtgSource.ts
   var object6 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
   var token4 = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(v);
@@ -10126,6 +10254,7 @@
     let witness = null;
     let facingPending = null;
     let facingProof = null;
+    let coFacingProof = null;
     let hjPending = null;
     let hjProof = null;
     let hjReason = "No supported HJ boundary/fold/turn sequence observed.";
@@ -10146,6 +10275,7 @@
       btnProof = null;
       sbProof = null;
       facingProof = null;
+      coFacingProof = null;
       if (lastCertificate && (!lastCertificate.invalidation || sequence !== null && lastCertificate.invalidation.sequence === sequence && lastCertificate.invalidation.at === now())) {
         lastCertificate.invalidation = { at: now(), sequence, reason: reason2 };
       }
@@ -10271,7 +10401,7 @@
           if (data.event !== "gC") throw new Error("Full rup/registration refresh invalidates carried continuity; no backfill proof.");
           const frame = advanceUtgState(previous.data.frame, data.frame, tableId, data.heroId);
           const anchor = firstUtg(previous.data, data, tableId, generation, observedAt, "HJ");
-          const facingAnchor = anchor ?? firstUtg(previous.data, data, tableId, generation, observedAt);
+          const facingAnchor = anchor ?? firstUtg(previous.data, data, tableId, generation, observedAt) ?? firstUtg(previous.data, data, tableId, generation, observedAt, "CO");
           const facingAdvanced = facingPending ? advanceFacingOpenWindow(facingPending, data, previous.data.frame, frame, sequence, observedAt) : null;
           facingPending = facingAnchor ? { witness: facingAnchor, anchor: {
             sequence,
@@ -10291,7 +10421,19 @@
               cursor: frame.now
             }
           } : null;
-          if (facingProof) facingPending = null;
+          coFacingProof = facingAdvanced?.coProof ? {
+            ...facingAdvanced.coProof,
+            continuity: {
+              status: "validated_prefix",
+              baselineSequence: previous.baselineSequence,
+              throughSequence: sequence,
+              generation,
+              tableId,
+              handId: frame.hI,
+              cursor: frame.now
+            }
+          } : null;
+          if (coFacingProof) facingPending = null;
           const advanced = hjPending ? advanceHjWindow(hjPending, data, sequence, observedAt) : null;
           hjPending = anchor ? { witness: anchor, anchor: {
             sequence,
@@ -10416,6 +10558,9 @@
       facingOpenProof() {
         return facingProof && baseline && now() >= facingProof.witness.receivedAt && now() < facingProof.expiresAt && baseline.generation === facingProof.witness.generation && baseline.data.frame.hI === facingProof.witness.handId && baseline.data.frame.now === facingProof.witness.cursor ? structuredClone(facingProof) : null;
       },
+      coFacingOpenProof() {
+        return coFacingProof && baseline && now() >= coFacingProof.witness.receivedAt && now() < coFacingProof.expiresAt && baseline.generation === coFacingProof.witness.generation && baseline.data.frame.hI === coFacingProof.witness.handId && baseline.data.frame.now === coFacingProof.witness.cursor ? structuredClone(coFacingProof) : null;
+      },
       hjProof() {
         return hjProof && baseline && now() >= hjProof.witness.receivedAt && now() < hjProof.expiresAt && baseline.generation === hjProof.witness.generation && baseline.data.frame.hI === hjProof.witness.handId && baseline.data.frame.now === hjProof.witness.cursor ? structuredClone(hjProof) : null;
       },
@@ -10434,9 +10579,15 @@
         const status = !certificate ? "not_issued" : currentTime < certificate.receivedAt ? "clock_regression" : certificate.invalidation && certificate.invalidation.at <= certificate.expiresAt ? "invalidated" : currentTime > certificate.expiresAt ? "expired" : certificate.invalidation ? "invalidated" : "fresh";
         return {
           scope: "Bounded production projection and validated state reducer. Never proves whole-hand history.",
+          coFacingOpenWindow: {
+            scope: "Closed hand238 historical prefix; no CO action authorization",
+            transitions: structuredClone(coFacingProof?.transitions ?? (facingPending?.call ? [facingPending.transition, facingPending.call] : facingPending?.transition ? [facingPending.transition] : [])),
+            hjActivation: structuredClone(coFacingProof?.hjActivation ?? facingPending?.hjActivation ?? null),
+            expiresAt: coFacingProof?.expiresAt ?? null
+          },
           facingOpenWindow: {
             scope: "Context only; no CALL/FOLD/3-BET authorization",
-            reason: facingProof ? now() >= facingProof.expiresAt ? "HJ-facing-open proof expired." : "Accepted UTG open5 then explicit HJ activation; live cross-check required." : facingPending?.transition ? "Accepted UTG open5; awaiting the immediately linked HJ activation." : facingPending ? "Frozen anchor; awaiting exact hand169 opening transition." : "No supported consecutive boundary -> UTG open5 -> HJ turn.",
+            reason: facingProof ? now() >= facingProof.expiresAt ? "HJ-facing-open proof expired." : "Accepted UTG open5 then explicit HJ activation; live cross-check required." : facingPending?.call ? "Accepted HJ call5; awaiting the immediately linked CO activation." : facingPending?.hjActivation ? "Historical HJ activation retained; awaiting the immediately next accepted CALL. No advice renewal." : facingPending?.transition ? "Accepted UTG open5; awaiting the immediately linked HJ activation." : facingPending ? "Frozen anchor; awaiting exact hand169 opening transition." : "No supported consecutive boundary -> UTG open5 -> HJ turn.",
             transition: facingPending?.transition ?? facingProof?.transitions[0] ?? null,
             expiresAt: facingProof?.expiresAt ?? null
           },
@@ -10648,6 +10799,7 @@
             btnProof: connected ? firstUtgSource.btnProof() : null,
             sbProof: connected ? firstUtgSource.sbProof() : null,
             facingOpenProof: connected ? firstUtgSource.facingOpenProof() : null,
+            coFacingOpenProof: connected ? firstUtgSource.coFacingOpenProof() : null,
             // Compatibility/display view of the same contract, not another validator.
             firstUtg: firstUtgProof?.witness ?? null,
             firstUtgEvidence: firstUtgSource.diagnostic(),

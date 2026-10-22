@@ -1,7 +1,7 @@
 import { initializeUtgState, advanceUtgState } from "./firstUtgState.js";
 import { advanceHjWindow, hjPatchKind, type HjPending, type HjProof } from "./hjWindow.js";
 import { advanceCoWindow, advanceBtnWindow, advanceSbWindow, type CoPending, type CoProof, type BtnProof, type SbProof } from "./coWindow.js";
-import { isObservedUtgOpenPatch, advanceFacingOpenWindow, type FacingOpenPending, type FacingOpenProof } from "./bettingWindow.js";
+import { isObservedUtgOpenPatch, isObservedHjCallPatch, advanceFacingOpenWindow, type FacingOpenPending, type FacingOpenProof, type CoFacingOpenProof } from "./bettingWindow.js";
 
 /** Scoped first-UTG witness from consecutive bounded source state.
  * No general poker-state emulator or full action-history claim. */
@@ -28,7 +28,7 @@ const keys = ["id", "hI", "gN", "now", "pre", "r", "gT", "seats", "iHPI", "deale
 export interface UtgProjection { event: "registered" | "gC" | "rup"; heroId: string | null; frame: Record<string, any>;
   /** Only the two exact raw transition shapes; absent means no HJ/CO/BTN/SB permission. */
   hjPatch?: Record<string, any>;
-  /** Closed accepted UTG open only; unknown raw mutations never disappear into a proof. */
+  /** Closed accepted UTG open / HJ call only; unknown raw mutations never disappear into a proof. */
   bettingPatch?: Record<string, any> }
 
 /** Separate bounded projection; no names, credentials, stats or opponent cards. */
@@ -61,7 +61,7 @@ export function projectFirstUtgSource(data: unknown, knownHero: string | null): 
         { cards: (hand as any).cards.map((c: any) => ({ value: id === heroId ? c.value : null, showing: c.showing })) }]));
     }
     const result = { event: p[0], heroId: token(heroId) ? heroId : null, frame,
-      ...(p[0] === "gC" && isObservedUtgOpenPatch(raw) ? { bettingPatch: raw } : {}),
+      ...(p[0] === "gC" && (isObservedUtgOpenPatch(raw) || isObservedHjCallPatch(raw)) ? { bettingPatch: raw } : {}),
       ...(p[0] === "gC" && hjPatchKind(raw) ? { hjPatch: raw } : {}) };
     return JSON.stringify(result).length <= 40_000 ? result : null;
   } catch { return null; }
@@ -151,6 +151,7 @@ export function createFirstUtgSource(tableId: string, now: () => number) {
   let witness: FirstUtgWitness | null = null;
   let facingPending: FacingOpenPending | null = null;
   let facingProof: FacingOpenProof | null = null;
+  let coFacingProof: CoFacingOpenProof | null = null;
   let hjPending: HjPending | null = null;
   let hjProof: HjProof | null = null;
   let hjReason = "No supported HJ boundary/fold/turn sequence observed.";
@@ -173,6 +174,7 @@ export function createFirstUtgSource(tableId: string, now: () => number) {
     btnProof = null;
     sbProof = null;
     facingProof = null;
+    coFacingProof = null;
     if (lastCertificate && (!lastCertificate.invalidation || sequence !== null &&
         lastCertificate.invalidation.sequence === sequence && lastCertificate.invalidation.at === now())) {
       lastCertificate.invalidation = { at: now(), sequence, reason };
@@ -250,8 +252,9 @@ export function createFirstUtgSource(tableId: string, now: () => number) {
         const frame = advanceUtgState(previous.data.frame, data.frame, tableId, data.heroId!);
         const anchor = firstUtg(previous.data, data, tableId, generation, observedAt, "HJ");
         // An observed UTG browser can certify the public transition, but only an
-        // independently cross-checked HJ hero may consume its decision context.
-        const facingAnchor = anchor ?? firstUtg(previous.data, data, tableId, generation, observedAt);
+        // independently cross-checked current HJ/CO hero may consume its context.
+        const facingAnchor = anchor ?? firstUtg(previous.data, data, tableId, generation, observedAt)
+          ?? firstUtg(previous.data, data, tableId, generation, observedAt, "CO");
         const facingAdvanced = facingPending
           ? advanceFacingOpenWindow(facingPending, data, previous.data.frame, frame, sequence, observedAt) : null;
         facingPending = facingAnchor ? { witness: facingAnchor, anchor: { sequence, cursor: facingAnchor.cursor,
@@ -260,7 +263,12 @@ export function createFirstUtgSource(tableId: string, now: () => number) {
         facingProof = facingAdvanced?.proof ? { ...facingAdvanced.proof,
           continuity: { status: "validated_prefix", baselineSequence: previous.baselineSequence,
             throughSequence: sequence, generation, tableId, handId: frame.hI, cursor: frame.now } } : null;
-        if (facingProof) facingPending = null;
+        coFacingProof = facingAdvanced?.coProof ? { ...facingAdvanced.coProof,
+          continuity: { status: "validated_prefix", baselineSequence: previous.baselineSequence,
+            throughSequence: sequence, generation, tableId, handId: frame.hI, cursor: frame.now } } : null;
+        // Keep historical HJ activation for the immediately next accepted CALL,
+        // independent of its advice expiry. All unsupported updates clear it.
+        if (coFacingProof) facingPending = null;
         const advanced = hjPending ? advanceHjWindow(hjPending, data, sequence, observedAt) : null;
         hjPending = anchor ? { witness: anchor, anchor: { sequence, cursor: anchor.cursor, receivedAt: observedAt,
           firstActorId: anchor.players.find(p => p.position === "UTG")!.playerId } } : advanced?.pending ?? null;
@@ -328,6 +336,9 @@ export function createFirstUtgSource(tableId: string, now: () => number) {
     facingOpenProof() { return facingProof && baseline && now() >= facingProof.witness.receivedAt && now() < facingProof.expiresAt &&
       baseline.generation === facingProof.witness.generation && baseline.data.frame.hI === facingProof.witness.handId &&
       baseline.data.frame.now === facingProof.witness.cursor ? structuredClone(facingProof) : null; },
+    coFacingOpenProof() { return coFacingProof && baseline && now() >= coFacingProof.witness.receivedAt && now() < coFacingProof.expiresAt &&
+      baseline.generation === coFacingProof.witness.generation && baseline.data.frame.hI === coFacingProof.witness.handId &&
+      baseline.data.frame.now === coFacingProof.witness.cursor ? structuredClone(coFacingProof) : null; },
     hjProof() { return hjProof && baseline && now() >= hjProof.witness.receivedAt && now() < hjProof.expiresAt &&
       baseline.generation === hjProof.witness.generation && baseline.data.frame.hI === hjProof.witness.handId &&
       baseline.data.frame.now === hjProof.witness.cursor ? structuredClone(hjProof) : null; },
@@ -347,8 +358,15 @@ export function createFirstUtgSource(tableId: string, now: () => number) {
         : certificate.invalidation && certificate.invalidation.at <= certificate.expiresAt ? "invalidated"
         : currentTime > certificate.expiresAt ? "expired" : certificate.invalidation ? "invalidated" : "fresh";
       return { scope: "Bounded production projection and validated state reducer. Never proves whole-hand history.",
+        coFacingOpenWindow: { scope: "Closed hand238 historical prefix; no CO action authorization",
+          transitions: structuredClone(coFacingProof?.transitions ??
+            (facingPending?.call ? [facingPending.transition!, facingPending.call] : facingPending?.transition ? [facingPending.transition] : [])),
+          hjActivation: structuredClone(coFacingProof?.hjActivation ?? facingPending?.hjActivation ?? null),
+          expiresAt: coFacingProof?.expiresAt ?? null },
         facingOpenWindow: { scope: "Context only; no CALL/FOLD/3-BET authorization",
           reason: facingProof ? now() >= facingProof.expiresAt ? "HJ-facing-open proof expired." : "Accepted UTG open5 then explicit HJ activation; live cross-check required."
+            : facingPending?.call ? "Accepted HJ call5; awaiting the immediately linked CO activation."
+            : facingPending?.hjActivation ? "Historical HJ activation retained; awaiting the immediately next accepted CALL. No advice renewal."
             : facingPending?.transition ? "Accepted UTG open5; awaiting the immediately linked HJ activation."
             : facingPending ? "Frozen anchor; awaiting exact hand169 opening transition."
             : "No supported consecutive boundary -> UTG open5 -> HJ turn.",

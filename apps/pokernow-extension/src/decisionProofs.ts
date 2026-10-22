@@ -4,7 +4,7 @@ import type { LiveStateAssessment } from "@poker-ai/browser-reader";
 import type { LiveTableRead } from "./tableRead.js";
 import type { LiveTimelineDiagnostic } from "./liveTimeline.js";
 import { inspectLiveUnopenedEvidence } from "./unopenedEvidence.js";
-import { currentFirstUtg, currentHj, currentCo, currentBtn, currentSb, currentFacingOpen } from "./firstUtgLive.js";
+import { currentFirstUtg, currentHj, currentCo, currentBtn, currentSb, currentFacingOpen, currentCoFacingOpen } from "./firstUtgLive.js";
 import { openingSizeEvidence } from "./openingSizeEvidence.js";
 import { callLegalityEvidence } from "./callLegalityEvidence.js";
 
@@ -102,6 +102,7 @@ export function buildLiveDecisionProofs(read: LiveTableRead, assessment: LiveSta
     set("raiseLegality", "contradicted", "Dependent sizing/packet cross-check", ["Sizing belongs to a different source, control or epoch."]);
   }
   const facing = currentFacingOpen(read, assessment, timeline);
+  const coFacing = currentCoFacingOpen(read, assessment, timeline);
   const callLegality = callLegalityEvidence(read, assessment, timeline, epoch);
   // Diagnostics consume the existing authority and its ORIGINAL expiry. No
   // reference, selected control or classifier result can mint/renew a proof.
@@ -124,13 +125,16 @@ export function buildLiveDecisionProofs(read: LiveTableRead, assessment: LiveSta
       THREE_BET: ["reviewed_response_strategy_and_size", "raise_rights", "minimum_and_maximum_totals", "chip_grid"],
     },
   } : null;
-  if (facing) {
-    const proof = source!.facingOpenProof!, continuity = proof.continuity;
+  const response = facing ?? coFacing;
+  const responseWindow = facing ? source!.facingOpenProof! : coFacing ? source!.coFacingOpenProof! : null;
+  if (response && responseWindow) {
+    const continuity = responseWindow.continuity;
     set("connection", "proven", `Same source authority: generation ${continuity.generation}, baseline ${continuity.baselineSequence}, through ${continuity.throughSequence}, cursor ${continuity.cursor}.`);
-    set("actionWindow", "proven", facing.provenance);
-    set("position", "proven", `${facing.provenance} Frozen HJ seat ${facing.heroSeat}.`);
-    set("roster", "proven", `${facing.provenance} Original six dealt-in IDs; no departures/folds.`);
-    set("stack", "proven", "Source starting capacities + current numeric DOM stacks; UTG remaining equals original minus five.");
+    set("actionWindow", "proven", response.provenance);
+    set("position", "proven", `${response.provenance} Frozen ${coFacing ? "CO" : "HJ"} seat ${response.heroSeat}.`);
+    set("roster", "proven", `${response.provenance} Original six dealt-in IDs; no departures/folds.`);
+    set("stack", "proven", "Source starting capacities + current numeric DOM stacks; accepted voluntary wagers deducted from the actors' starting capacities.");
+    if (coFacing) set("callCost", "proven", `${coFacing.provenance} Highest total5 minus CO total0 is five chips, covered by numeric CO capacity; no CO CALL permission.`);
     if (callLegality) {
       proofs[PROOF_SCOPES.indexOf("callCost")] = callLegality.costProof;
       proofs[PROOF_SCOPES.indexOf("legalActions")] = callLegality.legalActionsProof;
@@ -157,9 +161,18 @@ export function buildLiveDecisionProofs(read: LiveTableRead, assessment: LiveSta
     activation.state = "unsupported";
     activation.reasons.push(...responseStrategy!.reasons);
     activation.reasons.push("HJ response activation remains disabled; missing CALL/3-BET legality must never substitute FOLD.");
+  } else if (coFacing && activation.state !== "unsafe") {
+    activation.allowed = false;
+    activation.state = "unsupported";
+    activation.reasons.push("CO facing UTG open plus HJ caller: no reviewed response strategy or independent CO action permission. Unsupported CALL/3-BET must never substitute FOLD.");
   }
   return { evidence: envelope, activation, unopened, openingSize: opening.size,
-    responseWindow: facing ? source!.facingOpenProof : null, responseStrategy, callLegality };
+    responseWindow, responseStrategy, callLegality,
+    coResponse: coFacing && responseWindow ? { binding: { decisionEpoch: epoch, tableId: coFacing.tableId,
+      handId: coFacing.handId, heroId: coFacing.heroId, heroCards: coFacing.heroCards,
+      generation: coFacing.generation, cursor: coFacing.cursor, receivedAt: coFacing.receivedAt, expiresAt: responseWindow.expiresAt },
+      chosenAction: null, liveAuthorized: false, strategy: "missing", legality: "unproven",
+      accounting: source!.coFacingOpenProof!.accounting } : null };
 }
 
 /** Proof refreshes must invalidate pending recommendations even if DOM values did not change. */
@@ -172,6 +185,7 @@ export function liveProofRevision(timeline: LiveTimelineDiagnostic): string {
     ...(s.btnProof ? { btn: s.btnProof } : {}),
     ...(s.sbProof ? { sb: s.sbProof } : {}),
     ...(s.facingOpenProof ? { facingOpen: s.facingOpenProof } : {}),
+    ...(s.coFacingOpenProof ? { coFacingOpen: s.coFacingOpenProof } : {}),
     generation: s.sourceMetadata.socketContinuity.generation, continuity: s.sourceMetadata.socketContinuity.status,
     gap: s.sourceMetadata.socketContinuity.chainGap, lastCursor: s.sourceMetadata.socket.at(-1)?.metadata.frame,
     events: timeline.current.events.map(e => [e.id, e.order, e.actor?.seat]), coverage: timeline.current.coverage.status,

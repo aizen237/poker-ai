@@ -307,6 +307,11 @@
   var object4 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
   var integer2 = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
   var same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  function isObservedHjCallPatch(raw) {
+    if (!object4(raw)) return false;
+    const keys2 = ["tB", "now", "pGS", "sNA", "cRPI", "pITT", "sNAA", "wBACPI", "eventsData", "pre", "mEV", "fV", "sN"];
+    return Object.keys(raw).length === keys2.length && keys2.every((k) => Object.hasOwn(raw, k)) && integer2(raw.now) && integer2(raw.pre) && raw.now > raw.pre && integer2(raw.sNAA) && integer2(raw.sN) && raw.mEV === 0 && raw.fV === "0.1.72" && raw.sNA === "NSAA" && raw.pITT === null && same(raw.pGS, {}) && same(raw.wBACPI, []) && same(raw.eventsData, []) && object4(raw.tB) && Object.keys(raw.tB).length === 1 && Object.values(raw.tB)[0] === 5 && Array.isArray(raw.cRPI) && raw.cRPI.length === 2 && raw.cRPI[0] !== raw.cRPI[1] && raw.cRPI[1] === Object.keys(raw.tB)[0];
+  }
   function isObservedUtgOpenPatch(raw) {
     if (!object4(raw)) return false;
     const keys2 = [
@@ -402,7 +407,7 @@
         event: p[0],
         heroId: token3(heroId) ? heroId : null,
         frame,
-        ...p[0] === "gC" && isObservedUtgOpenPatch(raw) ? { bettingPatch: raw } : {},
+        ...p[0] === "gC" && (isObservedUtgOpenPatch(raw) || isObservedHjCallPatch(raw)) ? { bettingPatch: raw } : {},
         ...p[0] === "gC" && hjPatchKind(raw) ? { hjPatch: raw } : {}
       };
       return JSON.stringify(result).length <= 4e4 ? result : null;

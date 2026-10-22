@@ -1,5 +1,9 @@
 # Phase 4A: source-verified UTG open to five, then HJ
 
+The multi-action continuation through HJ's accepted CALL and CO activation is
+documented in [PREFLOP_PHASE4E.md](PREFLOP_PHASE4E.md). The text below records
+the original Phase 4A scope and validation.
+
 This implementation supplies **decision context only**. It does not enable
 CALL, FOLD, 3-BET, ALL-IN, or LLM fallback against the raise. The existing
 UTG/HJ/CO/BTN/SB unopened policies and BB abstention are unchanged.

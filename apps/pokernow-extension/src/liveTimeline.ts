@@ -147,6 +147,7 @@ export function createTimelineRuntime(options: TimelineRuntimeOptions) {
           btnProof: connected ? firstUtgSource.btnProof() : null,
           sbProof: connected ? firstUtgSource.sbProof() : null,
           facingOpenProof: connected ? firstUtgSource.facingOpenProof() : null,
+          coFacingOpenProof: connected ? firstUtgSource.coFacingOpenProof() : null,
           // Compatibility/display view of the same contract, not another validator.
           firstUtg: firstUtgProof?.witness ?? null,
           firstUtgEvidence: firstUtgSource.diagnostic(),

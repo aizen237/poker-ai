@@ -2,7 +2,7 @@ import { buildPreflopContext, type DecisionPacket } from "@poker-ai/ai-core";
 import type { LiveStateAssessment, ActionHistory } from "@poker-ai/browser-reader";
 import type { LiveTableRead } from "./tableRead.js";
 import type { LiveTimelineDiagnostic } from "./liveTimeline.js";
-import { currentFirstUtg, currentHj, currentCo, currentBtn, currentSb, currentFacingOpen } from "./firstUtgLive.js";
+import { currentFirstUtg, currentHj, currentCo, currentBtn, currentSb, currentFacingOpen, currentCoFacingOpen } from "./firstUtgLive.js";
 
 /** Current observations only. This neither certifies the source window nor supplies legal minima. */
 export function buildLivePreflopExecution(read: LiveTableRead, assessment: LiveStateAssessment,
@@ -25,19 +25,20 @@ export function buildLivePreflopContext(assessment: LiveStateAssessment, actionH
   if (bigBlind === null || !Number.isFinite(bigBlind) || bigBlind <= 0) return null;
   const hero = state?.seats.find(s => s.isYou);
   try {
-    const response = currentFacingOpen(read, assessment, timeline);
+    const coResponse = currentCoFacingOpen(read, assessment, timeline);
+    const response = currentFacingOpen(read, assessment, timeline) ?? coResponse;
     if (response) {
-      const proof = timeline!.sourceStatus.facingOpenProof!, action = proof.transitions[0];
+      const proof = coResponse ? timeline!.sourceStatus.coFacingOpenProof! : timeline!.sourceStatus.facingOpenProof!;
       return buildPreflopContext({
         heroSeat: response.heroSeat, playersDealtIn: 6,
         players: response.players.map(p => ({ seat: p.seat, position: p.position,
           remainingStackBB: state!.seats.find(s => s.seatNumber === p.seat)!.stack! / bigBlind,
           contributionBB: p.contribution / bigBlind, folded: false, allIn: false })),
         potBB: decisionPot === null ? null : decisionPot / bigBlind, amountToCallBB: 5 / bigBlind,
-        contributionMeaning: "street_total", historyCoverage: "complete", actionWindowEvidence: "hj_facing_utg_open5",
-        actions: [{ seat: action.actor.seat, action: "raise", totalContributionBB: action.newContributionChips / bigBlind,
-          observation: action.sequence, wagerAction: "raise" }],
-        historyNotes: ["Complete only for the closed boundary -> UTG open5 -> HJ activation window. Global historyComplete=false.",
+        contributionMeaning: "street_total", historyCoverage: "complete", actionWindowEvidence: proof.scope,
+        actions: proof.transitions.map(action => ({ seat: action.actor.seat, action: action.action, totalContributionBB: action.newContributionChips / bigBlind,
+          observation: action.sequence, wagerAction: action.action })),
+        historyNotes: [`Complete only for the closed ${proof.scope} decision prefix. Global historyComplete=false.`,
           "Response strategy, re-raise legality/grid/reopening and contestable pot remain unproven."],
         tournamentContext: "chip_ev_only",
       });
