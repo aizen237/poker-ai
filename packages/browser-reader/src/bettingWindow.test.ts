@@ -759,3 +759,100 @@ describe("CO open-plus-caller source-to-overlay replay", () => {
     expect(f.diagnostic().decision.scopedProofs.coResponse).toBeNull(); noAdvice(f);
   });
 });
+
+// Phase 4F evidence boundary: the real hand238 recording ENDS at CO activation.
+// Every appended frame below is a SYNTHETIC negative variant, never a recorded
+// CO action or evidence for a new action contract.
+describe("Phase 4F: no certified CO response or BTN response activation", () => {
+  const variants = ["actor-only", "guessed-call", "guessed-fold", "guessed-raise",
+    "coalesced", "reordered", "unknown-update", "reconnect"] as const;
+  function syntheticContinuation(variant: typeof variants[number]) {
+    const recorded = load("pokernow-hj-call-238.json").frames;
+    const co = recorded[15];
+    const envelope = (payload: any, offset: number) => ({ ...co,
+      localReceiveSequence: 16 + offset, localReceivedAt: co.localReceivedAt + offset * 1000,
+      payload: { ...payload, pre: co.payload.now + offset - 1, now: co.payload.now + offset } });
+    const turn = envelope({ ...co.payload, cPI: "PLAYER_3", pITT: "PLAYER_3",
+      pASA: co.payload.now + 2, mAVTB: 244 }, 2);
+    const call = { ...recorded[14].payload, tB: { PLAYER_2: 5 },
+      cRPI: ["PLAYER_10", "PLAYER_1", "PLAYER_2"] };
+    // Copying an observed HJ CALL / earlier-hand fold / UTG raise shape does
+    // not establish that CO performed that action in this response context.
+    const fold = { ...recorded[5].payload, pGS: { PLAYER_2: "fold" } };
+    const raise = { ...recorded[12].payload, tB: { PLAYER_2: 8 }, cHB: 8, mR: 11,
+      cRPI: ["PLAYER_2"] };
+    if (variant === "actor-only") return [envelope(turn.payload, 1)];
+    if (variant === "coalesced") return [envelope({ ...call, ...turn.payload, tB: call.tB }, 1)];
+    if (variant === "reordered") return [envelope(turn.payload, 1), envelope(call, 2)];
+    const action = variant === "guessed-fold" ? fold : variant === "guessed-raise" ? raise
+      : variant === "unknown-update" ? { eventsData: [], fV: "0.1.72", unreviewedAction: true } : call;
+    const tail = [envelope(action, 1), turn];
+    if (variant === "reconnect") tail.forEach(f => { f.connectionGeneration = 2; });
+    return tail;
+  }
+  it("the unmodified recorded prefix certifies CO only, without a third action or BTN window", async () => {
+    // Real recorded public source and HJ registration/cards; browser DOM is
+    // simulated by live(). This is not a captured CO or BTN browser session.
+    const f = await live(undefined, false, undefined, "", true, { originalObserver: true });
+    const d = f.diagnostic(), s = d.handTimeline.sourceStatus;
+    expect(s.coFacingOpenProof).toMatchObject({ activation: { sequence: 16 },
+      actor: { position: "CO" }, expiresAt: 1792581175464,
+      accounting: { streetContributionSumChips: 13, contestablePotChips: null } });
+    expect(s.coFacingOpenProof.transitions.map((t: any) => [t.actor.position, t.action])).toEqual([
+      ["UTG", "raise"], ["HJ", "call"],
+    ]);
+    expect(s.btnProof).toBeNull();
+    expect(d.decision.scopedProofs.responseWindow).toBeNull();
+    expect(d.decision.scopedProofs.activation.allowed).toBe(false);
+    expect(d.handTimeline.current.historyComplete).toBe(false);
+    expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
+    expect(f.socket.send).not.toHaveBeenCalled();
+  });
+  it.each(variants)("the production source rejects synthetic %s as a response certificate", variant => {
+    const f = replay(undefined, undefined, load("pokernow-hj-call-238.json").frames);
+    expect(f.source.coFacingOpenProof()?.activation.sequence).toBe(16);
+    for (const frame of syntheticContinuation(variant)) {
+      f.accept(frame);
+      expect(f.source.coFacingOpenProof()).toBeNull();
+      expect(f.source.facingOpenProof()).toBeNull();
+      expect(f.source.btnProof()).toBeNull();
+      expect(f.source.diagnostic().coFacingOpenWindow.transitions).toEqual([]);
+      expect(f.source.diagnostic().historyComplete).toBe(false);
+    }
+  });
+  it.each(variants)("simulated BTN browser stays blocked after synthetic %s", async variant => {
+    const f = await live((fs, read) => {
+      // Explicitly simulated BTN registration/private cards/DOM. Preserve all
+      // recorded public actions, original seats, stacks, contributions and IDs.
+      for (const frame of fs) {
+        if (frame.event === "registered") frame.payload.currentPlayer.id = "PLAYER_3";
+        const p = frame.payload.gameState ?? frame.payload;
+        if (p.pC) for (const [id, hand] of Object.entries(p.pC) as [string, any][])
+          hand.cards.forEach((c: any, i: number) => { c.value = id === "PLAYER_3" ? ["Ah", "Kd"][i] : null; });
+      }
+      for (const s of read.raw.seats) if (s.isOccupied) {
+        s.isYou = s.seatNumber === 3;
+        s.statusClasses = ["table-player", ...(s.isYou ? ["you-player"] : []),
+          ...(s.seatNumber === 2 ? ["decision-current"] : [])];
+        s.holeCardClassLists = s.isYou ? [["card-h", "card-s-A"], ["card-d", "card-s-K"]] : [];
+      }
+    }, false, undefined, '<button type="button">Call 5</button>', true, { originalObserver: true });
+    for (const frame of syntheticContinuation(variant)) f.incoming(frame);
+    // Even a favorable-looking BTN UI and CALL5 control cannot repair source
+    // evidence or turn the response into an unopened BTN policy decision.
+    for (const s of f.read.raw.seats) if (s.isOccupied) s.statusClasses = ["table-player",
+      ...(s.isYou ? ["you-player", "decision-current"] : [])];
+    f.poll();
+    const d = f.diagnostic(), p = d.decision.scopedProofs;
+    expect(d.preflop.heroPosition).toBe("BTN");
+    expect(d.preflop.actionWindowEvidence).toBeUndefined();
+    expect(d.preflop.openingEvidence).toBeUndefined();
+    expect(d.handTimeline.sourceStatus.btnProof).toBeNull();
+    expect(d.handTimeline.current.historyComplete).toBe(false);
+    expect(p.responseWindow).toBeNull(); expect(p.responseStrategy).toBeNull();
+    expect(p.callLegality).toBeNull(); expect(p.openingSize).toBeNull();
+    expect(p.activation.allowed).toBe(false);
+    expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
+    expect(f.socket.send).not.toHaveBeenCalled();
+  });
+});
