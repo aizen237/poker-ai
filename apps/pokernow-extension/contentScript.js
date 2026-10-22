@@ -4278,6 +4278,9 @@
   function formatCards(cards) {
     return cards.map(formatCard).join(" ");
   }
+  function cardId(card) {
+    return (card.rank - 2) * 4 + SUITS.indexOf(card.suit);
+  }
 
   // ../../packages/shared/dist/deck.js
   function fullDeck() {
@@ -4797,8 +4800,57 @@
     return { suitTexture, pairTexture, connectivity, overall };
   }
 
+  // ../../packages/range-engine/dist/comboRange.js
+  function comboKey(cards) {
+    if (cards.length !== 2)
+      throw new Error("A combination requires exactly two cards");
+    validateSimulationInput(cards, 0, 1);
+    const [a, b] = cards.map(cardId);
+    return a < b ? `${a}:${b}` : `${b}:${a}`;
+  }
+  function createComboRange(entries) {
+    const seen = /* @__PURE__ */ new Set();
+    const combos = [];
+    for (const entry of entries) {
+      const key = comboKey(entry.cards);
+      if (seen.has(key))
+        throw new Error(`Duplicate combination: ${key}`);
+      seen.add(key);
+      if (!Number.isFinite(entry.weight) || entry.weight < 0 || entry.weight > 1) {
+        throw new Error("Combination weight must be finite and between 0 and 1");
+      }
+      if (entry.weight === 0)
+        continue;
+      const cards = [Object.freeze({ ...entry.cards[0] }), Object.freeze({ ...entry.cards[1] })];
+      combos.push(Object.freeze({ cards: Object.freeze(cards), weight: entry.weight }));
+    }
+    return Object.freeze({ kind: "combination", combos: Object.freeze(combos) });
+  }
+  function removeKnownCards(range, knownCards) {
+    validateSimulationInput(knownCards, 0, 1);
+    const validated = createComboRange(range.combos);
+    const blocked = new Set(knownCards.map(cardId));
+    return createComboRange(validated.combos.filter((combo) => !combo.cards.some((card) => blocked.has(cardId(card)))));
+  }
+  function expandEquityRange(range, knownCards) {
+    if (range instanceof Map)
+      return expandRange(range, knownCards);
+    return removeKnownCards(range, knownCards).combos.map((combo) => ({
+      cards: [combo.cards[0], combo.cards[1]],
+      weight: combo.weight
+    }));
+  }
+
   // ../../packages/range-engine/dist/rangeEquity.js
   var DEFAULT_ITERATIONS2 = 1e4;
+  function checkedRng(random) {
+    return () => {
+      const value = random();
+      if (!Number.isFinite(value) || value < 0 || value >= 1)
+        throw new Error("RNG must return a finite value in [0, 1)");
+      return value;
+    };
+  }
   function weightedSample(combos, rng) {
     const totalWeight = combos.reduce((sum, c) => sum + c.weight, 0);
     if (totalWeight <= 0) {
@@ -4806,9 +4858,9 @@
     }
     let roll = rng() * totalWeight;
     for (const combo of combos) {
-      roll -= combo.weight;
-      if (roll <= 0)
+      if (roll < combo.weight)
         return combo;
+      roll -= combo.weight;
     }
     return combos[combos.length - 1];
   }
@@ -4820,11 +4872,11 @@
       throw new Error(`Board cannot have more than 5 cards, got ${board.length}`);
     }
     const iterations = options.iterations ?? DEFAULT_ITERATIONS2;
-    const rng = options.rng ?? Math.random;
+    const rng = checkedRng(options.rng ?? Math.random);
     const cardsToComplete = 5 - board.length;
     const knownCards = [...heroCards2, ...board];
     validateSimulationInput(knownCards, board.length, iterations);
-    const opponentCombos = expandRange(opponentRange, knownCards);
+    const opponentCombos = expandEquityRange(opponentRange, knownCards);
     if (opponentCombos.length === 0) {
       throw new Error("Opponent range has no valid combos remaining after excluding known cards");
     }
@@ -5322,7 +5374,7 @@
 
   // ../../packages/range-engine/dist/multiwayEquity.js
   var suits = ["s", "h", "d", "c"];
-  function cardId(card) {
+  function cardId2(card) {
     if (!Number.isInteger(card.rank) || card.rank < 2 || card.rank > 14 || !suits.includes(card.suit))
       throw new Error("Invalid card");
     return suits.indexOf(card.suit) * 13 + card.rank - 2;
@@ -5330,7 +5382,7 @@
   function masked(combo) {
     let low = 0, high = 0;
     for (const card of combo.cards) {
-      const id = cardId(card);
+      const id = cardId2(card);
       if (id < 32)
         low |= 1 << id;
       else
@@ -5355,7 +5407,7 @@
     if (opponentRanges.length < 1 || opponentRanges.length > 9)
       throw new Error("Requires 1 to 9 opponent ranges");
     const known2 = [...heroCards2, ...board];
-    if (new Set(known2.map(cardId)).size !== known2.length)
+    if (new Set(known2.map(cardId2)).size !== known2.length)
       throw new Error("Duplicate known cards");
     const iterations = options.iterations ?? 1e4;
     const maxAttempts = options.maxSamplingAttempts ?? Math.max(1e3, iterations * 100);
@@ -5371,7 +5423,7 @@
       return value;
     };
     const ranges = opponentRanges.map((range, i) => {
-      const combos = expandRange(range, known2).map(masked);
+      const combos = expandEquityRange(range, known2).map(masked);
       const mass = combos.reduce((sum, combo) => sum + combo.weight, 0);
       if (combos.length === 0 || mass <= 0)
         throw new Error("Opponent " + (i + 1) + " range has no legal combos after known-card removal");

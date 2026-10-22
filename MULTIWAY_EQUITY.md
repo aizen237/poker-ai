@@ -1,5 +1,9 @@
 # Multiway range equity
 
+Phase 5A also accepts explicit `ComboRange` inputs, including a mixture with
+legacy hand-class ranges, without changing the joint sampling algorithm. See
+[POSTFLOP_PHASE5A.md](POSTFLOP_PHASE5A.md) for semantics and independent checks.
+
 calculateEquityVsRanges(heroCards, opponentRanges, board, options) returns
 hero's expected showdown share of one common pot. It supports preflop, flop,
 turn and river, one through nine opponents, and an injected RNG. Each opponent

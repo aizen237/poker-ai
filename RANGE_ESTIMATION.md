@@ -1,5 +1,9 @@
 # Heads-up opponent range estimation V1
 
+Phase 5A adds reusable suit-specific combination ranges and equity input support;
+see [POSTFLOP_PHASE5A.md](POSTFLOP_PHASE5A.md). The estimator and live activation
+described here retain their existing behavior; no postflop action model is enabled.
+
 estimateOpponentRange now accepts structured actions, opponent position, history
 coverage, preflop effective depth, dealt-in count, chip-EV scope, and known cards.
 Actions retain street, prior full-raise count, facing action, optional aggressor

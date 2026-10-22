@@ -1,6 +1,7 @@
 import { Deck, type Card } from "@poker-ai/shared";
 import { evaluateBest } from "@poker-ai/poker-engine";
-import { expandRange, type Range, type WeightedCombo } from "./range.js";
+import type { WeightedCombo } from "./range.js";
+import { expandEquityRange, type EquityRange } from "./comboRange.js";
 import type { RangeEquityOptions, RangeEquityResult } from "./rangeEquity.js";
 
 export interface MultiwayEquityOptions extends RangeEquityOptions {
@@ -42,7 +43,7 @@ function pick(combos: readonly MaskedCombo[], total: number, rng: () => number):
  * restarts the WHOLE deal, never counts as a loss, and cannot loop forever.
  * This is equal-pot showdown equity, not side-pot EV or future-action modeling. */
 export function calculateEquityVsRanges(
-  heroCards: readonly Card[], opponentRanges: readonly Range[], board: readonly Card[],
+  heroCards: readonly Card[], opponentRanges: readonly EquityRange[], board: readonly Card[],
   options: MultiwayEquityOptions = {},
 ): MultiwayEquityResult {
   if (heroCards.length !== 2) throw new Error("Exactly two hero cards required");
@@ -61,7 +62,7 @@ export function calculateEquityVsRanges(
     return value;
   };
   const ranges = opponentRanges.map((range, i) => {
-    const combos = expandRange(range, known).map(masked);
+    const combos = expandEquityRange(range, known).map(masked);
     const mass = combos.reduce((sum, combo) => sum + combo.weight, 0);
     if (combos.length === 0 || mass <= 0) throw new Error("Opponent " + (i + 1) + " range has no legal combos after known-card removal");
     return { combos, mass };

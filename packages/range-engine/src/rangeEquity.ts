@@ -1,6 +1,7 @@
 import { Deck, validateSimulationInput, type Card } from "@poker-ai/shared";
 import { evaluateBest } from "@poker-ai/poker-engine";
-import { expandRange, type Range, type WeightedCombo } from "./range.js";
+import type { WeightedCombo } from "./range.js";
+import { expandEquityRange, type EquityRange } from "./comboRange.js";
 
 export interface RangeEquityResult {
   equity: number;
@@ -14,6 +15,14 @@ export interface RangeEquityOptions {
 
 const DEFAULT_ITERATIONS = 10_000;
 
+function checkedRng(random: () => number): () => number {
+  return () => {
+    const value = random();
+    if (!Number.isFinite(value) || value < 0 || value >= 1) throw new Error("RNG must return a finite value in [0, 1)");
+    return value;
+  };
+}
+
 /** Picks one combo from a weighted list, proportional to weight. */
 function weightedSample(combos: readonly WeightedCombo[], rng: () => number): WeightedCombo {
   const totalWeight = combos.reduce((sum, c) => sum + c.weight, 0);
@@ -22,8 +31,8 @@ function weightedSample(combos: readonly WeightedCombo[], rng: () => number): We
   }
   let roll = rng() * totalWeight;
   for (const combo of combos) {
+    if (roll < combo.weight) return combo;
     roll -= combo.weight;
-    if (roll <= 0) return combo;
   }
   return combos[combos.length - 1]!; // floating-point safety net
 }
@@ -36,7 +45,7 @@ function weightedSample(combos: readonly WeightedCombo[], rng: () => number): We
  */
 export function calculateEquityVsRange(
   heroCards: readonly Card[],
-  opponentRange: Range,
+  opponentRange: EquityRange,
   board: readonly Card[],
   options: RangeEquityOptions = {},
 ): RangeEquityResult {
@@ -48,12 +57,12 @@ export function calculateEquityVsRange(
   }
 
   const iterations = options.iterations ?? DEFAULT_ITERATIONS;
-  const rng = options.rng ?? Math.random;
+  const rng = checkedRng(options.rng ?? Math.random);
   const cardsToComplete = 5 - board.length;
   const knownCards = [...heroCards, ...board];
   validateSimulationInput(knownCards, board.length, iterations);
 
-  const opponentCombos = expandRange(opponentRange, knownCards);
+  const opponentCombos = expandEquityRange(opponentRange, knownCards);
   if (opponentCombos.length === 0) {
     throw new Error("Opponent range has no valid combos remaining after excluding known cards");
   }
@@ -82,8 +91,8 @@ export function calculateEquityVsRange(
  * respective ranges each iteration. Returns hero's average equity.
  */
 export function calculateRangeVsRangeEquity(
-  heroRange: Range,
-  opponentRange: Range,
+  heroRange: EquityRange,
+  opponentRange: EquityRange,
   board: readonly Card[],
   options: RangeEquityOptions = {},
 ): RangeEquityResult {
@@ -92,16 +101,16 @@ export function calculateRangeVsRangeEquity(
   }
 
   const iterations = options.iterations ?? DEFAULT_ITERATIONS;
-  const rng = options.rng ?? Math.random;
+  const rng = checkedRng(options.rng ?? Math.random);
   const cardsToComplete = 5 - board.length;
 
-  const heroCombosBase = expandRange(heroRange, board);
   validateSimulationInput(board, board.length, iterations);
+  const heroCombosBase = expandEquityRange(heroRange, board);
   if (heroCombosBase.length === 0) {
     throw new Error("Hero range has no valid combos remaining after excluding the board");
   }
 
-  const opponentCombos = expandRange(opponentRange, board);
+  const opponentCombos = expandEquityRange(opponentRange, board);
   if (opponentCombos.length === 0) throw new Error("Opponent range has no valid combos");
   let winShareSum = 0;
   let accepted = 0;
