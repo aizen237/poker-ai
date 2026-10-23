@@ -1,0 +1,440 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "e47fbd5816372360bade4de5d712346fe1bb70f6",
+  "parser": "PokerKit 0.7.7 direct parse_action",
+  "binaryObservations": 8,
+  "rows": [
+    {
+      "handId": "phh-pluribus:100:61",
+      "eventId": "phh-pluribus:100:61:action:26",
+      "sessionId": "phh-pluribus:2019-study",
+      "playerIds": [
+        "phh-player:5de6019026fba298abc5",
+        "phh-player:2ae2e798f40e37bbde7d",
+        "phh-player:9496185d0b99d9dbde4e",
+        "phh-player:833c1757a08868469e07",
+        "phh-player:6854297bf735460ba8f2",
+        "phh-player:fcd907f2972821227960"
+      ],
+      "opponentId": "phh-player:6854297bf735460ba8f2",
+      "actorPopulation": "bot",
+      "sourceRef": "https://github.com/uoftcprg/phh-dataset/blob/e47fbd5816372360bade4de5d712346fe1bb70f6/data/pluribus/100/61.phh",
+      "sourcePath": "data/pluribus/100/61.phh",
+      "handFingerprint": "9987eb4ce5f638b0bf23dacd4d5192bf3ef3c4bab63aa6b6bcb2b484881b4ee0",
+      "split": "development",
+      "observation": 26,
+      "board": [
+        "Qh",
+        "Kc",
+        "5h",
+        "Ks",
+        "6s"
+      ],
+      "street": "river",
+      "position": "CO",
+      "facingPosition": "BTN",
+      "priorRaises": 0,
+      "facing": "bet",
+      "potBB": 145.25,
+      "facingAmountBB": 68.25,
+      "effectiveStackBB": 68.25,
+      "callToBB": 68.25,
+      "callIsAllIn": true,
+      "heroCards": [
+        "5d",
+        "5c"
+      ],
+      "holeCards": [
+        "As",
+        "Ah"
+      ],
+      "label": "call",
+      "legalContext": {
+        "actorStack": 6825,
+        "actorBet": 0,
+        "otherStack": 0,
+        "otherBet": 6825,
+        "canRaise": false,
+        "activePlayers": 2
+      }
+    },
+    {
+      "handId": "phh-pluribus:102:23",
+      "eventId": "phh-pluribus:102:23:action:22",
+      "sessionId": "phh-pluribus:2019-study",
+      "playerIds": [
+        "phh-player:6854297bf735460ba8f2",
+        "phh-player:fcd907f2972821227960",
+        "phh-player:5de6019026fba298abc5",
+        "phh-player:2ae2e798f40e37bbde7d",
+        "phh-player:9496185d0b99d9dbde4e",
+        "phh-player:833c1757a08868469e07"
+      ],
+      "opponentId": "phh-player:833c1757a08868469e07",
+      "actorPopulation": "human",
+      "sourceRef": "https://github.com/uoftcprg/phh-dataset/blob/e47fbd5816372360bade4de5d712346fe1bb70f6/data/pluribus/102/23.phh",
+      "sourcePath": "data/pluribus/102/23.phh",
+      "handFingerprint": "9fb857e588f04359c5871b1c420a5bc509f30eb50d1826da4c8917ee262d7a99",
+      "split": "development",
+      "observation": 22,
+      "board": [
+        "8c",
+        "4d",
+        "9s",
+        "Qd",
+        "4h"
+      ],
+      "street": "river",
+      "position": "BTN",
+      "facingPosition": "BB",
+      "priorRaises": 0,
+      "facing": "bet",
+      "potBB": 121.75,
+      "facingAmountBB": 78.75,
+      "effectiveStackBB": 78.75,
+      "callToBB": 78.75,
+      "callIsAllIn": true,
+      "heroCards": [
+        "6d",
+        "2d"
+      ],
+      "holeCards": [
+        "Td",
+        "Ad"
+      ],
+      "label": "fold",
+      "legalContext": {
+        "actorStack": 7875,
+        "actorBet": 0,
+        "otherStack": 0,
+        "otherBet": 7875,
+        "canRaise": false,
+        "activePlayers": 2
+      }
+    },
+    {
+      "handId": "phh-pluribus:103:15",
+      "eventId": "phh-pluribus:103:15:action:23",
+      "sessionId": "phh-pluribus:2019-study",
+      "playerIds": [
+        "phh-player:9496185d0b99d9dbde4e",
+        "phh-player:833c1757a08868469e07",
+        "phh-player:6854297bf735460ba8f2",
+        "phh-player:fcd907f2972821227960",
+        "phh-player:5de6019026fba298abc5",
+        "phh-player:2ae2e798f40e37bbde7d"
+      ],
+      "opponentId": "phh-player:6854297bf735460ba8f2",
+      "actorPopulation": "bot",
+      "sourceRef": "https://github.com/uoftcprg/phh-dataset/blob/e47fbd5816372360bade4de5d712346fe1bb70f6/data/pluribus/103/15.phh",
+      "sourcePath": "data/pluribus/103/15.phh",
+      "handFingerprint": "a5c19cec96e380cbf7befd89102aaa694b177945b0d38b8e83cf246a3e36e2d0",
+      "split": "evaluation",
+      "observation": 23,
+      "board": [
+        "Ks",
+        "7h",
+        "3h",
+        "Jd",
+        "4d"
+      ],
+      "street": "river",
+      "position": "UTG",
+      "facingPosition": "BB",
+      "priorRaises": 0,
+      "facing": "bet",
+      "potBB": 138.0,
+      "facingAmountBB": 62.5,
+      "effectiveStackBB": 62.5,
+      "callToBB": 62.5,
+      "callIsAllIn": true,
+      "heroCards": [
+        "4c",
+        "3c"
+      ],
+      "holeCards": [
+        "7c",
+        "Ac"
+      ],
+      "label": "call",
+      "legalContext": {
+        "actorStack": 6250,
+        "actorBet": 0,
+        "otherStack": 0,
+        "otherBet": 6250,
+        "canRaise": false,
+        "activePlayers": 2
+      }
+    },
+    {
+      "handId": "phh-pluribus:103:3",
+      "eventId": "phh-pluribus:103:3:action:22",
+      "sessionId": "phh-pluribus:2019-study",
+      "playerIds": [
+        "phh-player:9496185d0b99d9dbde4e",
+        "phh-player:833c1757a08868469e07",
+        "phh-player:6854297bf735460ba8f2",
+        "phh-player:fcd907f2972821227960",
+        "phh-player:5de6019026fba298abc5",
+        "phh-player:2ae2e798f40e37bbde7d"
+      ],
+      "opponentId": "phh-player:fcd907f2972821227960",
+      "actorPopulation": "human",
+      "sourceRef": "https://github.com/uoftcprg/phh-dataset/blob/e47fbd5816372360bade4de5d712346fe1bb70f6/data/pluribus/103/3.phh",
+      "sourcePath": "data/pluribus/103/3.phh",
+      "handFingerprint": "fd32d792505fd97d285f6a7c4f619dc752c741cc5b9e1e4ef7e14e6cbc2de23b",
+      "split": "evaluation",
+      "observation": 22,
+      "board": [
+        "Ts",
+        "2c",
+        "Qc",
+        "Qs",
+        "9h"
+      ],
+      "street": "river",
+      "position": "HJ",
+      "facingPosition": "SB",
+      "priorRaises": 0,
+      "facing": "bet",
+      "potBB": 141.2,
+      "facingAmountBB": 59.8,
+      "effectiveStackBB": 59.8,
+      "callToBB": 59.8,
+      "callIsAllIn": true,
+      "heroCards": [
+        "As",
+        "Kd"
+      ],
+      "holeCards": [
+        "Jc",
+        "Jd"
+      ],
+      "label": "call",
+      "legalContext": {
+        "actorStack": 5980,
+        "actorBet": 0,
+        "otherStack": 0,
+        "otherBet": 5980,
+        "canRaise": false,
+        "activePlayers": 2
+      }
+    },
+    {
+      "handId": "phh-pluribus:104:45",
+      "eventId": "phh-pluribus:104:45:action:22",
+      "sessionId": "phh-pluribus:2019-study",
+      "playerIds": [
+        "phh-player:9496185d0b99d9dbde4e",
+        "phh-player:70453e469f5441951e9a",
+        "phh-player:6854297bf735460ba8f2",
+        "phh-player:fcd907f2972821227960",
+        "phh-player:5de6019026fba298abc5",
+        "phh-player:2ae2e798f40e37bbde7d"
+      ],
+      "opponentId": "phh-player:6854297bf735460ba8f2",
+      "actorPopulation": "bot",
+      "sourceRef": "https://github.com/uoftcprg/phh-dataset/blob/e47fbd5816372360bade4de5d712346fe1bb70f6/data/pluribus/104/45.phh",
+      "sourcePath": "data/pluribus/104/45.phh",
+      "handFingerprint": "a9c495ccfe5b33c282e9b9154fd030c7a8fc585e562e1b6d5861364af3619159",
+      "split": "evaluation",
+      "observation": 22,
+      "board": [
+        "5d",
+        "Td",
+        "5h",
+        "Js",
+        "3h"
+      ],
+      "street": "river",
+      "position": "UTG",
+      "facingPosition": "BB",
+      "priorRaises": 0,
+      "facing": "bet",
+      "potBB": 146.0,
+      "facingAmountBB": 54.5,
+      "effectiveStackBB": 54.5,
+      "callToBB": 54.5,
+      "callIsAllIn": true,
+      "heroCards": [
+        "Qd",
+        "Qc"
+      ],
+      "holeCards": [
+        "Kd",
+        "As"
+      ],
+      "label": "fold",
+      "legalContext": {
+        "actorStack": 5450,
+        "actorBet": 0,
+        "otherStack": 0,
+        "otherBet": 5450,
+        "canRaise": false,
+        "activePlayers": 2
+      }
+    },
+    {
+      "handId": "phh-pluribus:104:77",
+      "eventId": "phh-pluribus:104:77:action:27",
+      "sessionId": "phh-pluribus:2019-study",
+      "playerIds": [
+        "phh-player:6854297bf735460ba8f2",
+        "phh-player:fcd907f2972821227960",
+        "phh-player:5de6019026fba298abc5",
+        "phh-player:2ae2e798f40e37bbde7d",
+        "phh-player:9496185d0b99d9dbde4e",
+        "phh-player:70453e469f5441951e9a"
+      ],
+      "opponentId": "phh-player:6854297bf735460ba8f2",
+      "actorPopulation": "bot",
+      "sourceRef": "https://github.com/uoftcprg/phh-dataset/blob/e47fbd5816372360bade4de5d712346fe1bb70f6/data/pluribus/104/77.phh",
+      "sourcePath": "data/pluribus/104/77.phh",
+      "handFingerprint": "4c55559d26b0cee82c0601daf99afa14a4a56d6f5d81d555a394c00d170eed88",
+      "split": "evaluation",
+      "observation": 27,
+      "board": [
+        "8d",
+        "5d",
+        "2h",
+        "8s",
+        "4c"
+      ],
+      "street": "river",
+      "position": "SB",
+      "facingPosition": "BTN",
+      "priorRaises": 1,
+      "facing": "raise",
+      "potBB": 172.42,
+      "facingAmountBB": 41.7,
+      "effectiveStackBB": 41.7,
+      "callToBB": 74.38,
+      "callIsAllIn": true,
+      "heroCards": [
+        "5c",
+        "6c"
+      ],
+      "holeCards": [
+        "Kd",
+        "Qd"
+      ],
+      "label": "fold",
+      "legalContext": {
+        "actorStack": 4170,
+        "actorBet": 3268,
+        "otherStack": 0,
+        "otherBet": 7438,
+        "canRaise": false,
+        "activePlayers": 2
+      }
+    },
+    {
+      "handId": "phh-pluribus:105:14",
+      "eventId": "phh-pluribus:105:14:action:24",
+      "sessionId": "phh-pluribus:2019-study",
+      "playerIds": [
+        "phh-player:2ae2e798f40e37bbde7d",
+        "phh-player:9496185d0b99d9dbde4e",
+        "phh-player:70453e469f5441951e9a",
+        "phh-player:6854297bf735460ba8f2",
+        "phh-player:fcd907f2972821227960",
+        "phh-player:5de6019026fba298abc5"
+      ],
+      "opponentId": "phh-player:70453e469f5441951e9a",
+      "actorPopulation": "human",
+      "sourceRef": "https://github.com/uoftcprg/phh-dataset/blob/e47fbd5816372360bade4de5d712346fe1bb70f6/data/pluribus/105/14.phh",
+      "sourcePath": "data/pluribus/105/14.phh",
+      "handFingerprint": "cc5c5f4326ba8dafd66d1da4e185a7d525074b455440225a9a12f983ac4d549f",
+      "split": "evaluation",
+      "observation": 24,
+      "board": [
+        "4c",
+        "5c",
+        "Qc",
+        "7d",
+        "3c"
+      ],
+      "street": "river",
+      "position": "UTG",
+      "facingPosition": "HJ",
+      "priorRaises": 1,
+      "facing": "raise",
+      "potBB": 161.75,
+      "facingAmountBB": 39.75,
+      "effectiveStackBB": 39.75,
+      "callToBB": 70.25,
+      "callIsAllIn": true,
+      "heroCards": [
+        "Ac",
+        "Kc"
+      ],
+      "holeCards": [
+        "As",
+        "5s"
+      ],
+      "label": "fold",
+      "legalContext": {
+        "actorStack": 3975,
+        "actorBet": 3050,
+        "otherStack": 0,
+        "otherBet": 7025,
+        "canRaise": false,
+        "activePlayers": 2
+      }
+    },
+    {
+      "handId": "phh-pluribus:105:29",
+      "eventId": "phh-pluribus:105:29:action:25",
+      "sessionId": "phh-pluribus:2019-study",
+      "playerIds": [
+        "phh-player:6854297bf735460ba8f2",
+        "phh-player:fcd907f2972821227960",
+        "phh-player:5de6019026fba298abc5",
+        "phh-player:2ae2e798f40e37bbde7d",
+        "phh-player:9496185d0b99d9dbde4e",
+        "phh-player:70453e469f5441951e9a"
+      ],
+      "opponentId": "phh-player:2ae2e798f40e37bbde7d",
+      "actorPopulation": "human",
+      "sourceRef": "https://github.com/uoftcprg/phh-dataset/blob/e47fbd5816372360bade4de5d712346fe1bb70f6/data/pluribus/105/29.phh",
+      "sourcePath": "data/pluribus/105/29.phh",
+      "handFingerprint": "d9c75a51d6728e6dada4d49cd49fea9769e98ec780f8e38d689a031a3c8e7ba3",
+      "split": "evaluation",
+      "observation": 25,
+      "board": [
+        "8d",
+        "8s",
+        "8c",
+        "Qd",
+        "6s"
+      ],
+      "street": "river",
+      "position": "HJ",
+      "facingPosition": "CO",
+      "priorRaises": 0,
+      "facing": "bet",
+      "potBB": 136.25,
+      "facingAmountBB": 65.25,
+      "effectiveStackBB": 65.25,
+      "callToBB": 65.25,
+      "callIsAllIn": true,
+      "heroCards": [
+        "4c",
+        "Ac"
+      ],
+      "holeCards": [
+        "7c",
+        "7s"
+      ],
+      "label": "fold",
+      "legalContext": {
+        "actorStack": 6525,
+        "actorBet": 0,
+        "otherStack": 0,
+        "otherBet": 6525,
+        "canRaise": false,
+        "activePlayers": 2
+      }
+    }
+  ]
+}

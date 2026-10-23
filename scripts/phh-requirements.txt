@@ -1,0 +1,2 @@
+# Offline replay only; never imported by the application or extension.
+pokerkit==0.7.7

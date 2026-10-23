@@ -6,3 +6,6 @@ dist/
 # Local opponent observations
 .data/
 /evidence/
+
+# Offline Python replay cache
+/scripts/__pycache__/
