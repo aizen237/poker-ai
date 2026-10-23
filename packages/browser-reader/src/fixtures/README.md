@@ -1,5 +1,15 @@
 # PokerNow live fixtures
 
+## Phase 6A postflop evidence boundary
+
+`postflopSourceBoundary.test.ts` replays the existing hand48/49 source fixture,
+four-card DOM fragment and four-row log sample independently. They are partial
+sightings, not a combined hand or a captured postflop decision. The Phase 6A
+cases in `bettingWindow.test.ts` append explicitly synthetic rejection inputs
+to the real hand238 prefix; no postflop transition fixture is fabricated.
+See [POSTFLOP_PHASE6A.md](../../../../POSTFLOP_PHASE6A.md) for the complete local
+evidence census, source-field limits and minimal continuous capture specification.
+
 ## Phase 4A accepted UTG opening action
 
 `pokernow-utg-open-169.json` preserves all raw fields of local hand 169's

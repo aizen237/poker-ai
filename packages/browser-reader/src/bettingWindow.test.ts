@@ -760,6 +760,61 @@ describe("CO open-plus-caller source-to-overlay replay", () => {
   });
 });
 
+// Phase 6A: no captured postflop continuation exists. These are adversarial
+// synthetic tails after a REAL accepted preflop prefix, not positive evidence
+// for gT codes, card transitions, action semantics or a new source contract.
+describe("Phase 6A: unsupported postflop source/DOM cannot reuse a preflop certificate", () => {
+  it.each(["dom-only", "flop", "turn-without-flop", "river-without-turn", "duplicate-board", "hero-card-collision",
+    "reordered-board", "wrong-actor", "contradictory-actors", "missing-frame", "predecessor-gap",
+    "reordered-action", "reconnect", "stale", "new-hand"])("blocks synthetic %s through MAIN to overlay", async variant => {
+    // Original HJ observer and all 16 actual hand238 envelopes are preserved.
+    // live() supplies DOM scaffolding only. The public CO certificate below
+    // is a positive control that the real preflop source authority is running.
+    const f = await live(undefined, false, undefined, '<button type="button">Call 5</button>', true, { originalObserver: true });
+    const original = f.diagnostic().handTimeline.sourceStatus.coFacingOpenProof;
+    expect(original).toMatchObject({ activation: { sequence: 16 }, expiresAt: 1792581175464 });
+    const board = ["2c", "3d", "4h", "5s", "6c"].slice(0,
+      variant === "turn-without-flop" ? 4 : variant === "river-without-turn" ? 5 : 3);
+    if (variant === "duplicate-board") board[1] = board[0]!;
+    if (variant === "hero-card-collision") board[0] = "7h";
+    if (variant === "reordered-board") board.reverse();
+    const tail = { ...f.turn, localReceiveSequence: 17, localReceivedAt: f.turn.localReceivedAt + 2000,
+      payload: { pre: f.turn.payload.now, now: f.turn.payload.now + 1, eventsData: [], fV: "0.1.72",
+        gT: [1, board.length - 2], oTC: { "1": board }, cPI: "PLAYER_1", pITT: "PLAYER_1" } as any };
+    if (variant === "wrong-actor") tail.payload.cPI = tail.payload.pITT = "PLAYER_2";
+    if (variant === "contradictory-actors") tail.payload.pITT = "PLAYER_2";
+    // MAIN assigns its own sequence; omit a source predecessor instead of
+    // pretending a raw recorder sequence can inject a bridge sequence number.
+    if (variant === "missing-frame" || variant === "predecessor-gap") tail.payload.pre++;
+    if (variant === "reordered-action") tail.payload = structuredClone(load("pokernow-hj-call-238.json").frames[14].payload);
+    if (variant === "reconnect") tail.connectionGeneration++;
+    if (variant === "stale") tail.localReceivedAt = original.expiresAt + 1;
+    if (variant === "new-hand") { tail.payload.hI = "OTHER_HAND"; tail.payload.gN = 239; }
+    if (variant !== "dom-only") f.incoming(tail);
+    f.read.raw.boardCards = board.map(c => ({ valueText: c[0], suitText: c[1] }));
+    for (const seat of f.read.raw.seats) if (seat.isOccupied) seat.statusClasses = ["table-player",
+      ...(seat.isYou ? ["you-player", "decision-current"] : [])];
+    f.poll();
+    const d = f.diagnostic(), p = d.decision.scopedProofs, source = d.handTimeline.sourceStatus;
+    for (const key of ["firstUtgProof", "hjProof", "coProof", "btnProof", "sbProof", "facingOpenProof", "coFacingOpenProof"]) {
+      // With no new message, the public PREflop CO proof can still be fresh;
+      // the postflop DOM must nevertheless fail its dependent live cross-check.
+      if (variant === "dom-only" && key === "coFacingOpenProof") expect(source[key]).toEqual(original);
+      else expect(source[key]).toBeNull();
+    }
+    expect(p.activation.allowed).toBe(false);
+    expect(p.evidence.proofs.find((proof: any) => proof.scope === "actionWindow").status).not.toBe("proven");
+    expect(p.responseWindow).toBeNull(); expect(p.callLegality).toBeNull(); expect(p.openingSize).toBeNull();
+    expect(d.handTimeline.current.historyComplete).toBe(false);
+    expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0); expect(f.socket.send).not.toHaveBeenCalled();
+    // Repeated favorable-looking UI reads cannot resurrect the old deadline.
+    f.atAge(11000); f.refresh(); f.poll();
+    expect(f.diagnostic().decision.scopedProofs.activation.allowed).toBe(false);
+    expect(f.diagnostic().handTimeline.sourceStatus.coFacingOpenProof).toBeNull();
+    expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
+  });
+});
+
 // Phase 4F evidence boundary: the real hand238 recording ENDS at CO activation.
 // Every appended frame below is a SYNTHETIC negative variant, never a recorded
 // CO action or evidence for a new action contract.
