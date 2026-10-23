@@ -113,12 +113,12 @@ function scopeOf(observation: OfflineObservation): LikelihoodScope {
   const { observation: _order, ...action } = observation.action;
   return { board: observation.board, action, context: observation.context };
 }
-function validateObservation(o: OfflineObservation): void {
+export function validateOfflineObservation(o: OfflineObservation): void {
   comboKey(o.heroCards);
   requireThat(["flop", "turn", "river"].includes(o.action.street) &&
     o.board.length === ({ flop: 3, turn: 4, river: 5 })[o.action.street], "Board/street mismatch");
   validateSimulationInput([...o.heroCards, ...o.board], o.board.length, 1);
-  const e = o.evidence, a = o.action, c = o.context;
+  const e = o.evidence, a = o.action;
   requireThat([e.handId, e.sourceId, e.opponentId, e.decisionId, e.eventId].every(nonempty), "Missing observation identity");
   requireThat(e.historyCoverage === "complete", "Incomplete offline history coverage");
   requireThat(e.provenance.length > 0 && e.provenance.every(p => nonempty(p.basis) &&
@@ -126,6 +126,16 @@ function validateObservation(o: OfflineObservation): void {
   requireThat(Number.isFinite(e.observedAt) && e.observedAt >= 0 && e.originalExpiresAt !== null &&
     Number.isFinite(e.originalExpiresAt) && e.originalExpiresAt > e.observedAt, "Invalid original observation expiry");
   requireThat(Number.isSafeInteger(a.observation) && a.observation! >= 0, "Missing ordered observation");
+  validateLikelihoodScope(scopeOf(o));
+}
+const validateObservation = validateOfflineObservation;
+
+/** Structural scope validation only, never source/strategy authorization. */
+export function validateLikelihoodScope(scope: LikelihoodScope): void {
+  const a = scope.action, c = scope.context;
+  requireThat(["flop", "turn", "river"].includes(a.street) && scope.board.length ===
+    ({ flop: 3, turn: 4, river: 5 })[a.street], "Board/street mismatch");
+  validateSimulationInput(scope.board, scope.board.length, 1);
   requireThat(a.priorRaises !== null && Number.isSafeInteger(a.priorRaises) && a.priorRaises >= 0, "Unsupported raise context");
   requireThat(["none", "bet", "raise"].includes(a.facing), "Unsupported facing context");
   requireThat(a.facingPosition == null || ["UTG", "HJ", "CO", "BTN", "SB", "BB"].includes(a.facingPosition), "Invalid facing position");
@@ -162,11 +172,7 @@ function validateBinding(o: OfflineObservation, anchor: OfflineRangeAnchor, prev
 
 function validateModel(model: ActionLikelihoodModel, o: OfflineObservation, history: OfflineRangeHistory,
   options: OfflineConditioningOptions, legal: ComboRange): Map<string, number> {
-  requireThat(nonempty(model.id) && nonempty(model.version) && nonempty(model.provenance.basis), "Missing model identity/provenance");
-  strings(model.provenance.sourceRefs, "model source references", true);
-  strings(model.assumptions, "model assumptions");
-  strings(model.limitations, "model limitations", true);
-  strings(model.validation.reviewRefs, "model review references");
+  const probabilities = validateLikelihoodStructure(model, scopeOf(o), history.applied.map(r => r.observation.evidence.eventId!), legal);
   strings(options.supportedAssumptions, "supported assumptions");
   requireThat(model.assumptions.every(a => options.supportedAssumptions.includes(a)), "Unsupported model assumption");
   requireThat(options.purpose === "offline_analysis" || options.purpose === "mathematical_test", "Invalid offline purpose");
@@ -178,8 +184,22 @@ function validateModel(model: ActionLikelihoodModel, o: OfflineObservation, hist
       model.validation.reviewRefs.every(ref => options.reviews.some(r => r.modelId === model.id &&
         r.version === model.version && r.reviewRef === ref && equal(r.modelArtifact, model))), "Likelihood model has no matching supplied review artifact");
   }
-  requireThat(equal(model.scope, scopeOf(o)), "Likelihood model outside exact action/street/board/position/sizing/depth scope");
-  requireThat(equal(model.conditionedOnEventIds, history.applied.map(r => r.observation.evidence.eventId)), "Likelihood history scope mismatch");
+  return probabilities;
+}
+
+/** Allows unreviewed artifacts to be inspected/scored offline without passing
+ * the separate Phase 5B review/purpose gate or producing a posterior. */
+export function validateLikelihoodStructure(model: ActionLikelihoodModel, scope: LikelihoodScope,
+  conditionedOnEventIds: readonly string[], legal: ComboRange): Map<string, number> {
+  requireThat(nonempty(model.id) && nonempty(model.version) && nonempty(model.provenance.basis), "Missing model identity/provenance");
+  strings(model.provenance.sourceRefs, "model source references", true);
+  strings(model.assumptions, "model assumptions");
+  strings(model.limitations, "model limitations", true);
+  strings(model.validation.reviewRefs, "model review references");
+  requireThat(["unreviewed", "reviewed", "synthetic_fixture"].includes(model.validation.status), "Invalid model validation status");
+  validateLikelihoodScope(model.scope);
+  requireThat(equal(model.scope, scope), "Likelihood model outside exact action/street/board/position/sizing/depth scope");
+  requireThat(equal(model.conditionedOnEventIds, conditionedOnEventIds), "Likelihood history scope mismatch");
   const probabilities = new Map<string, number>();
   for (const row of model.likelihoods) {
     const key = comboKey(row.cards);

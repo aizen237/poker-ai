@@ -11,3 +11,6 @@ export * from "./comboRange.js";
 export * from "./boardRangeUpdate.js";
 export * from "./boardComboFeatures.js";
 export * from "./offlineConditioning.js";
+export * from "./likelihoodRegistry.js";
+export * from "./probabilityMetrics.js";
+export * from "./likelihoodBenchmark.js";
