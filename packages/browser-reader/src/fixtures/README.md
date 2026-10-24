@@ -1,5 +1,24 @@
 # PokerNow live fixtures
 
+## Phase 6B recorded flop transition and hero activation
+
+`pokernow-flop-239.json` preserves all 20 envelopes of one continuous recording:
+registration, fresh hand239 at frame4, flop/reset/SB activation at frame16,
+two observed flop contributions and registered UTG hero activation at frame20.
+Only table/hand/player IDs and player names are replaced bijectively; original
+values, member presence, arrays, source tokens, receipt times and generation
+remain intact. Reversing substitutions reproduces the parsed original exactly.
+The original JSON and both screenshots remain local and uncommitted.
+
+`flopWindow.test.ts` replays this fixture through the existing source authority
+and MAIN-to-overlay path. Its DOM/controls are explicitly simulated; the
+screenshots have no authoritative observation receipt or source cursor binding.
+The resulting certificates cover source observations only, with live postflop
+recommendations disabled, null CALL legality/pot facts and incomplete history.
+See [POSTFLOP_PHASE6B.md](../../../../POSTFLOP_PHASE6B.md) for the complete audit,
+deadlines, screenshot comparisons and exclusions. Negative mutations and any
+post-frame20 tail are synthetic tests, never additional captured evidence.
+
 ## Phase 6A postflop evidence boundary
 
 `postflopSourceBoundary.test.ts` replays the existing hand48/49 source fixture,

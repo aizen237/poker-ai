@@ -150,10 +150,10 @@
         return obj[e];
       });
     };
-    util2.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object7) => {
+    util2.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object8) => {
       const keys = [];
-      for (const key in object7) {
-        if (Object.prototype.hasOwnProperty.call(object7, key)) {
+      for (const key in object8) {
+        if (Object.prototype.hasOwnProperty.call(object8, key)) {
           keys.push(key);
         }
       }
@@ -5816,20 +5816,20 @@
     const raiseToBB = 2.5, investmentBB = raiseToBB - hero.contributionBB;
     const controls = execution.controls;
     const legal = execution.raiseBounds;
-    const exact = execution.exactOpeningSize;
-    if (firstSb && !exact)
+    const exact2 = execution.exactOpeningSize;
+    if (firstSb && !exact2)
       return fail("SB RAISE requires its dependent exact-five-chip sizing certificate; no substitution with FOLD.");
-    if (firstHj && !exact)
+    if (firstHj && !exact2)
       return fail("HJ RAISE requires its dependent exact-five-chip sizing certificate; no substitution with FOLD.");
-    if (firstCo && !exact)
+    if (firstCo && !exact2)
       return fail("CO RAISE requires its dependent exact-five-chip sizing certificate; no substitution with FOLD.");
-    if (firstBtn && !exact)
+    if (firstBtn && !exact2)
       return fail("BTN RAISE requires its dependent exact-five-chip sizing certificate; no substitution with FOLD.");
-    if (exact) {
+    if (exact2) {
       const now = Date.now();
-      if (exact.rule !== (firstSb ? "pokernow-0.1.72-th-4fun-1-2-sb-exact5-v1" : "pokernow-0.1.72-th-4fun-1-2-exact5-v1") || !(firstUtg2 && (exact.decisionWindow === void 0 || exact.decisionWindow === "first_utg_boundary") || firstHj && exact.decisionWindow === "hj_after_utg_fold" || firstCo && exact.decisionWindow === "co_after_utg_hj_folds" || firstBtn && exact.decisionWindow === "btn_after_utg_hj_co_folds" || firstSb && exact.decisionWindow === "sb_after_utg_hj_co_btn_folds") || hero.contributionBB !== (firstSb ? 0.5 : 0) || context.heroSeat !== exact.heroSeat || exact.units !== "chips" || exact.bigBlindChips !== 2 || exact.contributionChips !== (firstSb ? 1 : 0) || exact.raiseToChips !== 5 || exact.investmentChips !== (firstSb ? 4 : 5) || exact.remainingStackChips !== packet.hero.stackBB * 2 || investmentBB >= packet.hero.stackBB || packet.potEvidence?.bigBlind !== 2 || packet.decisionProofs?.handId !== `${exact.tableId}:hand:${exact.handId}` || packet.decisionProofs?.connectionGeneration !== exact.generation || packet.decisionProofs?.decisionEpoch !== exact.decisionEpoch || exact.expiresAt !== exact.receivedAt + 1e4 || now < exact.receivedAt || now >= exact.expiresAt)
+      if (exact2.rule !== (firstSb ? "pokernow-0.1.72-th-4fun-1-2-sb-exact5-v1" : "pokernow-0.1.72-th-4fun-1-2-exact5-v1") || !(firstUtg2 && (exact2.decisionWindow === void 0 || exact2.decisionWindow === "first_utg_boundary") || firstHj && exact2.decisionWindow === "hj_after_utg_fold" || firstCo && exact2.decisionWindow === "co_after_utg_hj_folds" || firstBtn && exact2.decisionWindow === "btn_after_utg_hj_co_folds" || firstSb && exact2.decisionWindow === "sb_after_utg_hj_co_btn_folds") || hero.contributionBB !== (firstSb ? 0.5 : 0) || context.heroSeat !== exact2.heroSeat || exact2.units !== "chips" || exact2.bigBlindChips !== 2 || exact2.contributionChips !== (firstSb ? 1 : 0) || exact2.raiseToChips !== 5 || exact2.investmentChips !== (firstSb ? 4 : 5) || exact2.remainingStackChips !== packet.hero.stackBB * 2 || investmentBB >= packet.hero.stackBB || packet.potEvidence?.bigBlind !== 2 || packet.decisionProofs?.handId !== `${exact2.tableId}:hand:${exact2.handId}` || packet.decisionProofs?.connectionGeneration !== exact2.generation || packet.decisionProofs?.decisionEpoch !== exact2.decisionEpoch || exact2.expiresAt !== exact2.receivedAt + 1e4 || now < exact2.receivedAt || now >= exact2.expiresAt)
         return fail("Exact five-chip opening rule is outside its bound profile, decision, capacity or original freshness window.");
-      if (controls.issues.length || (exact.controls === "panel_closed_unchecked" ? controls.formVisible || controls.raiseSubmitVisible || controls.selectedRaiseToBB !== null : !controls.formVisible || !controls.raiseSubmitVisible || controls.raiseSubmitEnabled !== true || controls.selectedRaiseToBB === null || controls.selectedRaiseToBB < hero.contributionBB || controls.selectedRaiseToBB - hero.contributionBB > packet.hero.stackBB || (exact.controls === "selected_amount_matches" ? controls.selectedRaiseToBB !== 2.5 : controls.selectedRaiseToBB === 2.5)))
+      if (controls.issues.length || (exact2.controls === "panel_closed_unchecked" ? controls.formVisible || controls.raiseSubmitVisible || controls.selectedRaiseToBB !== null : !controls.formVisible || !controls.raiseSubmitVisible || controls.raiseSubmitEnabled !== true || controls.selectedRaiseToBB === null || controls.selectedRaiseToBB < hero.contributionBB || controls.selectedRaiseToBB - hero.contributionBB > packet.hero.stackBB || (exact2.controls === "selected_amount_matches" ? controls.selectedRaiseToBB !== 2.5 : controls.selectedRaiseToBB === 2.5)))
         return fail("Current Raise controls contradict the independently certified exact size.");
     } else {
       if (!legal?.verified || legal.minRaiseToBB <= 1 || raiseToBB < legal.minRaiseToBB || investmentBB >= packet.hero.stackBB || !Number.isFinite(legal.chipUnitBB) || legal.chipUnitBB <= 0 || !near(investmentBB / legal.chipUnitBB, Math.round(investmentBB / legal.chipUnitBB)) || !near(raiseToBB / legal.chipUnitBB, Math.round(raiseToBB / legal.chipUnitBB)))
@@ -5843,7 +5843,7 @@
       investmentBB,
       reasons: [],
       strategySource: RFI_STRATEGY_SOURCE,
-      explanation: `${hand} is inside the ${packet.hero.position} six-max 100BB+ RFI reference. Raise to 2.5BB (${investmentBB}BB additional). Fixed sizing convention, not a solved optimum or EV estimate.${exact ? " Exact 5-chip profile rule supported by historical server acceptance; no live server preflight. Manual action only." : ""}`
+      explanation: `${hand} is inside the ${packet.hero.position} six-max 100BB+ RFI reference. Raise to 2.5BB (${investmentBB}BB additional). Fixed sizing convention, not a solved optimum or EV estimate.${exact2 ? " Exact 5-chip profile rule supported by historical server acceptance; no live server preflight. Manual action only." : ""}`
     };
   }
 
@@ -8973,9 +8973,9 @@
   var common = ["now", "pre", "eventsData", "mEV", "fV", "sN"];
   function hjPatchKind(raw) {
     if (!object(raw) || !integer(raw.now) || !integer(raw.pre) || raw.now <= raw.pre || !integer(raw.sN) || raw.mEV !== 0 || raw.fV !== "0.1.72" || !Array.isArray(raw.eventsData) || raw.eventsData.length) return null;
-    const exact = (fields) => Object.keys(raw).length === fields.length && fields.every((k) => Object.hasOwn(raw, k));
-    if (exact([...common, "pGS", "sNA", "pITT", "sNAA", "wBACPI"]) && object(raw.pGS) && Object.keys(raw.pGS).length === 1 && token(Object.keys(raw.pGS)[0]) && Object.values(raw.pGS)[0] === "fold" && raw.sNA === "NSAF" && raw.pITT === null && integer(raw.sNAA) && Array.isArray(raw.wBACPI) && raw.wBACPI.length === 1 && token(raw.wBACPI[0])) return "fold";
-    if (exact([...common, "cPI", "pITT", "sNA", "pASA", "sNAA", "mAVTB"]) && token(raw.cPI) && raw.pITT === raw.cPI && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now && integer(raw.mAVTB)) return "turn";
+    const exact2 = (fields) => Object.keys(raw).length === fields.length && fields.every((k) => Object.hasOwn(raw, k));
+    if (exact2([...common, "pGS", "sNA", "pITT", "sNAA", "wBACPI"]) && object(raw.pGS) && Object.keys(raw.pGS).length === 1 && token(Object.keys(raw.pGS)[0]) && Object.values(raw.pGS)[0] === "fold" && raw.sNA === "NSAF" && raw.pITT === null && integer(raw.sNAA) && Array.isArray(raw.wBACPI) && raw.wBACPI.length === 1 && token(raw.wBACPI[0])) return "fold";
+    if (exact2([...common, "cPI", "pITT", "sNA", "pASA", "sNAA", "mAVTB"]) && token(raw.cPI) && raw.pITT === raw.cPI && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now && integer(raw.mAVTB)) return "turn";
     return null;
   }
   function validatedOpeningPatch(data, heroId) {
@@ -10246,26 +10246,161 @@
     } };
   }
 
-  // src/firstUtgSource.ts
+  // src/flopWindow.ts
   var object6 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
-  var token4 = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(v);
   var integer4 = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
-  var same2 = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  var same2 = (a, b) => {
+    if (a === b) return true;
+    if (Array.isArray(a)) return Array.isArray(b) && a.length === b.length && a.every((v, i) => same2(v, b[i]));
+    return object6(a) && object6(b) && Object.keys(a).length === Object.keys(b).length && Object.keys(a).every((k) => Object.hasOwn(b, k) && same2(a[k], b[k]));
+  };
+  var exact = (v, keys) => Object.keys(v).length === keys.length && keys.every((k) => Object.hasOwn(v, k));
+  var common2 = ["now", "pre", "eventsData", "mEV", "fV", "sN"];
+  function flopPatchKind(raw) {
+    if (!object6(raw) || !integer4(raw.now) || !integer4(raw.pre) || raw.now <= raw.pre || !integer4(raw.sN) || raw.mEV !== 0 || raw.fV !== "0.1.72" || !same2(raw.eventsData, [])) return null;
+    const opening = hjPatchKind(raw);
+    if (opening) return opening;
+    const action2 = raw.sNA === "NSAA" && raw.pITT === null && integer4(raw.sNAA);
+    const contribution3 = object6(raw.tB) && Object.keys(raw.tB).length === 1 && Object.values(raw.tB)[0] === 2 && same2(raw.pGS, {}) && Array.isArray(raw.cRPI) && Array.isArray(raw.wBACPI);
+    if (action2 && contribution3 && exact(raw, [...common2, "tB", "pGS", "sNA", "cRPI", "pITT", "sNAA", "wBACPI"])) return "contribution";
+    if (action2 && contribution3 && raw.mR === 4 && raw.cHB === 2 && exact(raw, [...common2, "mR", "tB", "cHB", "pGS", "sNA", "cRPI", "pITT", "sNAA", "wBACPI"])) return "bet";
+    if (action2 && raw.bigBlindCheck === true && same2(raw.wBACPI, []) && exact(raw, [...common2, "sNA", "pITT", "sNAA", "wBACPI", "bigBlindCheck"])) return "bb_check";
+    if (exact(raw, [
+      ...common2,
+      "gT",
+      "mR",
+      "pC",
+      "tB",
+      "cHB",
+      "cPI",
+      "oTC",
+      "pot",
+      "sNA",
+      "cRPI",
+      "pASA",
+      "pITT",
+      "sNAA",
+      "mAVTB",
+      "players",
+      "bigBlindCheck"
+    ]) && same2(raw.gT, [1, 1]) && raw.mR === 2 && raw.cHB === 0 && raw.pot === 10 && raw.cPI === raw.pITT && typeof raw.cPI === "string" && raw.pASA === raw.now && raw.sNA === null && raw.sNAA === null && integer4(raw.mAVTB) && raw.bigBlindCheck === false && same2(raw.cRPI, []) && object6(raw.oTC) && exact(raw.oTC, ["1"]) && Array.isArray(raw.oTC["1"]) && raw.oTC["1"].length === 3 && raw.oTC["1"].every((c) => typeof c === "string" && /^[2-9TJQKA][shdc]$/.test(c)) && object6(raw.tB) && Object.keys(raw.tB).length === 5 && Object.values(raw.tB).every((v) => v === "<D>") && object6(raw.players) && Object.keys(raw.players).length === 5 && Object.values(raw.players).every((p) => object6(p) && exact(p, ["stack"]) && integer4(p.stack)) && object6(raw.pC) && Object.keys(raw.pC).length === 6 && Object.values(raw.pC).every((p) => object6(p) && exact(p, ["name1", "name2", "name1RH"]) && p.name1RH === null && (p.name1 === null || typeof p.name1 === "string" && p.name1.length <= 32) && (p.name2 === null || p.name2 === "<D>"))) return "deal";
+    return null;
+  }
+  function advanceFlopWindow(pending, data, previous, next, sequence, at) {
+    const w = pending.witness, raw = data.flopPatch ?? data.hjPatch, kind2 = flopPatchKind(raw), step = pending.step;
+    if (!raw || !kind2 || data.event !== "gC" || data.heroId !== w.heroId || sequence !== pending.anchor.sequence + step + 1) return null;
+    const projected = ["now", "pre", "eventsData", "fV", "tB", "pGS", "cRPI", "pITT", "cPI", "gT", "pC", "oTC", "players"];
+    const expected = Object.fromEntries(projected.filter((k) => Object.hasOwn(raw, k)).map((k) => [k, k === "pC" ? {} : raw[k]]));
+    if (!same2(data.frame, expected)) return null;
+    const role = (position2) => w.players.find((p) => p.position === position2);
+    const utg = role("UTG"), hj = role("HJ"), co = role("CO"), btn = role("BTN"), sb = role("SB"), bb = role("BB");
+    const actors = [utg, hj, hj, co, co, btn, btn, sb, sb, bb, bb, sb, sb, bb, bb, utg];
+    const kinds = [
+      "contribution",
+      "turn",
+      "contribution",
+      "turn",
+      "contribution",
+      "turn",
+      "fold",
+      "turn",
+      "contribution",
+      "turn",
+      "bb_check",
+      "deal",
+      "bet",
+      "turn",
+      "contribution",
+      "turn"
+    ];
+    const actor = actors[step];
+    if (!actor || kind2 !== kinds[step]) return null;
+    const totals = (through) => Object.fromEntries(w.players.map((p) => {
+      if (through >= 11) return [
+        p.playerId,
+        p.position === "SB" && through >= 12 || p.position === "BB" && through >= 14 ? 2 : 0
+      ];
+      const contributed = p.position === "UTG" && through >= 0 || p.position === "HJ" && through >= 2 || p.position === "CO" && through >= 4 || p.position === "SB" && through >= 8;
+      return [p.playerId, contributed ? 2 : p.contribution];
+    }));
+    const stable = (state, through) => state.id === w.tableId && state.hI === w.handId && state.gN === w.handNumber && state.dealerID === btn.playerId && state.dealerSeat === btn.seat && state.sBPI === sb.playerId && state.bBPI === bb.playerId && same2(state.seats, [...w.players].sort((a, b) => a.seat - b.seat).map((p) => [p.seat, p.playerId])) && state.iHPI.length === 6 && w.players.every((p) => state.iHPI.includes(p.playerId)) && Object.keys(state.pC).length === 6 && same2(state.gT, through >= 11 ? [1, 1] : [1, 0]) && same2(state.oTC, through >= 11 ? { "1": pending.transition?.board ?? raw.oTC?.["1"] } : { "1": [] }) && Object.keys(state.players).length === 6 && Object.keys(state.pGS).length === 6 && w.players.every((p) => state.pGS[p.playerId] === (p.position === "BTN" && through >= 6 ? "fold" : "inGame") && state.players[p.playerId].stack === p.sourceStack - (through >= 11 && p.position !== "BTN" ? 2 : 0) && !Object.hasOwn(state.players[p.playerId], "disconnectedSince") && same2(state.pC[p.playerId].cards, (p.playerId === w.heroId ? w.heroCards : [null, null]).map((value) => ({ value, showing: false })))) && Object.keys(state.tB).every((id) => w.players.some((p) => p.playerId === id)) && w.players.every((p) => (state.tB[p.playerId] ?? 0) === totals(through)[p.playerId]);
+    if (!stable(previous, step - 1) || !stable(next, step)) return null;
+    if (kind2 === "turn" || kind2 === "deal") {
+      if (previous.pITT !== null || next.cPI !== actor.playerId || next.pITT !== actor.playerId || raw.mAVTB !== actor.sourceStack - (step >= 11 ? 2 : 0)) return null;
+    } else if (previous.cPI !== actor.playerId || previous.pITT !== actor.playerId || next.cPI !== actor.playerId || next.pITT !== null) return null;
+    if (kind2 === "contribution" || kind2 === "bet") {
+      const responders = step === 0 ? [utg] : step === 2 ? [utg, hj] : step === 4 ? [utg, hj, co] : step === 8 ? [utg, hj, co, sb] : step === 12 ? [sb] : [sb, bb];
+      if (!same2(raw.tB, { [actor.playerId]: 2 }) || !same2(raw.cRPI, responders.map((p) => p.playerId)) || !same2(raw.wBACPI, step < 11 ? [bb.playerId] : [])) return null;
+    }
+    if (kind2 === "fold" && (!same2(raw.pGS, { [btn.playerId]: "fold" }) || !same2(raw.wBACPI, [bb.playerId]))) return null;
+    let transition = pending.transition;
+    if (kind2 === "deal") {
+      const board = raw.oTC["1"];
+      if ((/* @__PURE__ */ new Set([...board, ...w.heroCards])).size !== 5 || !same2(raw.tB, Object.fromEntries(w.players.filter((p) => p.position !== "BTN").map((p) => [p.playerId, "<D>"]))) || Object.keys(next.tB).length !== 0 || !same2(raw.players, Object.fromEntries(w.players.filter((p) => p.position !== "BTN").map((p) => [p.playerId, { stack: p.sourceStack - 2 }]))) || !same2(Object.keys(raw.pC).sort(), w.players.map((p) => p.playerId).sort()) || w.players.some((p) => p.playerId !== w.heroId && !same2(raw.pC[p.playerId], { name1: null, name2: null, name1RH: null }))) return null;
+      transition = {
+        sequence,
+        cursor: next.now,
+        previousCursor: previous.now,
+        receivedAt: at,
+        board: [...board],
+        from: "preflop",
+        to: "flop",
+        clearedContributions: structuredClone(previous.tB),
+        observedStacks: Object.fromEntries(w.players.map((p) => [p.playerId, next.players[p.playerId].stack]))
+      };
+    }
+    const observations = [...pending.observations];
+    if (step === 12 || step === 14) observations.push({
+      sequence,
+      playerId: actor.playerId,
+      priorContribution: previous.tB[actor.playerId] ?? 0,
+      contribution: next.tB[actor.playerId],
+      receivedAt: at
+    });
+    const advanced = { ...pending, step: step + 1, ...transition ? { transition } : {}, observations };
+    if (step !== 11 && step !== 15) return { pending: advanced };
+    return { pending: step === 15 ? null : advanced, proof: {
+      version: 1,
+      scope: step === 11 ? "flop_transition" : "flop_hero_activation",
+      historyComplete: false,
+      liveRecommendationsAllowed: false,
+      expiresAt: at + 1e4,
+      witness: {
+        ...structuredClone(w),
+        cursor: next.now,
+        previousCursor: previous.now,
+        receivedAt: at,
+        provenance: "Hand239 closed source observation prefix; original positions frozen at hand start. No legality, pot accounting, complete history or live recommendation authority."
+      },
+      anchor: structuredClone(pending.anchor),
+      transition: structuredClone(transition),
+      activation: { sequence, cursor: next.now, previousCursor: previous.now, receivedAt: at, playerId: actor.playerId },
+      observations,
+      contributions: totals(step),
+      facts: { amountToCallChips: null, contestablePotChips: null, legalActions: null }
+    } };
+  }
+
+  // src/firstUtgSource.ts
+  var object7 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+  var token4 = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(v);
+  var integer5 = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+  var same3 = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   var equivalent = (a, b) => {
     if (a === b) return true;
     if (Array.isArray(a)) return Array.isArray(b) && a.length === b.length && a.every((v, i) => equivalent(v, b[i]));
-    return object6(a) && object6(b) && Object.keys(a).length === Object.keys(b).length && Object.keys(a).every((k) => Object.hasOwn(b, k) && equivalent(a[k], b[k]));
+    return object7(a) && object7(b) && Object.keys(a).length === Object.keys(b).length && Object.keys(a).every((k) => Object.hasOwn(b, k) && equivalent(a[k], b[k]));
   };
   function firstUtg(reg, next, tableId, generation, at, role = "UTG") {
     const a = reg.frame, b = next.frame, hero = reg.heroId;
     const firstActor = role === "UTG" ? hero : b.cPI;
     if (role !== "UTG" && (a.version !== "0.1.72" || (b.version ?? a.version) !== "0.1.72" || b.fV !== "0.1.72")) return null;
-    if (!hero || next.event !== "gC" || a.id !== tableId || Object.hasOwn(b, "id") && b.id !== tableId || b.r === true || next.heroId !== hero || !integer4(a.now) || !integer4(b.now) || b.pre !== a.now || b.now <= a.now || !integer4(a.gN) || b.gN !== a.gN + 1 || !token4(a.hI) || !token4(b.hI) || a.hI === b.hI || !same2(a.gT, [1, 5]) || !same2(b.gT, [1, 0]) || !same2(b.oTC, { "1": [] }) || b.gameResult !== "<D>" || b.cPI !== firstActor || b.pITT !== firstActor || !same2(b.cRPI, []) || !same2(b.eventsData, []) || !same2(b.players, {}) || !same2(b.rHP, []) || b.rHC !== null) return null;
+    if (!hero || next.event !== "gC" || a.id !== tableId || Object.hasOwn(b, "id") && b.id !== tableId || b.r === true || next.heroId !== hero || !integer5(a.now) || !integer5(b.now) || b.pre !== a.now || b.now <= a.now || !integer5(a.gN) || b.gN !== a.gN + 1 || !token4(a.hI) || !token4(b.hI) || a.hI === b.hI || !same3(a.gT, [1, 5]) || !same3(b.gT, [1, 0]) || !same3(b.oTC, { "1": [] }) || b.gameResult !== "<D>" || b.cPI !== firstActor || b.pITT !== firstActor || !same3(b.cRPI, []) || !same3(b.eventsData, []) || !same3(b.players, {}) || !same3(b.rHP, []) || b.rHC !== null) return null;
     const profile = { smallBlind: 1, bigBlind: 2, ante: null, deadButton: false, gM: "th", mode: "4fun", aD: false, aS: false, cM: false, cR: false };
-    for (const [k, value] of Object.entries(profile)) if (!same2(a[k], value) || Object.hasOwn(b, k) && !same2(b[k], value)) return null;
-    if (!Array.isArray(a.seats) || a.seats.length !== 6 || Object.hasOwn(b, "seats") && !same2(a.seats, b.seats) || !Array.isArray(b.iHPI) || b.iHPI.length !== 6 || !object6(a.players) || !object6(b.pC) || !object6(b.tB) || !object6(a.pGS) || !object6(b.pGS)) return null;
+    for (const [k, value] of Object.entries(profile)) if (!same3(a[k], value) || Object.hasOwn(b, k) && !same3(b[k], value)) return null;
+    if (!Array.isArray(a.seats) || a.seats.length !== 6 || Object.hasOwn(b, "seats") && !same3(a.seats, b.seats) || !Array.isArray(b.iHPI) || b.iHPI.length !== 6 || !object7(a.players) || !object7(b.pC) || !object7(b.tB) || !object7(a.pGS) || !object7(b.pGS)) return null;
     const seats = a.seats;
-    if (!seats.every((s, i) => Array.isArray(s) && s.length === 2 && integer4(s[0]) && s[0] >= 1 && s[0] <= 10 && token4(s[1]) && (i === 0 || seats[i - 1][0] < s[0]))) return null;
+    if (!seats.every((s, i) => Array.isArray(s) && s.length === 2 && integer5(s[0]) && s[0] >= 1 && s[0] <= 10 && token4(s[1]) && (i === 0 || seats[i - 1][0] < s[0]))) return null;
     const rows = seats;
     const ids2 = rows.map((s) => s[1]);
     if (new Set(ids2).size !== 6 || new Set(b.iHPI).size !== 6 || Object.keys(b.pC).length !== 6 || !ids2.every((id) => b.iHPI.includes(id) && Object.hasOwn(b.pC, id)) || Object.keys(a.players).length !== 6 || Object.keys(b.pGS).some((id) => !ids2.includes(id))) return null;
@@ -10278,7 +10413,7 @@
     const players = [];
     for (let i = 0; i < cycle.length; i++) {
       const [seat, playerId] = cycle[i], p = a.players[playerId], cards = b.pC[playerId]?.cards;
-      if (!object6(p) || p.id !== playerId || !integer4(p.stack) || p.stack < 202 || p.status !== "inGame" || Object.hasOwn(p, "disconnectedSince") || (b.pGS[playerId] ?? a.pGS[playerId]) !== "inGame" || !Array.isArray(cards) || cards.length !== 2 || cards.some((c) => !object6(c) || c.showing !== false || (playerId === hero ? typeof c.value !== "string" || !/^[2-9TJQKA][shdc]$/.test(c.value) : c.value !== null))) return null;
+      if (!object7(p) || p.id !== playerId || !integer5(p.stack) || p.stack < 202 || p.status !== "inGame" || Object.hasOwn(p, "disconnectedSince") || (b.pGS[playerId] ?? a.pGS[playerId]) !== "inGame" || !Array.isArray(cards) || cards.length !== 2 || cards.some((c) => !object7(c) || c.showing !== false || (playerId === hero ? typeof c.value !== "string" || !/^[2-9TJQKA][shdc]$/.test(c.value) : c.value !== null))) return null;
       players.push({ seat, playerId, position: roles[i], sourceStack: p.stack, contribution: i === 1 ? 1 : i === 2 ? 2 : 0 });
     }
     const heroCards2 = b.pC[hero].cards.map((c) => c.value);
@@ -10297,13 +10432,15 @@
       smallBlind: 1,
       bigBlind: 2,
       players,
-      ...a.version === "0.1.72" && b.fV === "0.1.72" && (b.version ?? a.version) === "0.1.72" && same2(b.nR, [1]) && (Object.hasOwn(b, "mTB") ? b.mTB : a.mTB) === null && (Object.hasOwn(b, "rIT") ? b.rIT : a.rIT) === "no" && (Object.hasOwn(b, "sPM") ? b.sPM : a.sPM) === false ? { openingSizeProfile: "pokernow-0.1.72-th-4fun-1-2-exact5-v1" } : {},
+      ...a.version === "0.1.72" && b.fV === "0.1.72" && (b.version ?? a.version) === "0.1.72" && same3(b.nR, [1]) && (Object.hasOwn(b, "mTB") ? b.mTB : a.mTB) === null && (Object.hasOwn(b, "rIT") ? b.rIT : a.rIT) === "no" && (Object.hasOwn(b, "sPM") ? b.sPM : a.sPM) === false ? { openingSizeProfile: "pokernow-0.1.72-th-4fun-1-2-exact5-v1" } : {},
       provenance: `PokerNow validated hand-start ${a.hI}/${a.gN} -> ${b.hI}/${b.gN}, pre=${b.pre}, now=${b.now}; first UTG turn has no preceding voluntary turn; forced blinds only. Hand-53 observed source profile; bounded consecutive source state.${role !== "UTG" ? ` Frozen ${role} anchor only; not yet an actionable decision.` : ""}`
     };
   }
   function createFirstUtgSource(tableId, now) {
     let baseline = null;
     let witness = null;
+    let flopPending = null;
+    let flopProof = null;
     let facingPending = null;
     let facingProof = null;
     let coFacingProof = null;
@@ -10322,6 +10459,7 @@
     let lastCertificate = null;
     const invalidateWitness = (reason2, sequence) => {
       witness = null;
+      flopProof = null;
       hjProof = null;
       coProof = null;
       btnProof = null;
@@ -10362,8 +10500,9 @@
     return {
       accept(raw, sequence, generation, observedAt) {
         const reject = (message) => {
-          invalidateWitness(message, integer4(sequence) ? sequence : null);
+          invalidateWitness(message, integer5(sequence) ? sequence : null);
           facingPending = null;
+          flopPending = null;
           hjPending = null;
           hjReason = message;
           coPending = null;
@@ -10376,7 +10515,7 @@
           rejectedGeneration = lastGeneration;
           reason = message;
         };
-        if (!integer4(sequence) || !integer4(generation) || generation < 1) {
+        if (!integer5(sequence) || !integer5(generation) || generation < 1) {
           reject("Invalid local source sequence/generation.");
           return;
         }
@@ -10388,7 +10527,10 @@
         const previous = baseline;
         baseline = null;
         const newGeneration = generation !== lastGeneration;
-        if (newGeneration) facingPending = null;
+        if (newGeneration) {
+          facingPending = null;
+          flopPending = null;
+        }
         const contiguous = sequence === lastSequence + 1 && !newGeneration;
         lastSequence = sequence;
         lastGeneration = generation;
@@ -10404,12 +10546,12 @@
           lastObservedAt = -1;
           registrationSeen = false;
         }
-        if (!integer4(observedAt) || observedAt > now() || observedAt < lastObservedAt) {
+        if (!integer5(observedAt) || observedAt > now() || observedAt < lastObservedAt) {
           reject("Invalid or regressing local receive time.");
           return;
         }
         lastObservedAt = observedAt;
-        const valid2 = object6(raw) && object6(raw.frame) && JSON.stringify(raw).length <= 4e4 && ["registered", "gC", "rup"].includes(raw.event);
+        const valid2 = object7(raw) && object7(raw.frame) && JSON.stringify(raw).length <= 4e4 && ["registered", "gC", "rup"].includes(raw.event);
         const observation = { sequence, generation, observedAt, projection: valid2 ? structuredClone(raw) : null };
         observations.push(observation);
         retainedCharacters += JSON.stringify(observation).length;
@@ -10452,6 +10594,26 @@
           }
           if (data.event !== "gC") throw new Error("Full rup/registration refresh invalidates carried continuity; no backfill proof.");
           const frame = advanceUtgState(previous.data.frame, data.frame, tableId, data.heroId);
+          const flopAnchor = firstUtg(previous.data, data, tableId, generation, observedAt);
+          const flopAdvanced = flopPending ? advanceFlopWindow(flopPending, data, previous.data.frame, frame, sequence, observedAt) : null;
+          flopPending = flopAnchor?.openingSizeProfile && equivalent(data.flopBoundary, { mR: 4, cHB: 2 }) ? {
+            witness: flopAnchor,
+            step: 0,
+            observations: [],
+            anchor: { sequence, cursor: flopAnchor.cursor, receivedAt: observedAt }
+          } : flopAdvanced?.pending ?? null;
+          flopProof = flopAdvanced?.proof ? {
+            ...flopAdvanced.proof,
+            continuity: {
+              status: "validated_prefix",
+              baselineSequence: previous.baselineSequence,
+              throughSequence: sequence,
+              generation,
+              tableId,
+              handId: frame.hI,
+              cursor: frame.now
+            }
+          } : null;
           const anchor = firstUtg(previous.data, data, tableId, generation, observedAt, "HJ");
           const facingAnchor = anchor ?? firstUtg(previous.data, data, tableId, generation, observedAt) ?? firstUtg(previous.data, data, tableId, generation, observedAt, "CO");
           const facingAdvanced = facingPending ? advanceFacingOpenWindow(facingPending, data, previous.data.frame, frame, sequence, observedAt) : null;
@@ -10591,6 +10753,7 @@
       reset() {
         invalidateWitness("Source disconnect, reader gap or reset invalidated first-UTG evidence.", null);
         facingPending = null;
+        flopPending = null;
         hjPending = null;
         hjReason = "Source disconnected/reset.";
         coPending = null;
@@ -10607,6 +10770,9 @@
         return currentProof()?.witness ?? null;
       },
       proof: currentProof,
+      flopProof() {
+        return flopProof && baseline && now() >= flopProof.witness.receivedAt && now() < flopProof.expiresAt && baseline.generation === flopProof.witness.generation && baseline.data.frame.hI === flopProof.witness.handId && baseline.data.frame.now === flopProof.witness.cursor ? structuredClone(flopProof) : null;
+      },
       facingOpenProof() {
         return facingProof && baseline && now() >= facingProof.witness.receivedAt && now() < facingProof.expiresAt && baseline.generation === facingProof.witness.generation && baseline.data.frame.hI === facingProof.witness.handId && baseline.data.frame.now === facingProof.witness.cursor ? structuredClone(facingProof) : null;
       },
@@ -10852,6 +11018,8 @@
             sbProof: connected ? firstUtgSource.sbProof() : null,
             facingOpenProof: connected ? firstUtgSource.facingOpenProof() : null,
             coFacingOpenProof: connected ? firstUtgSource.coFacingOpenProof() : null,
+            // Observational certificate only; no decision/legality adapter consumes it.
+            flopObservationProof: connected ? firstUtgSource.flopProof() : null,
             // Compatibility/display view of the same contract, not another validator.
             firstUtg: firstUtgProof?.witness ?? null,
             firstUtgEvidence: firstUtgSource.diagnostic(),

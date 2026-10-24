@@ -2,6 +2,7 @@ import { initializeUtgState, advanceUtgState } from "./firstUtgState.js";
 import { advanceHjWindow, hjPatchKind, type HjPending, type HjProof } from "./hjWindow.js";
 import { advanceCoWindow, advanceBtnWindow, advanceSbWindow, type CoPending, type CoProof, type BtnProof, type SbProof } from "./coWindow.js";
 import { isObservedUtgOpenPatch, isObservedHjCallPatch, advanceFacingOpenWindow, type FacingOpenPending, type FacingOpenProof, type CoFacingOpenProof } from "./bettingWindow.js";
+import { flopPatchKind, advanceFlopWindow, type FlopPending, type FlopObservationProof } from "./flopWindow.js";
 
 /** Scoped first-UTG witness from consecutive bounded source state.
  * No general poker-state emulator or full action-history claim. */
@@ -29,7 +30,11 @@ export interface UtgProjection { event: "registered" | "gC" | "rup"; heroId: str
   /** Only the two exact raw transition shapes; absent means no HJ/CO/BTN/SB permission. */
   hjPatch?: Record<string, any>;
   /** Closed accepted UTG open / HJ call only; unknown raw mutations never disappear into a proof. */
-  bettingPatch?: Record<string, any> }
+  bettingPatch?: Record<string, any>;
+  /** Closed hand239 observations only; never action permission. */
+  flopPatch?: Record<string, any>;
+  /** Raw hand-start discriminators, not decoded betting bounds. */
+  flopBoundary?: { mR: number; cHB: number } }
 
 /** Separate bounded projection; no names, credentials, stats or opponent cards. */
 export function projectFirstUtgSource(data: unknown, knownHero: string | null): UtgProjection | null {
@@ -43,6 +48,7 @@ export function projectFirstUtgSource(data: unknown, knownHero: string | null): 
     // automatic cross-world projection. This witness supports empty events only.
     if (Object.hasOwn(raw, "eventsData") && !same(raw.eventsData, [])) return null;
     const heroId = p[0] === "registered" ? p[1].currentPlayer?.id : knownHero;
+    const flopKind = p[0] === "gC" ? flopPatchKind(raw) : null;
     const frame: Record<string, any> = {};
     for (const key of keys) if (Object.hasOwn(raw, key)) frame[key] = raw[key];
     // Only the observed hand-boundary removal marker is consumed by the proof.
@@ -55,12 +61,25 @@ export function projectFirstUtgSource(data: unknown, knownHero: string | null): 
     }
     if (Object.hasOwn(raw, "pC")) {
       if (!object(raw.pC) || Object.keys(raw.pC).length > 10) return null;
-      if (Object.values(raw.pC).some(hand => !object(hand) || !Array.isArray(hand.cards) || hand.cards.length > 2 ||
-          hand.cards.some((c: unknown) => !object(c) || !(c.value === null || typeof c.value === "string") || typeof c.showing !== "boolean"))) return null;
-      frame.pC = Object.fromEntries(Object.entries(raw.pC).map(([id, hand]) => [id,
-        { cards: (hand as any).cards.map((c: any) => ({ value: id === heroId ? c.value : null, showing: c.showing })) }]));
+      // Hand239 flop carries descriptions only, with no cards member. The
+      // closed raw deal shape is retained for the dependent recognizer. An
+      // empty card patch lets the existing reducer preserve private cards;
+      // descriptions never become new cards or opponent knowledge.
+      if (flopKind === "deal") {
+        if (Object.entries(raw.pC).some(([id, hand]) => id !== heroId &&
+            !equivalent(hand, { name1: null, name2: null, name1RH: null }))) return null;
+        frame.pC = {};
+      } else {
+        if (Object.values(raw.pC).some(hand => !object(hand) || !Array.isArray(hand.cards) || hand.cards.length > 2 ||
+            hand.cards.some((c: unknown) => !object(c) || !(c.value === null || typeof c.value === "string") || typeof c.showing !== "boolean"))) return null;
+        frame.pC = Object.fromEntries(Object.entries(raw.pC).map(([id, hand]) => [id,
+          { cards: (hand as any).cards.map((c: any) => ({ value: id === heroId ? c.value : null, showing: c.showing })) }]));
+      }
     }
     const result = { event: p[0], heroId: token(heroId) ? heroId : null, frame,
+      ...(p[0] === "gC" && same(raw.gT, [1, 0]) && integer(raw.mR) && integer(raw.cHB)
+        ? { flopBoundary: { mR: raw.mR, cHB: raw.cHB } } : {}),
+      ...(flopKind && flopKind !== "turn" && flopKind !== "fold" ? { flopPatch: raw } : {}),
       ...(p[0] === "gC" && (isObservedUtgOpenPatch(raw) || isObservedHjCallPatch(raw)) ? { bettingPatch: raw } : {}),
       ...(p[0] === "gC" && hjPatchKind(raw) ? { hjPatch: raw } : {}) };
     return JSON.stringify(result).length <= 40_000 ? result : null;
@@ -149,6 +168,8 @@ function firstUtg(reg: UtgProjection, next: UtgProjection, tableId: string, gene
 export function createFirstUtgSource(tableId: string, now: () => number) {
   let baseline: { data: UtgProjection; generation: number; sequence: number; baselineSequence: number } | null = null;
   let witness: FirstUtgWitness | null = null;
+  let flopPending: FlopPending | null = null;
+  let flopProof: FlopObservationProof | null = null;
   let facingPending: FacingOpenPending | null = null;
   let facingProof: FacingOpenProof | null = null;
   let coFacingProof: CoFacingOpenProof | null = null;
@@ -169,6 +190,7 @@ export function createFirstUtgSource(tableId: string, now: () => number) {
     invalidation: { at: number; sequence: number | null; reason: string } | null } | null = null;
   const invalidateWitness = (reason: string, sequence: number | null) => {
     witness = null;
+    flopProof = null;
     hjProof = null;
     coProof = null;
     btnProof = null;
@@ -198,13 +220,13 @@ export function createFirstUtgSource(tableId: string, now: () => number) {
   };
   return {
     accept(raw: unknown, sequence: unknown, generation: unknown, observedAt: unknown): SourceBootstrapReceipt | undefined {
-      const reject = (message: string) => { invalidateWitness(message, integer(sequence) ? sequence : null); facingPending = null; hjPending = null; hjReason = message; coPending = null; coReason = message; btnPending = null; btnReason = message; sbPending = null; sbReason = message; baseline = null; rejectedGeneration = lastGeneration; reason = message; };
+      const reject = (message: string) => { invalidateWitness(message, integer(sequence) ? sequence : null); facingPending = null; flopPending = null; hjPending = null; hjReason = message; coPending = null; coReason = message; btnPending = null; btnReason = message; sbPending = null; sbReason = message; baseline = null; rejectedGeneration = lastGeneration; reason = message; };
       if (!integer(sequence) || !integer(generation) || generation < 1) { reject("Invalid local source sequence/generation."); return; }
       if (sequence <= lastSequence || generation < lastGeneration) { reject("Stale/replayed local source delivery invalidated carried state."); return; }
       invalidateWitness("Subsequent source update requires a new certificate; no same-decision renewal contract is verified.", sequence);
       const previous = baseline; baseline = null;
       const newGeneration = generation !== lastGeneration;
-      if (newGeneration) facingPending = null;
+      if (newGeneration) { facingPending = null; flopPending = null; }
       const contiguous = sequence === lastSequence + 1 && !newGeneration;
       lastSequence = sequence;
       lastGeneration = generation;
@@ -250,6 +272,13 @@ export function createFirstUtgSource(tableId: string, now: () => number) {
         // Only the identical, immediate bootstrap refresh above is supported.
         if (data.event !== "gC") throw new Error("Full rup/registration refresh invalidates carried continuity; no backfill proof.");
         const frame = advanceUtgState(previous.data.frame, data.frame, tableId, data.heroId!);
+        const flopAnchor = firstUtg(previous.data, data, tableId, generation, observedAt);
+        const flopAdvanced = flopPending ? advanceFlopWindow(flopPending, data, previous.data.frame, frame, sequence, observedAt) : null;
+        flopPending = flopAnchor?.openingSizeProfile && equivalent(data.flopBoundary, { mR: 4, cHB: 2 }) ? { witness: flopAnchor, step: 0, observations: [],
+          anchor: { sequence, cursor: flopAnchor.cursor, receivedAt: observedAt } } : flopAdvanced?.pending ?? null;
+        flopProof = flopAdvanced?.proof ? { ...flopAdvanced.proof,
+          continuity: { status: "validated_prefix", baselineSequence: previous.baselineSequence,
+            throughSequence: sequence, generation, tableId, handId: frame.hI, cursor: frame.now } } : null;
         const anchor = firstUtg(previous.data, data, tableId, generation, observedAt, "HJ");
         // An observed UTG browser can certify the public transition, but only an
         // independently cross-checked current HJ/CO hero may consume its context.
@@ -330,9 +359,12 @@ export function createFirstUtgSource(tableId: string, now: () => number) {
           : "Validated source state carried forward; this update is not a supported first-UTG boundary.";
       } catch (error) { reject(error instanceof Error ? error.message : "Unsupported source mutation."); }
     },
-    reset() { invalidateWitness("Source disconnect, reader gap or reset invalidated first-UTG evidence.", null); facingPending = null; hjPending = null; hjReason = "Source disconnected/reset."; coPending = null; coReason = "Source disconnected/reset."; btnPending = null; btnReason = "Source disconnected/reset."; sbPending = null; sbReason = "Source disconnected/reset."; baseline = null; rejectedGeneration = lastGeneration; reason = "Source disconnect, reader gap or reset invalidated first-UTG evidence."; },
+    reset() { invalidateWitness("Source disconnect, reader gap or reset invalidated first-UTG evidence.", null); facingPending = null; flopPending = null; hjPending = null; hjReason = "Source disconnected/reset."; coPending = null; coReason = "Source disconnected/reset."; btnPending = null; btnReason = "Source disconnected/reset."; sbPending = null; sbReason = "Source disconnected/reset."; baseline = null; rejectedGeneration = lastGeneration; reason = "Source disconnect, reader gap or reset invalidated first-UTG evidence."; },
     snapshot() { return currentProof()?.witness ?? null; },
     proof: currentProof,
+    flopProof() { return flopProof && baseline && now() >= flopProof.witness.receivedAt && now() < flopProof.expiresAt &&
+      baseline.generation === flopProof.witness.generation && baseline.data.frame.hI === flopProof.witness.handId &&
+      baseline.data.frame.now === flopProof.witness.cursor ? structuredClone(flopProof) : null; },
     facingOpenProof() { return facingProof && baseline && now() >= facingProof.witness.receivedAt && now() < facingProof.expiresAt &&
       baseline.generation === facingProof.witness.generation && baseline.data.frame.hI === facingProof.witness.handId &&
       baseline.data.frame.now === facingProof.witness.cursor ? structuredClone(facingProof) : null; },

@@ -143,22 +143,22 @@
     }
     return text.length;
   }
-  function members(object6) {
+  function members(object7) {
     const result = [];
     let i = 1;
-    while (i < object6.length) {
-      while (/\s|,/.test(object6[i] ?? "") && i < object6.length) i++;
-      if (object6[i] === "}") break;
+    while (i < object7.length) {
+      while (/\s|,/.test(object7[i] ?? "") && i < object7.length) i++;
+      if (object7[i] === "}") break;
       const keyStart = i++;
-      while (i < object6.length) {
-        if (object6[i] === "\\") i += 2;
-        else if (object6[i++] === '"') break;
+      while (i < object7.length) {
+        if (object7[i] === "\\") i += 2;
+        else if (object7[i++] === '"') break;
       }
-      const key = JSON.parse(object6.slice(keyStart, i));
-      while (object6[i] !== ":" && i < object6.length) i++;
+      const key = JSON.parse(object7.slice(keyStart, i));
+      while (object7[i] !== ":" && i < object7.length) i++;
       i++;
-      const end = endOfValue(object6, i);
-      result.push({ key, raw: object6.slice(i, end).trim() });
+      const end = endOfValue(object7, i);
+      result.push({ key, raw: object7.slice(i, end).trim() });
       i = end;
     }
     return result;
@@ -297,9 +297,9 @@
   var common = ["now", "pre", "eventsData", "mEV", "fV", "sN"];
   function hjPatchKind(raw) {
     if (!object3(raw) || !integer(raw.now) || !integer(raw.pre) || raw.now <= raw.pre || !integer(raw.sN) || raw.mEV !== 0 || raw.fV !== "0.1.72" || !Array.isArray(raw.eventsData) || raw.eventsData.length) return null;
-    const exact = (fields) => Object.keys(raw).length === fields.length && fields.every((k) => Object.hasOwn(raw, k));
-    if (exact([...common, "pGS", "sNA", "pITT", "sNAA", "wBACPI"]) && object3(raw.pGS) && Object.keys(raw.pGS).length === 1 && token2(Object.keys(raw.pGS)[0]) && Object.values(raw.pGS)[0] === "fold" && raw.sNA === "NSAF" && raw.pITT === null && integer(raw.sNAA) && Array.isArray(raw.wBACPI) && raw.wBACPI.length === 1 && token2(raw.wBACPI[0])) return "fold";
-    if (exact([...common, "cPI", "pITT", "sNA", "pASA", "sNAA", "mAVTB"]) && token2(raw.cPI) && raw.pITT === raw.cPI && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now && integer(raw.mAVTB)) return "turn";
+    const exact2 = (fields) => Object.keys(raw).length === fields.length && fields.every((k) => Object.hasOwn(raw, k));
+    if (exact2([...common, "pGS", "sNA", "pITT", "sNAA", "wBACPI"]) && object3(raw.pGS) && Object.keys(raw.pGS).length === 1 && token2(Object.keys(raw.pGS)[0]) && Object.values(raw.pGS)[0] === "fold" && raw.sNA === "NSAF" && raw.pITT === null && integer(raw.sNAA) && Array.isArray(raw.wBACPI) && raw.wBACPI.length === 1 && token2(raw.wBACPI[0])) return "fold";
+    if (exact2([...common, "cPI", "pITT", "sNA", "pASA", "sNAA", "mAVTB"]) && token2(raw.cPI) && raw.pITT === raw.cPI && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now && integer(raw.mAVTB)) return "turn";
     return null;
   }
 
@@ -334,10 +334,57 @@
     return Object.keys(raw).length === keys2.length && keys2.every((k) => Object.hasOwn(raw, k)) && integer2(raw.now) && integer2(raw.pre) && raw.now > raw.pre && integer2(raw.sNAA) && integer2(raw.sN) && raw.mR === 8 && raw.cHB === 5 && raw.mEV === 0 && raw.fV === "0.1.72" && raw.sNA === "NSAA" && raw.pITT === null && same(raw.pGS, {}) && same(raw.wBACPI, []) && same(raw.eventsData, []) && object4(raw.tB) && Object.keys(raw.tB).length === 1 && Object.values(raw.tB)[0] === 5 && same(raw.cRPI, Object.keys(raw.tB));
   }
 
-  // src/firstUtgSource.ts
+  // src/flopWindow.ts
   var object5 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+  var integer3 = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+  var same2 = (a, b) => {
+    if (a === b) return true;
+    if (Array.isArray(a)) return Array.isArray(b) && a.length === b.length && a.every((v, i) => same2(v, b[i]));
+    return object5(a) && object5(b) && Object.keys(a).length === Object.keys(b).length && Object.keys(a).every((k) => Object.hasOwn(b, k) && same2(a[k], b[k]));
+  };
+  var exact = (v, keys2) => Object.keys(v).length === keys2.length && keys2.every((k) => Object.hasOwn(v, k));
+  var common2 = ["now", "pre", "eventsData", "mEV", "fV", "sN"];
+  function flopPatchKind(raw) {
+    if (!object5(raw) || !integer3(raw.now) || !integer3(raw.pre) || raw.now <= raw.pre || !integer3(raw.sN) || raw.mEV !== 0 || raw.fV !== "0.1.72" || !same2(raw.eventsData, [])) return null;
+    const opening = hjPatchKind(raw);
+    if (opening) return opening;
+    const action = raw.sNA === "NSAA" && raw.pITT === null && integer3(raw.sNAA);
+    const contribution = object5(raw.tB) && Object.keys(raw.tB).length === 1 && Object.values(raw.tB)[0] === 2 && same2(raw.pGS, {}) && Array.isArray(raw.cRPI) && Array.isArray(raw.wBACPI);
+    if (action && contribution && exact(raw, [...common2, "tB", "pGS", "sNA", "cRPI", "pITT", "sNAA", "wBACPI"])) return "contribution";
+    if (action && contribution && raw.mR === 4 && raw.cHB === 2 && exact(raw, [...common2, "mR", "tB", "cHB", "pGS", "sNA", "cRPI", "pITT", "sNAA", "wBACPI"])) return "bet";
+    if (action && raw.bigBlindCheck === true && same2(raw.wBACPI, []) && exact(raw, [...common2, "sNA", "pITT", "sNAA", "wBACPI", "bigBlindCheck"])) return "bb_check";
+    if (exact(raw, [
+      ...common2,
+      "gT",
+      "mR",
+      "pC",
+      "tB",
+      "cHB",
+      "cPI",
+      "oTC",
+      "pot",
+      "sNA",
+      "cRPI",
+      "pASA",
+      "pITT",
+      "sNAA",
+      "mAVTB",
+      "players",
+      "bigBlindCheck"
+    ]) && same2(raw.gT, [1, 1]) && raw.mR === 2 && raw.cHB === 0 && raw.pot === 10 && raw.cPI === raw.pITT && typeof raw.cPI === "string" && raw.pASA === raw.now && raw.sNA === null && raw.sNAA === null && integer3(raw.mAVTB) && raw.bigBlindCheck === false && same2(raw.cRPI, []) && object5(raw.oTC) && exact(raw.oTC, ["1"]) && Array.isArray(raw.oTC["1"]) && raw.oTC["1"].length === 3 && raw.oTC["1"].every((c) => typeof c === "string" && /^[2-9TJQKA][shdc]$/.test(c)) && object5(raw.tB) && Object.keys(raw.tB).length === 5 && Object.values(raw.tB).every((v) => v === "<D>") && object5(raw.players) && Object.keys(raw.players).length === 5 && Object.values(raw.players).every((p) => object5(p) && exact(p, ["stack"]) && integer3(p.stack)) && object5(raw.pC) && Object.keys(raw.pC).length === 6 && Object.values(raw.pC).every((p) => object5(p) && exact(p, ["name1", "name2", "name1RH"]) && p.name1RH === null && (p.name1 === null || typeof p.name1 === "string" && p.name1.length <= 32) && (p.name2 === null || p.name2 === "<D>"))) return "deal";
+    return null;
+  }
+
+  // src/firstUtgSource.ts
+  var object6 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
   var token3 = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(v);
-  var same2 = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  var integer4 = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+  var same3 = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  var equivalent = (a, b) => {
+    if (a === b) return true;
+    if (Array.isArray(a)) return Array.isArray(b) && a.length === b.length && a.every((v, i) => equivalent(v, b[i]));
+    return object6(a) && object6(b) && Object.keys(a).length === Object.keys(b).length && Object.keys(a).every((k) => Object.hasOwn(b, k) && equivalent(a[k], b[k]));
+  };
   var keys = [
     "id",
     "hI",
@@ -383,30 +430,38 @@
     if (typeof data !== "string" || data.length > 2e6 || !data.startsWith("42[")) return null;
     try {
       const p = JSON.parse(data.slice(2));
-      if (!Array.isArray(p) || p.length !== 2 || !["registered", "gC", "rup"].includes(p[0]) || !object5(p[1])) return null;
+      if (!Array.isArray(p) || p.length !== 2 || !["registered", "gC", "rup"].includes(p[0]) || !object6(p[1])) return null;
       const raw = p[0] === "registered" ? p[1].gameState : p[1];
-      if (!object5(raw)) return null;
-      if (Object.hasOwn(raw, "eventsData") && !same2(raw.eventsData, [])) return null;
+      if (!object6(raw)) return null;
+      if (Object.hasOwn(raw, "eventsData") && !same3(raw.eventsData, [])) return null;
       const heroId = p[0] === "registered" ? p[1].currentPlayer?.id : knownHero;
+      const flopKind = p[0] === "gC" ? flopPatchKind(raw) : null;
       const frame = {};
       for (const key of keys) if (Object.hasOwn(raw, key)) frame[key] = raw[key];
       if (p[0] === "registered" || frame.gameResult !== "<D>") delete frame.gameResult;
       if (Object.hasOwn(raw, "players")) {
-        if (!object5(raw.players) || Object.keys(raw.players).length > 10) return null;
-        frame.players = Object.fromEntries(Object.entries(raw.players).map(([id, player]) => [id, object5(player) ? Object.fromEntries(["id", "stack", "status", "disconnectedSince"].filter((k) => Object.hasOwn(player, k)).map((k) => [k, player[k]])) : player]));
+        if (!object6(raw.players) || Object.keys(raw.players).length > 10) return null;
+        frame.players = Object.fromEntries(Object.entries(raw.players).map(([id, player]) => [id, object6(player) ? Object.fromEntries(["id", "stack", "status", "disconnectedSince"].filter((k) => Object.hasOwn(player, k)).map((k) => [k, player[k]])) : player]));
       }
       if (Object.hasOwn(raw, "pC")) {
-        if (!object5(raw.pC) || Object.keys(raw.pC).length > 10) return null;
-        if (Object.values(raw.pC).some((hand) => !object5(hand) || !Array.isArray(hand.cards) || hand.cards.length > 2 || hand.cards.some((c) => !object5(c) || !(c.value === null || typeof c.value === "string") || typeof c.showing !== "boolean"))) return null;
-        frame.pC = Object.fromEntries(Object.entries(raw.pC).map(([id, hand]) => [
-          id,
-          { cards: hand.cards.map((c) => ({ value: id === heroId ? c.value : null, showing: c.showing })) }
-        ]));
+        if (!object6(raw.pC) || Object.keys(raw.pC).length > 10) return null;
+        if (flopKind === "deal") {
+          if (Object.entries(raw.pC).some(([id, hand]) => id !== heroId && !equivalent(hand, { name1: null, name2: null, name1RH: null }))) return null;
+          frame.pC = {};
+        } else {
+          if (Object.values(raw.pC).some((hand) => !object6(hand) || !Array.isArray(hand.cards) || hand.cards.length > 2 || hand.cards.some((c) => !object6(c) || !(c.value === null || typeof c.value === "string") || typeof c.showing !== "boolean"))) return null;
+          frame.pC = Object.fromEntries(Object.entries(raw.pC).map(([id, hand]) => [
+            id,
+            { cards: hand.cards.map((c) => ({ value: id === heroId ? c.value : null, showing: c.showing })) }
+          ]));
+        }
       }
       const result = {
         event: p[0],
         heroId: token3(heroId) ? heroId : null,
         frame,
+        ...p[0] === "gC" && same3(raw.gT, [1, 0]) && integer4(raw.mR) && integer4(raw.cHB) ? { flopBoundary: { mR: raw.mR, cHB: raw.cHB } } : {},
+        ...flopKind && flopKind !== "turn" && flopKind !== "fold" ? { flopPatch: raw } : {},
         ...p[0] === "gC" && (isObservedUtgOpenPatch(raw) || isObservedHjCallPatch(raw)) ? { bettingPatch: raw } : {},
         ...p[0] === "gC" && hjPatchKind(raw) ? { hjPatch: raw } : {}
       };

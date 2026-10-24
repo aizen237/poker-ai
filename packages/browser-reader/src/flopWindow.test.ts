@@ -1,0 +1,231 @@
+import { readFileSync } from "node:fs";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createFirstUtgSource, projectFirstUtgSource } from "../../../apps/pokernow-extension/src/firstUtgSource.js";
+import { parseHTML } from "linkedom";
+
+const mocks = vi.hoisted(() => ({ read: vi.fn() }));
+vi.mock("../../../apps/pokernow-extension/src/tableRead.js", () => ({ readLiveTable: mocks.read }));
+vi.mock("../../../apps/pokernow-extension/src/opponentStats.js", () => ({ createLiveOpponentClient: () => ({ tick() {}, observe() {}, profile() { return null; } }) }));
+
+const frames = (): any[] => JSON.parse(readFileSync(new URL("./fixtures/pokernow-flop-239.json", import.meta.url), "utf8")).frames;
+function replay(fs = frames(), changeProjection?: (p: any, f: any) => void) {
+  let now = 0, hero: string | null = null;
+  const source = createFirstUtgSource("TABLE_TEST", () => now);
+  const accept = (f: any) => {
+    now = f.localReceivedAt;
+    const p = projectFirstUtgSource("42" + JSON.stringify([f.event, f.payload]), hero);
+    changeProjection?.(p, f); hero = p?.heroId ?? hero;
+    source.accept(p, f.localReceiveSequence, f.connectionGeneration, now);
+  };
+  for (const f of fs) accept(f);
+  return { source, accept, at: (t: number) => { now = t; } };
+}
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+describe("hand239 recorded flop observations through the sole source authority", () => {
+  it("retains registration, reconnecting player removal marker, fresh boundary and original positions", () => {
+    const f = replay(frames().slice(0, 4)), p = f.source.proof()!;
+    expect(p).toMatchObject({ witness: { heroId: "PLAYER_1", handId: "HAND_239", handNumber: 239,
+      heroCards: ["3s", "Js"] }, continuity: { baselineSequence: 1, throughSequence: 4, generation: 1 } });
+    expect(p.witness.players.map(p => [p.seat, p.position, p.sourceStack])).toEqual([
+      [5, "BTN", 253], [9, "SB", 244], [10, "BB", 260], [1, "UTG", 261], [2, "HJ", 240], [3, "CO", 244],
+    ]);
+    expect(f.source.flopProof()).toBeNull();
+  });
+  it("certifies frame16's board, explicit reset and SB activation while preserving private cards", () => {
+    const f = replay(frames().slice(0, 16)), p = f.source.flopProof()!;
+    expect(p).toMatchObject({ scope: "flop_transition", historyComplete: false, liveRecommendationsAllowed: false,
+      continuity: { baselineSequence: 1, throughSequence: 16, generation: 1, cursor: 1792829782249 },
+      anchor: { sequence: 4 }, activation: { sequence: 16, playerId: "PLAYER_9", receivedAt: 1792829779949 },
+      transition: { sequence: 16, from: "preflop", to: "flop", board: ["8d", "Jh", "Ts"],
+        clearedContributions: { PLAYER_9: 2, PLAYER_10: 2, PLAYER_1: 2, PLAYER_2: 2, PLAYER_3: 2 },
+        observedStacks: { PLAYER_1: 259, PLAYER_2: 238, PLAYER_3: 242, PLAYER_5: 253, PLAYER_9: 242, PLAYER_10: 258 } },
+      expiresAt: 1792829789949, observations: [], facts: { amountToCallChips: null, contestablePotChips: null, legalActions: null } });
+    expect(Object.values(p.contributions)).toEqual([0, 0, 0, 0, 0, 0]);
+    const state = f.source.diagnostic().carriedState!.projection.frame;
+    expect(state.pC.PLAYER_1.cards).toEqual([{ value: "3s", showing: false }, { value: "Js", showing: false }]);
+    for (const [id, hand] of Object.entries(state.pC) as [string, any][])
+      if (id !== "PLAYER_1") expect(hand.cards.every((c: any) => c.value === null)).toBe(true);
+    expect(state.tB).toEqual({});
+    expect(f.source.proof()).toBeNull();
+  });
+  it("validates frames17-20 and issues only the explicit hero activation with its own original deadline", () => {
+    for (const count of [17, 18, 19]) expect(replay(frames().slice(0, count)).source.flopProof()).toBeNull();
+    const f = replay(), p = f.source.flopProof()!;
+    expect(p).toMatchObject({ scope: "flop_hero_activation", activation: { sequence: 20, playerId: "PLAYER_1",
+      receivedAt: 1792829805759, cursor: 1792829808066 }, expiresAt: 1792829815759,
+      continuity: { throughSequence: 20 }, contributions: { PLAYER_1: 0, PLAYER_2: 0, PLAYER_3: 0, PLAYER_5: 0, PLAYER_9: 2, PLAYER_10: 2 },
+      observations: [{ sequence: 17, playerId: "PLAYER_9", priorContribution: 0, contribution: 2 },
+        { sequence: 19, playerId: "PLAYER_10", priorContribution: 0, contribution: 2 }] });
+    expect(p.activation.receivedAt).toBeGreaterThan(p.transition.receivedAt + 10000);
+    expect(p.historyComplete).toBe(false); expect(p.liveRecommendationsAllowed).toBe(false);
+    expect(Object.values(p.facts)).toEqual([null, null, null]);
+    p.transition.board.reverse(); p.witness.players[0]!.seat = 99;
+    expect(f.source.flopProof()!.transition.board).toEqual(["8d", "Jh", "Ts"]);
+    expect(f.source.flopProof()!.witness.players[0]!.seat).toBe(5);
+    f.at(1792829805758); expect(f.source.flopProof()).toBeNull();
+    f.at(1792829815758); expect(f.source.flopProof()).not.toBeNull();
+    f.at(1792829815759); expect(f.source.flopProof()).toBeNull();
+    f.at(1792829815760); expect(f.source.flopProof()).toBeNull();
+  });
+  it.each(Array.from({ length: 20 }, (_, i) => i))("cannot repair missing recorded frame %i", index => {
+    const fs = frames(); fs.splice(index, 1);
+    expect(replay(fs).source.flopProof()).toBeNull();
+  });
+  it.each(Array.from({ length: 16 }, (_, i) => i + 4))("unknown raw mutation at index %i cannot disappear into the projection", index => {
+    const fs = frames(); fs[index].payload.unknownMutation = true;
+    expect(replay(fs).source.flopProof()).toBeNull();
+  });
+  const mutations: Record<string, (fs: any[]) => void> = {
+    predecessor: fs => fs[15].payload.pre++, sequence: fs => fs[15].localReceiveSequence++,
+    generation: fs => fs[15].connectionGeneration++, replay: fs => fs.splice(18, 0, structuredClone(fs[17])),
+    "receipt-regression": fs => fs[19].localReceivedAt = fs[18].localReceivedAt - 1,
+    "source-regression": fs => fs[19].payload.now = fs[19].payload.pre,
+    "wrong-table": fs => fs[15].payload.id = "OTHER",
+    "wrong-hand": fs => fs[15].payload.hI = "OTHER",
+    "wrong-number": fs => fs[15].payload.gN = 240,
+    "wrong-hero": fs => fs[0].payload.currentPlayer.id = "PLAYER_2",
+    "roster-change": fs => fs[17].payload.iHPI = ["PLAYER_1"],
+    "dealer-change": fs => fs[15].payload.dealerSeat = 3,
+    "seat-change": fs => fs[15].payload.seats = [[1, "PLAYER_1"]],
+    "wrong-profile": fs => fs[0].payload.gameState.ante = 1,
+    "missing-boundary-profile": fs => fs[3].payload.fV = "0.1.73",
+    "boundary-highest-contradiction": fs => fs[3].payload.cHB = 3,
+    "boundary-round-contradiction": fs => fs[3].payload.mR = 5,
+    "disconnected-player": fs => delete fs[2].payload.players.PLAYER_2.disconnectedSince,
+    "all-in": fs => fs[16].payload.pGS = { PLAYER_9: "allIn" },
+    "no-street": fs => delete fs[15].payload.gT,
+    "turn-street": fs => fs[15].payload.gT = [1, 2],
+    "no-board": fs => delete fs[15].payload.oTC,
+    "short-board": fs => fs[15].payload.oTC["1"].pop(),
+    "duplicate-board": fs => fs[15].payload.oTC["1"][1] = "8d",
+    "hero-collision": fs => fs[15].payload.oTC["1"][1] = "Js",
+    "multiple-boards": fs => fs[15].payload.oTC["2"] = ["Ah", "Kh", "Qh"],
+    "reordered-board-tail": fs => fs[17].payload.oTC = { "1": ["Jh", "8d", "Ts"] },
+    "missing-reset": fs => delete fs[15].payload.tB.PLAYER_1,
+    "zero-instead-of-deletion": fs => fs[15].payload.tB.PLAYER_1 = 0,
+    "extra-reset": fs => fs[15].payload.tB.PLAYER_5 = "<D>",
+    "bad-collected-stack": fs => fs[15].payload.players.PLAYER_1.stack++,
+    "unknown-deal-field": fs => fs[15].payload.unknownMutation = true,
+    "card-mutation": fs => fs[15].payload.pC.PLAYER_1.cards = [{ value: "Ah", showing: false }, { value: "Kd", showing: false }],
+    "missing-card-description": fs => delete fs[15].payload.pC.PLAYER_1.name2,
+    "wrong-first-flop-actor": fs => fs[15].payload.cPI = fs[15].payload.pITT = "PLAYER_10",
+    "conflicting-first-flop-actor": fs => fs[15].payload.pITT = "PLAYER_10",
+    "preflop-total": fs => fs[4].payload.tB.PLAYER_1 = 3,
+    "preflop-order": fs => fs[6].payload.tB = { PLAYER_3: 2 },
+    "missing-bb-check": fs => delete fs[14].payload.bigBlindCheck,
+    "wrong-fold": fs => fs[10].payload.pGS = { PLAYER_3: "fold" },
+    "flop-total": fs => fs[16].payload.tB.PLAYER_9 = 3,
+    "flop-second-total": fs => fs[18].payload.tB.PLAYER_10 = 3,
+    "flop-extra-wager": fs => fs[18].payload.tB.PLAYER_2 = 2,
+    "flop-wrong-contributor": fs => fs[18].payload.tB = { PLAYER_2: 2 },
+    "flop-wrong-activation": fs => fs[17].payload.cPI = fs[17].payload.pITT = "PLAYER_2",
+    "coalesced-activation": fs => fs[18].payload.cPI = "PLAYER_1",
+    "unknown-activation": fs => fs[19].payload.unknownMutation = true,
+    "wrong-hero-activation": fs => fs[19].payload.cPI = fs[19].payload.pITT = "PLAYER_2",
+    "conflicting-hero-activation": fs => fs[19].payload.pITT = "PLAYER_2",
+    "no-hero-activation": fs => delete fs[19].payload.pITT,
+    "refresh": fs => fs[19].event = "rup",
+  };
+  it.each(Object.keys(mutations))("rejects synthetic %s", variant => {
+    const fs = frames(); mutations[variant]!(fs);
+    expect(replay(fs).source.flopProof()).toBeNull();
+  });
+  it.each(["missing-raw", "projected-board", "projected-cards", "projected-contribution"])("rejects %s projection contradiction", variant => {
+    const f = replay(frames(), (p, frame) => {
+      if (frame.localReceiveSequence !== 16 || !p) return;
+      if (variant === "missing-raw") delete p.flopPatch;
+      if (variant === "projected-board") p.frame.oTC = { "1": [...p.frame.oTC["1"]].reverse() };
+      if (variant === "projected-cards") p.frame.pC = { PLAYER_1: { cards: [{ value: "Ah", showing: false }, { value: "Kd", showing: false }] } };
+      if (variant === "projected-contribution") p.frame.tB = {};
+    });
+    expect(f.source.flopProof()).toBeNull();
+  });
+  it.each(["empty", "actor", "hand", "reconnect", "disconnect", "missing-projection"])("invalidates the issued proof on %s without renewal", variant => {
+    const f = replay(), last = frames()[19]; expect(f.source.flopProof()).not.toBeNull();
+    if (variant === "disconnect") f.source.reset();
+    else if (variant === "missing-projection") f.source.accept(null, 21, 1, last.localReceivedAt);
+    else f.accept({ ...last, localReceiveSequence: 21, localReceivedAt: last.localReceivedAt + 1,
+      connectionGeneration: variant === "reconnect" ? 2 : 1,
+      payload: { now: last.payload.now + 1, pre: last.payload.now,
+        ...(variant === "actor" ? { cPI: "PLAYER_2", pITT: "PLAYER_2" } : {}),
+        ...(variant === "hand" ? { hI: "OTHER" } : {}) } });
+    expect(f.source.flopProof()).toBeNull();
+  });
+  it("reset also destroys historical pending observations", () => {
+    const f = replay(frames().slice(0, 19)); f.source.reset(); f.accept(frames()[19]);
+    expect(f.source.flopProof()).toBeNull();
+  });
+});
+
+describe("hand239 MAIN -> source runtime -> decision/display boundary", () => {
+  it("exposes the observed hero activation while withholding advice, legality and history even with matching simulated controls", async () => {
+    vi.resetModules();
+    const fs = frames(), last = fs[19];
+    // This read/HTML is explicit test scaffolding, NOT a recovered screenshot
+    // timestamp or DOM capture. Raw source envelopes/times remain unchanged.
+    const read = JSON.parse(readFileSync(new URL("./fixtures/utg-reader-cross-check.json", import.meta.url), "utf8")).read;
+    const stacks: Record<number, number> = { 1: 259, 2: 238, 3: 242, 5: 253, 9: 240, 10: 256 };
+    for (const seat of read.raw.seats) if (seat.isOccupied) {
+      seat.isYou = seat.seatNumber === 1;
+      seat.stackText = seat.stackContainerText = String(stacks[seat.seatNumber]);
+      seat.betValueText = seat.seatNumber === 9 || seat.seatNumber === 10 ? "2" : "0";
+      seat.statusClasses = ["table-player", `table-player-${seat.seatNumber}`,
+        ...(seat.isYou ? ["you-player", "decision-current"] : []), ...(seat.seatNumber === 5 ? ["fold"] : [])];
+      if (seat.isYou) seat.holeCardClassLists = ["3", "J"].map(rank => ["card-container", "card-s", `card-s-${rank}`, "flipped"]);
+    }
+    read.raw.boardCards = ["8d", "Jh", "Ts"].map(c => ({ valueText: c[0], suitText: c[1] }));
+    read.raw.potMainValueText = "10"; read.raw.potTotalValueText = "14";
+    const { document } = parseHTML('<html><body><button type="button">Call 2</button></body></html>');
+    const location = new URL("https://www.pokernow.com/games/TABLE_TEST");
+    const listeners: Array<(e: any) => void> = [];
+    let now = fs[0].localReceivedAt, poll = () => {}, refresh = () => {};
+    class Socket extends EventTarget {
+      send = vi.fn();
+      constructor(public url: string) { super(); }
+      incoming(f: any) { this.dispatchEvent(new MessageEvent("message", { data: "42" + JSON.stringify([f.event, f.payload]) })); }
+    }
+    const win = { location, WebSocket: Socket, setTimeout: () => 1, clearTimeout() {},
+      addEventListener: (type: string, cb: (e: any) => void) => { if (type === "message") listeners.push(cb); },
+      postMessage: (data: unknown) => { for (const cb of listeners) cb({ source: win, origin: location.origin, data }); },
+      sessionStorage: { getItem: () => null } };
+    vi.stubGlobal("window", win); vi.stubGlobal("document", document); vi.stubGlobal("location", location);
+    vi.stubGlobal("localStorage", { getItem: () => "1", removeItem() {} });
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    vi.stubGlobal("setInterval", (cb: () => void, ms: number) => { if (ms === 250) refresh = cb; else poll = cb; return 1; });
+    const logs: any[][] = [], requests: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((...args) => { logs.push(args); });
+    vi.spyOn(console, "warn").mockImplementation(() => {}); vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubGlobal("fetch", vi.fn((url: string) => { requests.push(url); return Promise.resolve(new Response("[]")); }));
+    const { readCallControl } = await import("../../../apps/pokernow-extension/src/callControlRead.js");
+    mocks.read.mockImplementation(() => { read.callControl = readCallControl(document, () => true); return read; });
+    await import("../../../apps/pokernow-extension/src/eventSource.js");
+    await import("../../../apps/pokernow-extension/src/contentScript.js");
+    const socket = new win.WebSocket("wss://www.pokernow.com/socket.io/?gameID=TABLE_TEST");
+    for (const f of fs) { now = f.localReceivedAt; socket.incoming(f); }
+    const diagnostic = () => JSON.parse(logs.filter(args => String(args[0]).includes("Copyable snapshot JSON")).at(-1)![1]);
+    const blocked = () => {
+      poll(); const d = diagnostic(), p = d.decision.scopedProofs;
+      expect(p.activation.allowed).toBe(false);
+      // Existing DOM arithmetic may report a numeric call gap. It cannot
+      // supply a CALL legality certificate or consume the source observation.
+      for (const scope of ["actionWindow", "legalActions", "accounting", "pot"])
+        expect(p.evidence.proofs.find((proof: any) => proof.scope === scope)?.status, scope).not.toBe("proven");
+      expect(p.responseWindow).toBeNull(); expect(p.callLegality).toBeNull();
+      expect(d.handTimeline.current.historyComplete).toBe(false);
+      expect(d.handTimeline.current.events).toEqual([]);
+      expect(document.querySelector('#poker-ai-reader-overlay [style*="font-size:16px"]')).toBeNull();
+      expect(requests.filter(url => url.endsWith("/recommendation"))).toEqual([]);
+      expect(socket.send).not.toHaveBeenCalled();
+      return d.handTimeline.sourceStatus.flopObservationProof;
+    };
+    expect(blocked()).toMatchObject({ scope: "flop_hero_activation", activation: { sequence: 20 }, expiresAt: 1792829815759 });
+    // Log refresh and polling cannot renew the source opportunity.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    now = last.localReceivedAt + 9999; refresh(); expect(blocked()?.expiresAt).toBe(1792829815759);
+    now++; refresh(); expect(blocked()).toBeNull();
+    socket.incoming({ ...last, payload: { now: last.payload.now + 1, pre: last.payload.now } });
+    expect(blocked()).toBeNull();
+    socket.dispatchEvent(new Event("close")); expect(blocked()).toBeNull();
+  });
+});
