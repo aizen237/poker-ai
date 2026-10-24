@@ -344,6 +344,37 @@
   };
   var exact = (v, keys2) => Object.keys(v).length === keys2.length && keys2.every((k) => Object.hasOwn(v, k));
   var common2 = ["now", "pre", "eventsData", "mEV", "fV", "sN"];
+  function isFlopAccountingBoundary(raw) {
+    return object5(raw) && exact(raw, [
+      ...common2,
+      "gN",
+      "gT",
+      "hI",
+      "nR",
+      "pC",
+      "tB",
+      "cPI",
+      "oTC",
+      "pGS",
+      "rHP",
+      "sBS",
+      "sNA",
+      "bBPI",
+      "cRPI",
+      "iHPI",
+      "pASA",
+      "pITT",
+      "sBPI",
+      "sNAA",
+      "mAVTB",
+      "wBACPI",
+      "players",
+      "dealerID",
+      "dealerSeat",
+      "gameResult",
+      "rHC"
+    ]) && raw.mEV === 0 && integer3(raw.sN) && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now && raw.mAVTB === 268 && raw.sBS === 5 && same2(raw.wBACPI, [raw.bBPI]) && object5(raw.pC) && Object.values(raw.pC).every((p) => object5(p) && exact(p, ["cards", "name1", "name2", "name1RH", "name2RH", "prob1"]) && [p.name1, p.name2, p.name1RH, p.name2RH, p.prob1].every((v) => v === null) && Array.isArray(p.cards) && p.cards.every((c) => object5(c) && exact(c, ["value", "showing"])));
+  }
   function flopPatchKind(raw) {
     if (!object5(raw) || !integer3(raw.now) || !integer3(raw.pre) || raw.now <= raw.pre || !integer3(raw.sN) || raw.mEV !== 0 || raw.fV !== "0.1.72" || !same2(raw.eventsData, [])) return null;
     const opening = hjPatchKind(raw);
@@ -462,6 +493,7 @@
         frame,
         ...(p[0] === "registered" || p[0] === "gC" && same3(raw.gT, [1, 0])) && (Object.hasOwn(raw, "mR") || Object.hasOwn(raw, "cHB")) ? { flopBoundary: { mR: integer4(raw.mR) ? raw.mR : null, cHB: integer4(raw.cHB) ? raw.cHB : null } } : {},
         ...flopKind && flopKind !== "turn" && flopKind !== "fold" ? { flopPatch: raw } : {},
+        ...p[0] === "gC" && isFlopAccountingBoundary(raw) ? { flopAccountingBoundary: true } : {},
         ...p[0] === "gC" && (isObservedUtgOpenPatch(raw) || isObservedHjCallPatch(raw)) ? { bettingPatch: raw } : {},
         ...p[0] === "gC" && hjPatchKind(raw) ? { hjPatch: raw } : {}
       };

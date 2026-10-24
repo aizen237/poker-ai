@@ -159,9 +159,10 @@ describe("hand239 recorded flop observations through the sole source authority",
 });
 
 describe("recorded flop MAIN -> source runtime -> decision/display boundary", () => {
-  it.each([239, 243])("hand%i withholds advice, legality and history even with matching simulated controls", async hand => {
+  it.each([[239, false], [243, false], [243, true]] as const)("hand%i withholds advice, legality and history (unknown return: %s)", async (hand, unknownReturn) => {
     vi.resetModules();
     const fs: any[] = hand === 239 ? frames() : JSON.parse(readFileSync(new URL("./fixtures/pokernow-flop-243.json", import.meta.url), "utf8")).frames;
+    if (unknownReturn) fs[20].payload.uncalledReturn = { PLAYER_1: 2 }; // Labeled synthetic rejection case.
     const last = fs[19], expiry = last.localReceivedAt + 10000;
     // This read/HTML is explicit test scaffolding, NOT a recovered screenshot
     // timestamp or DOM capture. Raw source envelopes/times remain unchanged.
@@ -225,6 +226,10 @@ describe("recorded flop MAIN -> source runtime -> decision/display boundary", ()
       return d.handTimeline.sourceStatus.flopObservationProof;
     };
     expect(blocked()).toMatchObject({ scope: "flop_hero_activation", activation: { sequence: 20 }, expiresAt: expiry });
+    if (hand === 243) expect(blocked()?.accounting).toMatchObject({
+      preflop: { streetContributionSumChips: 12 }, flop: { streetContributionSumChips: 6 },
+      cumulativeInvestmentSumChips: 18, sourcePot: { valueChips: 12 }, contestablePotChips: null, potLedger: null,
+    });
     // Log refresh and polling cannot renew the source opportunity.
     await new Promise(resolve => setTimeout(resolve, 0));
     now = last.localReceivedAt + 9999; refresh(); expect(blocked()?.expiresAt).toBe(expiry);
@@ -233,13 +238,17 @@ describe("recorded flop MAIN -> source runtime -> decision/display boundary", ()
       for (const f of fs.slice(20)) {
         now = f.localReceivedAt; socket.incoming(f);
         expect(blocked()).toBeNull();
-        expect(diagnostic().handTimeline.sourceStatus.historicalFlopAcceptance).toMatchObject({
+        if (unknownReturn) expect(diagnostic().handTimeline.sourceStatus.historicalFlopAcceptance).toBeNull();
+        else expect(diagnostic().handTimeline.sourceStatus.historicalFlopAcceptance).toMatchObject({
           scope: "historical_flop_call2", originalHeroExpiresAt: expiry, acceptance: { action: "call", sequence: 21 },
           nextActivation: f.localReceiveSequence === 22 ? { sequence: 22, playerId: "PLAYER_2" } : null,
+          accounting: { preflop: { streetContributionSumChips: 12 }, flop: { streetContributionSumChips: 8 },
+            cumulativeInvestmentSumChips: 20, sourcePot: { valueChips: 12 }, displayedTotalPotChips: null,
+            contestablePotChips: null, potLedger: null },
         });
       }
       now += 10000; refresh(); expect(blocked()).toBeNull();
-      expect(diagnostic().handTimeline.sourceStatus.historicalFlopAcceptance.originalHeroExpiresAt).toBe(expiry);
+      if (!unknownReturn) expect(diagnostic().handTimeline.sourceStatus.historicalFlopAcceptance.originalHeroExpiresAt).toBe(expiry);
     }
     const tail = fs.at(-1);
     socket.incoming({ ...tail, payload: { now: tail.payload.now + 1, pre: tail.payload.now } });

@@ -1,6 +1,7 @@
 import type { FirstUtgProof, FirstUtgWitness, UtgProjection } from "./firstUtgSource.js";
 import type { BoundedUtgState } from "./firstUtgState.js";
 import { hjPatchKind } from "./hjWindow.js";
+import type { CoFacingOpenProof } from "./bettingWindow.js";
 
 const object = (v: unknown): v is Record<string, any> => !!v && typeof v === "object" && !Array.isArray(v);
 const integer = (v: unknown) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
@@ -12,6 +13,44 @@ const same = (a: unknown, b: unknown): boolean => {
 };
 const exact = (v: Record<string, any>, keys: string[]) => Object.keys(v).length === keys.length && keys.every(k => Object.hasOwn(v, k));
 const common = ["now", "pre", "eventsData", "mEV", "fV", "sN"];
+
+/** Additional accounting gate at hand243's boundary. The opening witness owns
+ * identity/posts; this closed raw shape prevents hidden returns/pot mutations
+ * from being discarded by projection. It does not change preflop permission. */
+export function isFlopAccountingBoundary(raw: unknown): boolean {
+  return object(raw) && exact(raw, [...common, "gN", "gT", "hI", "nR", "pC", "tB", "cPI", "oTC", "pGS",
+    "rHP", "sBS", "sNA", "bBPI", "cRPI", "iHPI", "pASA", "pITT", "sBPI", "sNAA", "mAVTB",
+    "wBACPI", "players", "dealerID", "dealerSeat", "gameResult", "rHC"]) &&
+    raw.mEV === 0 && integer(raw.sN) && raw.sNA === null && raw.sNAA === null &&
+    raw.pASA === raw.now && raw.mAVTB === 268 && raw.sBS === 5 && same(raw.wBACPI, [raw.bBPI]) &&
+    object(raw.pC) && Object.values(raw.pC).every(p => object(p) &&
+      exact(p, ["cards", "name1", "name2", "name1RH", "name2RH", "prob1"]) &&
+      [p.name1, p.name2, p.name1RH, p.name2RH, p.prob1].every(v => v === null) &&
+      Array.isArray(p.cards) && p.cards.every((c: unknown) => object(c) && exact(c, ["value", "showing"])));
+}
+
+/** Reuses the preflop source accounting rows, separately for each street.
+ * Neither these gross investments nor display arithmetic is a net pot ledger. */
+export interface FlopContributionAccounting {
+  scope: "hand243_contribution_prefix";
+  coverage: "validated_prefix";
+  units: "chips";
+  preflop: CoFacingOpenProof["accounting"];
+  flop: CoFacingOpenProof["accounting"];
+  preflopObservations: FlopObservationProof["observations"];
+  cumulativeInvestments: Array<{ playerId: string; seat: number; preflopChips: number; flopChips: number;
+    investedChips: number; observedSourceStackChips: number }>;
+  cumulativeInvestmentSumChips: number;
+  sourcePot: { valueChips: number; sequence: number; cursor: number; receivedAt: number };
+  /** Addition only, never an independently observed display or eligible pot. */
+  sourcePotPlusStreetChips: number;
+  displayedTotalPotChips: null;
+  contestablePotChips: null;
+  netCommittedChips: null;
+  returnedUncalledChips: null;
+  rakeOrDropChips: null;
+  potLedger: null;
+}
 
 /** Closed hand239/243 raw shapes, checked before projection can hide mutations.
  * These are observations, NOT a general bet/call/check or sizing contract. */
@@ -54,10 +93,11 @@ export interface FlopObservationProof {
   anchor: { sequence: number; cursor: number; receivedAt: number };
   transition: { sequence: number; cursor: number; previousCursor: number; receivedAt: number;
     board: string[]; from: "preflop"; to: "flop"; clearedContributions: Record<string, number>;
-    observedStacks: Record<string, number> };
+    observedStacks: Record<string, number>; observedPotChips: number };
   activation: { sequence: number; cursor: number; previousCursor: number; receivedAt: number; playerId: string };
   observations: Array<{ sequence: number; playerId: string; priorContribution: number; contribution: number; receivedAt: number }>;
   contributions: Record<string, number>;
+  accounting?: FlopContributionAccounting;
   facts: { amountToCallChips: null; contestablePotChips: null; legalActions: null };
 }
 export interface FlopPending {
@@ -67,6 +107,8 @@ export interface FlopPending {
   step: number;
   transition?: FlopObservationProof["transition"];
   observations: FlopObservationProof["observations"];
+  /** Only initialized by the closed raw hand243 boundary. */
+  preflopObservations?: FlopObservationProof["observations"];
   heroActivation?: FlopObservationProof["activation"];
   acceptance?: FlopAcceptanceProof["acceptance"];
 }
@@ -103,7 +145,45 @@ export interface FlopAcceptanceProof {
   nextActivation: FlopObservationProof["activation"] | null;
   observations: FlopObservationProof["observations"];
   contributions: Record<string, number>;
+  accounting?: FlopContributionAccounting;
   facts: FlopObservationProof["facts"];
+}
+
+/** Called only after the existing recognizer validates the entire prefix.
+ * Sum observed deltas independently, then reconcile with reset/source totals.
+ * Do not call reconcileCompleteHandAccounting/proveContestablePot: their
+ * complete-hand, net-adjustment and no-rake evidence is absent here. */
+function contributionAccounting(pending: FlopPending, next: BoundedUtgState): FlopContributionAccounting | null {
+  const { witness: w, transition: t, preflopObservations: pre, observations: flop } = pending;
+  if (pending.profile !== "hand243" || !t || !pre) return null;
+  const street = (observations: FlopObservationProof["observations"], preflop: boolean): CoFacingOpenProof["accounting"] => {
+    const contributions = w.players.map(p => {
+      const forcedChips = preflop ? p.contribution : 0;
+      const voluntaryInvestmentChips = observations.filter(o => o.playerId === p.playerId)
+        .reduce((sum, o) => sum + o.contribution - o.priorContribution, 0);
+      const streetTotalChips = forcedChips + voluntaryInvestmentChips;
+      return { playerId: p.playerId, seat: p.seat, position: p.position, forcedChips, voluntaryInvestmentChips,
+        streetTotalChips, remainingCapacityChips: (preflop ? p.sourceStack : t.observedStacks[p.playerId]!) - streetTotalChips };
+    });
+    return { units: "chips", contributions, streetContributionSumChips: contributions.reduce((sum, p) => sum + p.streetTotalChips, 0),
+      contestablePotChips: null, provenance: "Hand243 closed source prefix: forced posts plus distinct observed increases. Remaining capacity is arithmetic, not an observed stack decrement or CALL permission." };
+  };
+  const preflop = street(pre, true), current = street(flop, false);
+  if (preflop.contributions.some(p => p.streetTotalChips !== t.clearedContributions[p.playerId] ||
+      p.remainingCapacityChips !== t.observedStacks[p.playerId]) ||
+      current.contributions.some(p => p.streetTotalChips !== (next.tB[p.playerId] ?? 0)) ||
+      preflop.streetContributionSumChips !== t.observedPotChips) return null;
+  const cumulativeInvestments = preflop.contributions.map((p, i) => ({ playerId: p.playerId, seat: p.seat,
+    preflopChips: p.streetTotalChips, flopChips: current.contributions[i]!.streetTotalChips,
+    investedChips: p.streetTotalChips + current.contributions[i]!.streetTotalChips,
+    observedSourceStackChips: next.players[p.playerId].stack }));
+  return { scope: "hand243_contribution_prefix", coverage: "validated_prefix", units: "chips", preflop, flop: current,
+    preflopObservations: structuredClone(pre), cumulativeInvestments,
+    cumulativeInvestmentSumChips: cumulativeInvestments.reduce((sum, p) => sum + p.investedChips, 0),
+    sourcePot: { valueChips: t.observedPotChips, sequence: t.sequence, cursor: t.cursor, receivedAt: t.receivedAt },
+    sourcePotPlusStreetChips: t.observedPotChips + current.streetContributionSumChips,
+    displayedTotalPotChips: null, contestablePotChips: null, netCommittedChips: null,
+    returnedUncalledChips: null, rakeOrDropChips: null, potLedger: null };
 }
 
 /** Dependent recognizer only: advanceUtgState owns all state and continuity.
@@ -176,12 +256,17 @@ export function advanceFlopWindow(pending: FlopPending, data: UtgProjection, pre
         w.players.some(p => p.playerId !== w.heroId && !same(raw.pC[p.playerId], { name1: null, name2: null, name1RH: null }))) return null;
     transition = { sequence, cursor: next.now, previousCursor: previous.now, receivedAt: at, board: [...board],
       from: "preflop", to: "flop", clearedContributions: structuredClone(previous.tB),
-      observedStacks: Object.fromEntries(w.players.map(p => [p.playerId, next.players[p.playerId].stack])) };
+      observedStacks: Object.fromEntries(w.players.map(p => [p.playerId, next.players[p.playerId].stack])), observedPotChips: raw.pot };
   }
   const observations = [...pending.observations];
   if (kind === "bet" || kind === "contribution" && step > 11) observations.push({ sequence, playerId: actor.playerId,
     priorContribution: previous.tB[actor.playerId] ?? 0, contribution: next.tB[actor.playerId], receivedAt: at });
   const advanced: FlopPending = { ...pending, step: step + 1, ...(transition ? { transition } : {}), observations };
+  if (pending.preflopObservations && kind === "contribution" && step < 11) {
+    advanced.preflopObservations = [...pending.preflopObservations, { sequence, playerId: actor.playerId,
+      priorContribution: previous.tB[actor.playerId] ?? 0, contribution: next.tB[actor.playerId], receivedAt: at }];
+  }
+  const accounting = contributionAccounting(advanced, next);
   const activation = { sequence, cursor: next.now, previousCursor: previous.now, receivedAt: at, playerId: actor.playerId };
   if (hand243 && step === 17) advanced.heroActivation = activation;
   if (hand243 && step >= 18) {
@@ -207,6 +292,7 @@ export function advanceFlopWindow(pending: FlopPending, data: UtgProjection, pre
       heroActivation: structuredClone(pending.heroActivation), originalHeroExpiresAt: pending.heroActivation.receivedAt + 10_000,
       acceptance: structuredClone(advanced.acceptance), nextActivation: step === 19 ? activation : null,
       observations, contributions: totals(step), facts: { amountToCallChips: null, contestablePotChips: null, legalActions: null },
+      ...(accounting ? { accounting } : {}),
     } };
   }
   const heroStep = hand243 ? 17 : 15;
@@ -215,9 +301,10 @@ export function advanceFlopWindow(pending: FlopPending, data: UtgProjection, pre
     version: 1, scope: step === 11 ? "flop_transition" : "flop_hero_activation", historyComplete: false,
     liveRecommendationsAllowed: false, expiresAt: at + 10_000,
     witness: { ...structuredClone(w), cursor: next.now, previousCursor: previous.now, receivedAt: at,
-      provenance: `Hand${hand243 ? 243 : 239} closed source observation prefix; original positions frozen at hand start. No legality, pot accounting, complete history or live recommendation authority.` },
+      provenance: `Hand${hand243 ? 243 : 239} closed source observation prefix; original positions frozen at hand start. No legality, contestable-pot, complete history or live recommendation authority.` },
     anchor: structuredClone(pending.anchor), transition: structuredClone(transition!),
     activation,
     observations, contributions: totals(step), facts: { amountToCallChips: null, contestablePotChips: null, legalActions: null },
+    ...(accounting ? { accounting } : {}),
   } };
 }
