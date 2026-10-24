@@ -158,24 +158,29 @@ describe("hand239 recorded flop observations through the sole source authority",
   });
 });
 
-describe("hand239 MAIN -> source runtime -> decision/display boundary", () => {
-  it("exposes the observed hero activation while withholding advice, legality and history even with matching simulated controls", async () => {
+describe("recorded flop MAIN -> source runtime -> decision/display boundary", () => {
+  it.each([239, 243])("hand%i withholds advice, legality and history even with matching simulated controls", async hand => {
     vi.resetModules();
-    const fs = frames(), last = fs[19];
+    const fs: any[] = hand === 239 ? frames() : JSON.parse(readFileSync(new URL("./fixtures/pokernow-flop-243.json", import.meta.url), "utf8")).frames;
+    const last = fs[19], expiry = last.localReceivedAt + 10000;
     // This read/HTML is explicit test scaffolding, NOT a recovered screenshot
     // timestamp or DOM capture. Raw source envelopes/times remain unchanged.
     const read = JSON.parse(readFileSync(new URL("./fixtures/utg-reader-cross-check.json", import.meta.url), "utf8")).read;
-    const stacks: Record<number, number> = { 1: 259, 2: 238, 3: 242, 5: 253, 9: 240, 10: 256 };
+    const stacks: Record<number, number> = hand === 239 ? { 1: 259, 2: 238, 3: 242, 5: 253, 9: 240, 10: 256 }
+      : { 1: 254, 2: 233, 3: 238, 5: 251, 9: 244, 10: 264 };
     for (const seat of read.raw.seats) if (seat.isOccupied) {
       seat.isYou = seat.seatNumber === 1;
       seat.stackText = seat.stackContainerText = String(stacks[seat.seatNumber]);
-      seat.betValueText = seat.seatNumber === 9 || seat.seatNumber === 10 ? "2" : "0";
+      seat.betValueText = (hand === 243 ? [5, 9, 10] : [9, 10]).includes(seat.seatNumber) ? "2" : "0";
       seat.statusClasses = ["table-player", `table-player-${seat.seatNumber}`,
-        ...(seat.isYou ? ["you-player", "decision-current"] : []), ...(seat.seatNumber === 5 ? ["fold"] : [])];
-      if (seat.isYou) seat.holeCardClassLists = ["3", "J"].map(rank => ["card-container", "card-s", `card-s-${rank}`, "flipped"]);
+        ...(seat.isYou ? ["you-player", "decision-current"] : []), ...(hand === 239 && seat.seatNumber === 5 ? ["fold"] : [])];
+      if (seat.isYou) seat.holeCardClassLists = (hand === 239 ? ["3s", "Js"] : ["9d", "Qc"])
+        .map(c => ["card-container", `card-${c[1]}`, `card-s-${c[0]}`, "flipped"]);
     }
-    read.raw.boardCards = ["8d", "Jh", "Ts"].map(c => ({ valueText: c[0], suitText: c[1] }));
-    read.raw.potMainValueText = "10"; read.raw.potTotalValueText = "14";
+    read.raw.dealerSeatNumber = hand === 239 ? 5 : 3;
+    read.evidence.dealerClasses = ["dealer-button-ctn", `dealer-position-${read.raw.dealerSeatNumber}`];
+    read.raw.boardCards = (hand === 239 ? ["8d", "Jh", "Ts"] : ["6h", "Qh", "3s"]).map(c => ({ valueText: c[0], suitText: c[1] }));
+    read.raw.potMainValueText = hand === 239 ? "10" : "12"; read.raw.potTotalValueText = hand === 239 ? "14" : "18";
     const { document } = parseHTML('<html><body><button type="button">Call 2</button></body></html>');
     const location = new URL("https://www.pokernow.com/games/TABLE_TEST");
     const listeners: Array<(e: any) => void> = [];
@@ -202,7 +207,7 @@ describe("hand239 MAIN -> source runtime -> decision/display boundary", () => {
     await import("../../../apps/pokernow-extension/src/eventSource.js");
     await import("../../../apps/pokernow-extension/src/contentScript.js");
     const socket = new win.WebSocket("wss://www.pokernow.com/socket.io/?gameID=TABLE_TEST");
-    for (const f of fs) { now = f.localReceivedAt; socket.incoming(f); }
+    for (const f of fs.slice(0, 20)) { now = f.localReceivedAt; socket.incoming(f); }
     const diagnostic = () => JSON.parse(logs.filter(args => String(args[0]).includes("Copyable snapshot JSON")).at(-1)![1]);
     const blocked = () => {
       poll(); const d = diagnostic(), p = d.decision.scopedProofs;
@@ -219,13 +224,27 @@ describe("hand239 MAIN -> source runtime -> decision/display boundary", () => {
       expect(socket.send).not.toHaveBeenCalled();
       return d.handTimeline.sourceStatus.flopObservationProof;
     };
-    expect(blocked()).toMatchObject({ scope: "flop_hero_activation", activation: { sequence: 20 }, expiresAt: 1792829815759 });
+    expect(blocked()).toMatchObject({ scope: "flop_hero_activation", activation: { sequence: 20 }, expiresAt: expiry });
     // Log refresh and polling cannot renew the source opportunity.
     await new Promise(resolve => setTimeout(resolve, 0));
-    now = last.localReceivedAt + 9999; refresh(); expect(blocked()?.expiresAt).toBe(1792829815759);
+    now = last.localReceivedAt + 9999; refresh(); expect(blocked()?.expiresAt).toBe(expiry);
     now++; refresh(); expect(blocked()).toBeNull();
-    socket.incoming({ ...last, payload: { now: last.payload.now + 1, pre: last.payload.now } });
+    if (hand === 243) {
+      for (const f of fs.slice(20)) {
+        now = f.localReceivedAt; socket.incoming(f);
+        expect(blocked()).toBeNull();
+        expect(diagnostic().handTimeline.sourceStatus.historicalFlopAcceptance).toMatchObject({
+          scope: "historical_flop_call2", originalHeroExpiresAt: expiry, acceptance: { action: "call", sequence: 21 },
+          nextActivation: f.localReceiveSequence === 22 ? { sequence: 22, playerId: "PLAYER_2" } : null,
+        });
+      }
+      now += 10000; refresh(); expect(blocked()).toBeNull();
+      expect(diagnostic().handTimeline.sourceStatus.historicalFlopAcceptance.originalHeroExpiresAt).toBe(expiry);
+    }
+    const tail = fs.at(-1);
+    socket.incoming({ ...tail, payload: { now: tail.payload.now + 1, pre: tail.payload.now } });
     expect(blocked()).toBeNull();
+    expect(diagnostic().handTimeline.sourceStatus.historicalFlopAcceptance).toBeNull();
     socket.dispatchEvent(new Event("close")); expect(blocked()).toBeNull();
   });
 });

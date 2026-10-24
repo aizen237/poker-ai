@@ -371,7 +371,7 @@
       "mAVTB",
       "players",
       "bigBlindCheck"
-    ]) && same2(raw.gT, [1, 1]) && raw.mR === 2 && raw.cHB === 0 && raw.pot === 10 && raw.cPI === raw.pITT && typeof raw.cPI === "string" && raw.pASA === raw.now && raw.sNA === null && raw.sNAA === null && integer3(raw.mAVTB) && raw.bigBlindCheck === false && same2(raw.cRPI, []) && object5(raw.oTC) && exact(raw.oTC, ["1"]) && Array.isArray(raw.oTC["1"]) && raw.oTC["1"].length === 3 && raw.oTC["1"].every((c) => typeof c === "string" && /^[2-9TJQKA][shdc]$/.test(c)) && object5(raw.tB) && Object.keys(raw.tB).length === 5 && Object.values(raw.tB).every((v) => v === "<D>") && object5(raw.players) && Object.keys(raw.players).length === 5 && Object.values(raw.players).every((p) => object5(p) && exact(p, ["stack"]) && integer3(p.stack)) && object5(raw.pC) && Object.keys(raw.pC).length === 6 && Object.values(raw.pC).every((p) => object5(p) && exact(p, ["name1", "name2", "name1RH"]) && p.name1RH === null && (p.name1 === null || typeof p.name1 === "string" && p.name1.length <= 32) && (p.name2 === null || p.name2 === "<D>"))) return "deal";
+    ]) && same2(raw.gT, [1, 1]) && raw.mR === 2 && raw.cHB === 0 && (raw.pot === 10 || raw.pot === 12) && raw.cPI === raw.pITT && typeof raw.cPI === "string" && raw.pASA === raw.now && raw.sNA === null && raw.sNAA === null && integer3(raw.mAVTB) && raw.bigBlindCheck === false && same2(raw.cRPI, []) && object5(raw.oTC) && exact(raw.oTC, ["1"]) && Array.isArray(raw.oTC["1"]) && raw.oTC["1"].length === 3 && raw.oTC["1"].every((c) => typeof c === "string" && /^[2-9TJQKA][shdc]$/.test(c)) && object5(raw.tB) && Object.keys(raw.tB).length === raw.pot / 2 && Object.values(raw.tB).every((v) => v === "<D>") && object5(raw.players) && Object.keys(raw.players).length === raw.pot / 2 && Object.values(raw.players).every((p) => object5(p) && exact(p, ["stack"]) && integer3(p.stack)) && object5(raw.pC) && Object.keys(raw.pC).length === 6 && Object.values(raw.pC).every((p) => object5(p) && exact(p, ["name1", "name2", "name1RH"]) && p.name1RH === null && (p.name1 === null || typeof p.name1 === "string" && p.name1.length <= 32) && (p.name2 === null || p.name2 === "<D>"))) return "deal";
     return null;
   }
 
@@ -460,7 +460,7 @@
         event: p[0],
         heroId: token3(heroId) ? heroId : null,
         frame,
-        ...p[0] === "gC" && same3(raw.gT, [1, 0]) && integer4(raw.mR) && integer4(raw.cHB) ? { flopBoundary: { mR: raw.mR, cHB: raw.cHB } } : {},
+        ...(p[0] === "registered" || p[0] === "gC" && same3(raw.gT, [1, 0])) && (Object.hasOwn(raw, "mR") || Object.hasOwn(raw, "cHB")) ? { flopBoundary: { mR: integer4(raw.mR) ? raw.mR : null, cHB: integer4(raw.cHB) ? raw.cHB : null } } : {},
         ...flopKind && flopKind !== "turn" && flopKind !== "fold" ? { flopPatch: raw } : {},
         ...p[0] === "gC" && (isObservedUtgOpenPatch(raw) || isObservedHjCallPatch(raw)) ? { bettingPatch: raw } : {},
         ...p[0] === "gC" && hjPatchKind(raw) ? { hjPatch: raw } : {}

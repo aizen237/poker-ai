@@ -10283,18 +10283,42 @@
       "mAVTB",
       "players",
       "bigBlindCheck"
-    ]) && same2(raw.gT, [1, 1]) && raw.mR === 2 && raw.cHB === 0 && raw.pot === 10 && raw.cPI === raw.pITT && typeof raw.cPI === "string" && raw.pASA === raw.now && raw.sNA === null && raw.sNAA === null && integer4(raw.mAVTB) && raw.bigBlindCheck === false && same2(raw.cRPI, []) && object6(raw.oTC) && exact(raw.oTC, ["1"]) && Array.isArray(raw.oTC["1"]) && raw.oTC["1"].length === 3 && raw.oTC["1"].every((c) => typeof c === "string" && /^[2-9TJQKA][shdc]$/.test(c)) && object6(raw.tB) && Object.keys(raw.tB).length === 5 && Object.values(raw.tB).every((v) => v === "<D>") && object6(raw.players) && Object.keys(raw.players).length === 5 && Object.values(raw.players).every((p) => object6(p) && exact(p, ["stack"]) && integer4(p.stack)) && object6(raw.pC) && Object.keys(raw.pC).length === 6 && Object.values(raw.pC).every((p) => object6(p) && exact(p, ["name1", "name2", "name1RH"]) && p.name1RH === null && (p.name1 === null || typeof p.name1 === "string" && p.name1.length <= 32) && (p.name2 === null || p.name2 === "<D>"))) return "deal";
+    ]) && same2(raw.gT, [1, 1]) && raw.mR === 2 && raw.cHB === 0 && (raw.pot === 10 || raw.pot === 12) && raw.cPI === raw.pITT && typeof raw.cPI === "string" && raw.pASA === raw.now && raw.sNA === null && raw.sNAA === null && integer4(raw.mAVTB) && raw.bigBlindCheck === false && same2(raw.cRPI, []) && object6(raw.oTC) && exact(raw.oTC, ["1"]) && Array.isArray(raw.oTC["1"]) && raw.oTC["1"].length === 3 && raw.oTC["1"].every((c) => typeof c === "string" && /^[2-9TJQKA][shdc]$/.test(c)) && object6(raw.tB) && Object.keys(raw.tB).length === raw.pot / 2 && Object.values(raw.tB).every((v) => v === "<D>") && object6(raw.players) && Object.keys(raw.players).length === raw.pot / 2 && Object.values(raw.players).every((p) => object6(p) && exact(p, ["stack"]) && integer4(p.stack)) && object6(raw.pC) && Object.keys(raw.pC).length === 6 && Object.values(raw.pC).every((p) => object6(p) && exact(p, ["name1", "name2", "name1RH"]) && p.name1RH === null && (p.name1 === null || typeof p.name1 === "string" && p.name1.length <= 32) && (p.name2 === null || p.name2 === "<D>"))) return "deal";
     return null;
+  }
+  var HAND243_STACKS = { UTG: 268, HJ: 256, CO: 235, BTN: 240, SB: 255, BB: 248 };
+  function matchesFlopCallContract(w) {
+    return !!w.openingSizeProfile && w.players.length === 6 && w.players.find((p) => p.playerId === w.heroId)?.position === "HJ" && same2(w.heroCards, ["9d", "Qc"]) && w.players.every((p) => p.sourceStack === HAND243_STACKS[p.position]);
   }
   function advanceFlopWindow(pending, data, previous, next, sequence, at) {
     const w = pending.witness, raw = data.flopPatch ?? data.hjPatch, kind2 = flopPatchKind(raw), step = pending.step;
+    const hand243 = pending.profile === "hand243";
+    if (hand243 && !matchesFlopCallContract(w)) return null;
     if (!raw || !kind2 || data.event !== "gC" || data.heroId !== w.heroId || sequence !== pending.anchor.sequence + step + 1) return null;
     const projected = ["now", "pre", "eventsData", "fV", "tB", "pGS", "cRPI", "pITT", "cPI", "gT", "pC", "oTC", "players"];
     const expected = Object.fromEntries(projected.filter((k) => Object.hasOwn(raw, k)).map((k) => [k, k === "pC" ? {} : raw[k]]));
     if (!same2(data.frame, expected)) return null;
     const role = (position2) => w.players.find((p) => p.position === position2);
     const utg = role("UTG"), hj = role("HJ"), co = role("CO"), btn = role("BTN"), sb = role("SB"), bb = role("BB");
-    const actors = [utg, hj, hj, co, co, btn, btn, sb, sb, bb, bb, sb, sb, bb, bb, utg];
+    const actors = [
+      utg,
+      hj,
+      hj,
+      co,
+      co,
+      btn,
+      btn,
+      sb,
+      sb,
+      bb,
+      bb,
+      sb,
+      sb,
+      bb,
+      bb,
+      utg,
+      ...hand243 ? [utg, hj, hj, co] : []
+    ];
     const kinds = [
       "contribution",
       "turn",
@@ -10311,32 +10335,34 @@
       "bet",
       "turn",
       "contribution",
-      "turn"
+      "turn",
+      ...hand243 ? ["contribution", "turn", "contribution", "turn"] : []
     ];
+    if (hand243) kinds[6] = "contribution";
     const actor = actors[step];
     if (!actor || kind2 !== kinds[step]) return null;
     const totals = (through) => Object.fromEntries(w.players.map((p) => {
       if (through >= 11) return [
         p.playerId,
-        p.position === "SB" && through >= 12 || p.position === "BB" && through >= 14 ? 2 : 0
+        p.position === "SB" && through >= 12 || p.position === "BB" && through >= 14 || hand243 && (p.position === "UTG" && through >= 16 || p.position === "HJ" && through >= 18) ? 2 : 0
       ];
-      const contributed = p.position === "UTG" && through >= 0 || p.position === "HJ" && through >= 2 || p.position === "CO" && through >= 4 || p.position === "SB" && through >= 8;
+      const contributed = p.position === "UTG" && through >= 0 || p.position === "HJ" && through >= 2 || p.position === "CO" && through >= 4 || p.position === "SB" && through >= 8 || hand243 && p.position === "BTN" && through >= 6;
       return [p.playerId, contributed ? 2 : p.contribution];
     }));
-    const stable = (state, through) => state.id === w.tableId && state.hI === w.handId && state.gN === w.handNumber && state.dealerID === btn.playerId && state.dealerSeat === btn.seat && state.sBPI === sb.playerId && state.bBPI === bb.playerId && same2(state.seats, [...w.players].sort((a, b) => a.seat - b.seat).map((p) => [p.seat, p.playerId])) && state.iHPI.length === 6 && w.players.every((p) => state.iHPI.includes(p.playerId)) && Object.keys(state.pC).length === 6 && same2(state.gT, through >= 11 ? [1, 1] : [1, 0]) && same2(state.oTC, through >= 11 ? { "1": pending.transition?.board ?? raw.oTC?.["1"] } : { "1": [] }) && Object.keys(state.players).length === 6 && Object.keys(state.pGS).length === 6 && w.players.every((p) => state.pGS[p.playerId] === (p.position === "BTN" && through >= 6 ? "fold" : "inGame") && state.players[p.playerId].stack === p.sourceStack - (through >= 11 && p.position !== "BTN" ? 2 : 0) && !Object.hasOwn(state.players[p.playerId], "disconnectedSince") && same2(state.pC[p.playerId].cards, (p.playerId === w.heroId ? w.heroCards : [null, null]).map((value) => ({ value, showing: false })))) && Object.keys(state.tB).every((id) => w.players.some((p) => p.playerId === id)) && w.players.every((p) => (state.tB[p.playerId] ?? 0) === totals(through)[p.playerId]);
+    const stable = (state, through) => state.id === w.tableId && state.hI === w.handId && state.gN === w.handNumber && state.dealerID === btn.playerId && state.dealerSeat === btn.seat && state.sBPI === sb.playerId && state.bBPI === bb.playerId && same2(state.seats, [...w.players].sort((a, b) => a.seat - b.seat).map((p) => [p.seat, p.playerId])) && state.iHPI.length === 6 && w.players.every((p) => state.iHPI.includes(p.playerId)) && Object.keys(state.pC).length === 6 && same2(state.gT, through >= 11 ? [1, 1] : [1, 0]) && same2(state.oTC, through >= 11 ? { "1": pending.transition?.board ?? raw.oTC?.["1"] } : { "1": [] }) && Object.keys(state.players).length === 6 && Object.keys(state.pGS).length === 6 && w.players.every((p) => state.pGS[p.playerId] === (!hand243 && p.position === "BTN" && through >= 6 ? "fold" : "inGame") && state.players[p.playerId].stack === p.sourceStack - (through >= 11 && (hand243 || p.position !== "BTN") ? 2 : 0) && !Object.hasOwn(state.players[p.playerId], "disconnectedSince") && same2(state.pC[p.playerId].cards, (p.playerId === w.heroId ? w.heroCards : [null, null]).map((value) => ({ value, showing: false })))) && Object.keys(state.tB).every((id) => w.players.some((p) => p.playerId === id)) && w.players.every((p) => (state.tB[p.playerId] ?? 0) === totals(through)[p.playerId]);
     if (!stable(previous, step - 1) || !stable(next, step)) return null;
     if (kind2 === "turn" || kind2 === "deal") {
       if (previous.pITT !== null || next.cPI !== actor.playerId || next.pITT !== actor.playerId || raw.mAVTB !== actor.sourceStack - (step >= 11 ? 2 : 0)) return null;
     } else if (previous.cPI !== actor.playerId || previous.pITT !== actor.playerId || next.cPI !== actor.playerId || next.pITT !== null) return null;
     if (kind2 === "contribution" || kind2 === "bet") {
-      const responders = step === 0 ? [utg] : step === 2 ? [utg, hj] : step === 4 ? [utg, hj, co] : step === 8 ? [utg, hj, co, sb] : step === 12 ? [sb] : [sb, bb];
+      const responders = step < 11 ? [utg, hj, co, ...hand243 ? [btn] : [], sb].filter((p) => totals(step)[p.playerId] === 2) : [sb, bb, ...hand243 ? [utg, hj] : []].filter((p) => totals(step)[p.playerId] === 2);
       if (!same2(raw.tB, { [actor.playerId]: 2 }) || !same2(raw.cRPI, responders.map((p) => p.playerId)) || !same2(raw.wBACPI, step < 11 ? [bb.playerId] : [])) return null;
     }
     if (kind2 === "fold" && (!same2(raw.pGS, { [btn.playerId]: "fold" }) || !same2(raw.wBACPI, [bb.playerId]))) return null;
     let transition = pending.transition;
     if (kind2 === "deal") {
       const board = raw.oTC["1"];
-      if ((/* @__PURE__ */ new Set([...board, ...w.heroCards])).size !== 5 || !same2(raw.tB, Object.fromEntries(w.players.filter((p) => p.position !== "BTN").map((p) => [p.playerId, "<D>"]))) || Object.keys(next.tB).length !== 0 || !same2(raw.players, Object.fromEntries(w.players.filter((p) => p.position !== "BTN").map((p) => [p.playerId, { stack: p.sourceStack - 2 }]))) || !same2(Object.keys(raw.pC).sort(), w.players.map((p) => p.playerId).sort()) || w.players.some((p) => p.playerId !== w.heroId && !same2(raw.pC[p.playerId], { name1: null, name2: null, name1RH: null }))) return null;
+      if (hand243 && !same2(board, ["6h", "Qh", "3s"]) || (/* @__PURE__ */ new Set([...board, ...w.heroCards])).size !== 5 || raw.pot !== (hand243 ? 12 : 10) || !same2(raw.tB, Object.fromEntries(w.players.filter((p) => hand243 || p.position !== "BTN").map((p) => [p.playerId, "<D>"]))) || Object.keys(next.tB).length !== 0 || !same2(raw.players, Object.fromEntries(w.players.filter((p) => hand243 || p.position !== "BTN").map((p) => [p.playerId, { stack: p.sourceStack - 2 }]))) || !same2(Object.keys(raw.pC).sort(), w.players.map((p) => p.playerId).sort()) || w.players.some((p) => p.playerId !== w.heroId && !same2(raw.pC[p.playerId], { name1: null, name2: null, name1RH: null }))) return null;
       transition = {
         sequence,
         cursor: next.now,
@@ -10350,7 +10376,7 @@
       };
     }
     const observations = [...pending.observations];
-    if (step === 12 || step === 14) observations.push({
+    if (kind2 === "bet" || kind2 === "contribution" && step > 11) observations.push({
       sequence,
       playerId: actor.playerId,
       priorContribution: previous.tB[actor.playerId] ?? 0,
@@ -10358,8 +10384,49 @@
       receivedAt: at
     });
     const advanced = { ...pending, step: step + 1, ...transition ? { transition } : {}, observations };
-    if (step !== 11 && step !== 15) return { pending: advanced };
-    return { pending: step === 15 ? null : advanced, proof: {
+    const activation = { sequence, cursor: next.now, previousCursor: previous.now, receivedAt: at, playerId: actor.playerId };
+    if (hand243 && step === 17) advanced.heroActivation = activation;
+    if (hand243 && step >= 18) {
+      if (!pending.heroActivation || !transition || step > 19) return null;
+      if (step === 18) {
+        if (actor.playerId !== w.heroId || previous.tB[hj.playerId] !== void 0 || Math.max(...w.players.map((p) => previous.tB[p.playerId] ?? 0)) !== 2 || Math.max(...w.players.map((p) => next.tB[p.playerId] ?? 0)) !== 2 || previous.players[hj.playerId].stack !== 254 || raw.pre !== pending.heroActivation.cursor) return null;
+        advanced.acceptance = {
+          sequence,
+          cursor: next.now,
+          previousCursor: previous.now,
+          receivedAt: at,
+          street: "flop",
+          action: "call",
+          actor: { playerId: hj.playerId, seat: hj.seat, position: "HJ" },
+          priorContributionChips: 0,
+          newContributionChips: 2,
+          investmentChips: 2,
+          previousHighestContributionChips: 2,
+          observedRaiseIncrementChips: 0,
+          evidence: { source: "pokernow_gC", contract: "hand243_hj_flop_call2_v1", raw: structuredClone(raw) }
+        };
+      }
+      if (!advanced.acceptance || step === 19 && raw.pre !== advanced.acceptance.cursor) return null;
+      return { pending: step === 19 ? null : advanced, historical: {
+        version: 1,
+        scope: "historical_flop_call2",
+        historyComplete: false,
+        liveRecommendationsAllowed: false,
+        witness: structuredClone(w),
+        anchor: structuredClone(pending.anchor),
+        transition: structuredClone(transition),
+        heroActivation: structuredClone(pending.heroActivation),
+        originalHeroExpiresAt: pending.heroActivation.receivedAt + 1e4,
+        acceptance: structuredClone(advanced.acceptance),
+        nextActivation: step === 19 ? activation : null,
+        observations,
+        contributions: totals(step),
+        facts: { amountToCallChips: null, contestablePotChips: null, legalActions: null }
+      } };
+    }
+    const heroStep = hand243 ? 17 : 15;
+    if (step !== 11 && step !== heroStep) return { pending: advanced };
+    return { pending: !hand243 && step === heroStep ? null : advanced, proof: {
       version: 1,
       scope: step === 11 ? "flop_transition" : "flop_hero_activation",
       historyComplete: false,
@@ -10370,11 +10437,11 @@
         cursor: next.now,
         previousCursor: previous.now,
         receivedAt: at,
-        provenance: "Hand239 closed source observation prefix; original positions frozen at hand start. No legality, pot accounting, complete history or live recommendation authority."
+        provenance: `Hand${hand243 ? 243 : 239} closed source observation prefix; original positions frozen at hand start. No legality, pot accounting, complete history or live recommendation authority.`
       },
       anchor: structuredClone(pending.anchor),
       transition: structuredClone(transition),
-      activation: { sequence, cursor: next.now, previousCursor: previous.now, receivedAt: at, playerId: actor.playerId },
+      activation,
       observations,
       contributions: totals(step),
       facts: { amountToCallChips: null, contestablePotChips: null, legalActions: null }
@@ -10441,6 +10508,7 @@
     let witness = null;
     let flopPending = null;
     let flopProof = null;
+    let flopAcceptance = null;
     let facingPending = null;
     let facingProof = null;
     let coFacingProof = null;
@@ -10460,6 +10528,7 @@
     const invalidateWitness = (reason2, sequence) => {
       witness = null;
       flopProof = null;
+      flopAcceptance = null;
       hjProof = null;
       coProof = null;
       btnProof = null;
@@ -10595,12 +10664,20 @@
           if (data.event !== "gC") throw new Error("Full rup/registration refresh invalidates carried continuity; no backfill proof.");
           const frame = advanceUtgState(previous.data.frame, data.frame, tableId, data.heroId);
           const flopAnchor = firstUtg(previous.data, data, tableId, generation, observedAt);
+          const historicalAnchor = firstUtg(previous.data, data, tableId, generation, observedAt, "HJ");
+          const historicalBoundary = previous.data.event === "registered" && equivalent(previous.data.flopBoundary, { mR: 4, cHB: 2 }) && !Object.hasOwn(data, "flopBoundary");
           const flopAdvanced = flopPending ? advanceFlopWindow(flopPending, data, previous.data.frame, frame, sequence, observedAt) : null;
           flopPending = flopAnchor?.openingSizeProfile && equivalent(data.flopBoundary, { mR: 4, cHB: 2 }) ? {
             witness: flopAnchor,
             step: 0,
             observations: [],
             anchor: { sequence, cursor: flopAnchor.cursor, receivedAt: observedAt }
+          } : historicalAnchor && matchesFlopCallContract(historicalAnchor) && historicalBoundary ? {
+            witness: historicalAnchor,
+            profile: "hand243",
+            step: 0,
+            observations: [],
+            anchor: { sequence, cursor: historicalAnchor.cursor, receivedAt: observedAt }
           } : flopAdvanced?.pending ?? null;
           flopProof = flopAdvanced?.proof ? {
             ...flopAdvanced.proof,
@@ -10614,7 +10691,19 @@
               cursor: frame.now
             }
           } : null;
-          const anchor = firstUtg(previous.data, data, tableId, generation, observedAt, "HJ");
+          flopAcceptance = flopAdvanced?.historical ? {
+            ...flopAdvanced.historical,
+            continuity: {
+              status: "validated_prefix",
+              baselineSequence: previous.baselineSequence,
+              throughSequence: sequence,
+              generation,
+              tableId,
+              handId: frame.hI,
+              cursor: frame.now
+            }
+          } : null;
+          const anchor = historicalAnchor;
           const facingAnchor = anchor ?? firstUtg(previous.data, data, tableId, generation, observedAt) ?? firstUtg(previous.data, data, tableId, generation, observedAt, "CO");
           const facingAdvanced = facingPending ? advanceFacingOpenWindow(facingPending, data, previous.data.frame, frame, sequence, observedAt) : null;
           facingPending = facingAnchor ? { witness: facingAnchor, anchor: {
@@ -10770,6 +10859,11 @@
         return currentProof()?.witness ?? null;
       },
       proof: currentProof,
+      // Historical result bound to the latest validated prefix, never a timed
+      // opportunity. Reads cannot recreate flopProof or a legality certificate.
+      flopAcceptanceProof() {
+        return flopAcceptance && baseline && now() >= (flopAcceptance.nextActivation ?? flopAcceptance.acceptance).receivedAt && baseline.sequence === flopAcceptance.continuity.throughSequence && baseline.generation === flopAcceptance.continuity.generation && baseline.data.frame.hI === flopAcceptance.continuity.handId && baseline.data.frame.now === flopAcceptance.continuity.cursor ? structuredClone(flopAcceptance) : null;
+      },
       flopProof() {
         return flopProof && baseline && now() >= flopProof.witness.receivedAt && now() < flopProof.expiresAt && baseline.generation === flopProof.witness.generation && baseline.data.frame.hI === flopProof.witness.handId && baseline.data.frame.now === flopProof.witness.cursor ? structuredClone(flopProof) : null;
       },
@@ -11020,6 +11114,7 @@
             coFacingOpenProof: connected ? firstUtgSource.coFacingOpenProof() : null,
             // Observational certificate only; no decision/legality adapter consumes it.
             flopObservationProof: connected ? firstUtgSource.flopProof() : null,
+            historicalFlopAcceptance: connected ? firstUtgSource.flopAcceptanceProof() : null,
             // Compatibility/display view of the same contract, not another validator.
             firstUtg: firstUtgProof?.witness ?? null,
             firstUtgEvidence: firstUtgSource.diagnostic(),

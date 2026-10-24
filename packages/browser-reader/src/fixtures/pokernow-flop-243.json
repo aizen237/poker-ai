@@ -1,0 +1,1053 @@
+{
+  "capture": {
+    "temporaryDiagnosticsOnly": true,
+    "authoritativeOrdering": false,
+    "historyCompletenessProof": false,
+    "active": false,
+    "stopReason": "exported_or_manually_stopped",
+    "frameCount": 22,
+    "retainedJsonCharacters": 9958,
+    "rejectedFrames": 0,
+    "retainedSourceCharacters": 11091,
+    "registeredCaptured": true,
+    "lastRetainedFrame": {
+      "localReceiveSequence": 22,
+      "localReceivedAt": 1792832974441,
+      "connectionGeneration": 1,
+      "event": "gC"
+    },
+    "limits": {
+      "frames": 500,
+      "characters": 4194304
+    }
+  },
+  "frames": [
+    {
+      "localReceiveSequence": 1,
+      "localReceivedAt": 1792832910556,
+      "connectionGeneration": 1,
+      "event": "registered",
+      "payload": {
+        "currentPlayer": {
+          "id": "PLAYER_1"
+        },
+        "gameState": {
+          "aD": false,
+          "aS": false,
+          "cM": false,
+          "cR": false,
+          "gM": "th",
+          "gN": 242,
+          "gT": [
+            1,
+            5
+          ],
+          "hI": "HAND_242",
+          "id": "TABLE_TEST",
+          "lE": true,
+          "mR": 4,
+          "nR": [
+            1
+          ],
+          "pC": {
+            "PLAYER_2": {
+              "cards": [
+                {
+                  "value": null,
+                  "showing": false
+                },
+                {
+                  "value": null,
+                  "showing": false
+                }
+              ],
+              "name1": null,
+              "name2RH": null,
+              "prob1": null,
+              "name2": null,
+              "name1RH": null
+            },
+            "PLAYER_3": {
+              "cards": [
+                {
+                  "value": null,
+                  "showing": false
+                },
+                {
+                  "value": null,
+                  "showing": false
+                }
+              ],
+              "name1": null,
+              "name2RH": null,
+              "prob1": null,
+              "name2": null,
+              "name1RH": null
+            },
+            "PLAYER_5": {
+              "cards": [
+                {
+                  "value": null,
+                  "showing": false
+                },
+                {
+                  "value": null,
+                  "showing": false
+                }
+              ],
+              "name1": null,
+              "name2RH": null,
+              "prob1": null,
+              "name2": null,
+              "name1RH": null
+            },
+            "PLAYER_9": {
+              "cards": [
+                {
+                  "value": null,
+                  "showing": false
+                },
+                {
+                  "value": null,
+                  "showing": false
+                }
+              ],
+              "name1": null,
+              "name2RH": null,
+              "prob1": null,
+              "name2": null,
+              "name1RH": null
+            },
+            "PLAYER_10": {
+              "cards": [
+                {
+                  "value": null,
+                  "showing": false
+                },
+                {
+                  "value": null,
+                  "showing": false
+                }
+              ],
+              "name1": null,
+              "name2RH": null,
+              "prob1": null,
+              "name2": null,
+              "name1RH": null
+            },
+            "PLAYER_1": {
+              "cards": [
+                {
+                  "value": "6c",
+                  "showing": false
+                },
+                {
+                  "value": "Tc",
+                  "showing": false
+                }
+              ],
+              "name1": null,
+              "name2": null,
+              "name1RH": null,
+              "name2RH": null,
+              "prob1": null
+            }
+          },
+          "rH": false,
+          "sG": false,
+          "tB": {},
+          "aGC": true,
+          "aVC": true,
+          "cHB": 2,
+          "cPI": null,
+          "dSB": false,
+          "gDM": [],
+          "mTB": null,
+          "now": 1792832901686,
+          "oTC": {
+            "1": []
+          },
+          "pGS": {
+            "PLAYER_1": "fold",
+            "PLAYER_2": "fold",
+            "PLAYER_3": "fold",
+            "PLAYER_5": "inGame",
+            "PLAYER_9": "fold",
+            "PLAYER_10": "fold"
+          },
+          "pTB": {
+            "PLAYER_5": 0,
+            "PLAYER_3": 0,
+            "PLAYER_10": 0,
+            "PLAYER_2": 0,
+            "PLAYER_9": 0,
+            "PLAYER_1": 0
+          },
+          "pot": 0,
+          "rHC": null,
+          "rHP": [],
+          "rIT": "no",
+          "sBS": 3,
+          "sNA": "NSAGR",
+          "sPI": [],
+          "sPM": false,
+          "tHC": null,
+          "ante": null,
+          "bBPI": "PLAYER_5",
+          "cRPI": [],
+          "iHPI": [
+            "PLAYER_5",
+            "PLAYER_3",
+            "PLAYER_10",
+            "PLAYER_2",
+            "PLAYER_9",
+            "PLAYER_1"
+          ],
+          "lSPI": null,
+          "mode": "4fun",
+          "pASA": 1792832900591,
+          "pITT": null,
+          "sBPI": "PLAYER_3",
+          "sNAA": 1792832904586,
+          "mAVTB": 241,
+          "seats": [
+            [
+              1,
+              "PLAYER_1"
+            ],
+            [
+              2,
+              "PLAYER_2"
+            ],
+            [
+              3,
+              "PLAYER_3"
+            ],
+            [
+              5,
+              "PLAYER_5"
+            ],
+            [
+              9,
+              "PLAYER_9"
+            ],
+            [
+              10,
+              "PLAYER_10"
+            ]
+          ],
+          "dLTWTB": null,
+          "status": "inProgress",
+          "wBACPI": [
+            "PLAYER_5"
+          ],
+          "dLTWoTB": null,
+          "ownerID": "PLAYER_1",
+          "players": {
+            "PLAYER_5": {
+              "id": "PLAYER_5",
+              "dAC": false,
+              "name": "Player 5",
+              "stack": 255,
+              "status": "inGame",
+              "avatarID": null,
+              "winCount": 32,
+              "quitCount": 0,
+              "isNetworkPlayer": true
+            },
+            "PLAYER_3": {
+              "id": "PLAYER_3",
+              "dAC": false,
+              "name": "Player 3",
+              "stack": 240,
+              "status": "inGame",
+              "winCount": 53,
+              "quitCount": 4,
+              "isNetworkPlayer": true
+            },
+            "PLAYER_10": {
+              "id": "PLAYER_10",
+              "dAC": false,
+              "name": "Player 10",
+              "stack": 268,
+              "status": "inGame",
+              "winCount": 41,
+              "quitCount": 5,
+              "isNetworkPlayer": true
+            },
+            "PLAYER_2": {
+              "id": "PLAYER_2",
+              "dAC": false,
+              "name": "Player 2",
+              "stack": 235,
+              "status": "inGame",
+              "avatarID": null,
+              "winCount": 29,
+              "quitCount": 0,
+              "isNetworkPlayer": true
+            },
+            "PLAYER_9": {
+              "id": "PLAYER_9",
+              "dAC": false,
+              "name": "Player 9",
+              "stack": 248,
+              "status": "inGame",
+              "avatarID": null,
+              "winCount": 32,
+              "quitCount": 0,
+              "isNetworkPlayer": true
+            },
+            "PLAYER_1": {
+              "id": "PLAYER_1",
+              "dAC": false,
+              "name": "Player 1",
+              "stack": 256,
+              "status": "inGame",
+              "avatarID": null,
+              "winCount": 55,
+              "quitCount": 1,
+              "isNetworkPlayer": true
+            }
+          },
+          "version": "0.1.72",
+          "bigBlind": 2,
+          "dealerID": "PLAYER_2",
+          "deadButton": false,
+          "dealerSeat": 2,
+          "eventsData": [],
+          "smallBlind": 1,
+          "bigBlindCheck": false,
+          "directToNexTurn": false,
+          "recordChatForReplay": true,
+          "allowStandaloneRebuy": false,
+          "pre": 1792832900833,
+          "gameResult": {
+            "PLAYER_5": {
+              "gained": 6,
+              "position": 1
+            }
+          },
+          "mEV": 0,
+          "fV": "0.1.72",
+          "sN": 1792832910447
+        }
+      }
+    },
+    {
+      "localReceiveSequence": 2,
+      "localReceivedAt": 1792832930798,
+      "connectionGeneration": 1,
+      "event": "gC",
+      "payload": {
+        "gN": 243,
+        "gT": [
+          1,
+          0
+        ],
+        "hI": "HAND_243",
+        "nR": [
+          1
+        ],
+        "pC": {
+          "PLAYER_2": {
+            "cards": [
+              {
+                "value": null,
+                "showing": false
+              },
+              {
+                "value": null,
+                "showing": false
+              }
+            ],
+            "name1": null,
+            "name2RH": null,
+            "prob1": null,
+            "name2": null,
+            "name1RH": null
+          },
+          "PLAYER_3": {
+            "cards": [
+              {
+                "value": null,
+                "showing": false
+              },
+              {
+                "value": null,
+                "showing": false
+              }
+            ],
+            "name1": null,
+            "name2RH": null,
+            "prob1": null,
+            "name2": null,
+            "name1RH": null
+          },
+          "PLAYER_5": {
+            "cards": [
+              {
+                "value": null,
+                "showing": false
+              },
+              {
+                "value": null,
+                "showing": false
+              }
+            ],
+            "name1": null,
+            "name2RH": null,
+            "prob1": null,
+            "name2": null,
+            "name1RH": null
+          },
+          "PLAYER_9": {
+            "cards": [
+              {
+                "value": null,
+                "showing": false
+              },
+              {
+                "value": null,
+                "showing": false
+              }
+            ],
+            "name1": null,
+            "name2RH": null,
+            "prob1": null,
+            "name2": null,
+            "name1RH": null
+          },
+          "PLAYER_10": {
+            "cards": [
+              {
+                "value": null,
+                "showing": false
+              },
+              {
+                "value": null,
+                "showing": false
+              }
+            ],
+            "name1": null,
+            "name2RH": null,
+            "prob1": null,
+            "name2": null,
+            "name1RH": null
+          },
+          "PLAYER_1": {
+            "cards": [
+              {
+                "value": "9d",
+                "showing": false
+              },
+              {
+                "value": "Qc",
+                "showing": false
+              }
+            ],
+            "name1": null,
+            "name2": null,
+            "name1RH": null,
+            "name2RH": null,
+            "prob1": null
+          }
+        },
+        "tB": {
+          "PLAYER_5": 1,
+          "PLAYER_9": 2
+        },
+        "cPI": "PLAYER_10",
+        "now": 1792832930671,
+        "oTC": {
+          "1": []
+        },
+        "pGS": {
+          "PLAYER_1": "inGame",
+          "PLAYER_2": "inGame",
+          "PLAYER_3": "inGame",
+          "PLAYER_9": "inGame",
+          "PLAYER_10": "inGame"
+        },
+        "rHP": [],
+        "sBS": 5,
+        "sNA": null,
+        "bBPI": "PLAYER_9",
+        "cRPI": [],
+        "iHPI": [
+          "PLAYER_5",
+          "PLAYER_3",
+          "PLAYER_10",
+          "PLAYER_2",
+          "PLAYER_9",
+          "PLAYER_1"
+        ],
+        "pASA": 1792832930671,
+        "pITT": "PLAYER_10",
+        "sBPI": "PLAYER_5",
+        "sNAA": null,
+        "mAVTB": 268,
+        "wBACPI": [
+          "PLAYER_9"
+        ],
+        "players": {},
+        "dealerID": "PLAYER_3",
+        "dealerSeat": 3,
+        "eventsData": [],
+        "gameResult": "<D>",
+        "pre": 1792832901686,
+        "mEV": 0,
+        "fV": "0.1.72",
+        "sN": 1792832930700,
+        "rHC": null
+      }
+    },
+    {
+      "localReceiveSequence": 3,
+      "localReceivedAt": 1792832935474,
+      "connectionGeneration": 1,
+      "event": "gC",
+      "payload": {
+        "tB": {
+          "PLAYER_10": 2
+        },
+        "now": 1792832935373,
+        "pGS": {},
+        "sNA": "NSAA",
+        "cRPI": [
+          "PLAYER_10"
+        ],
+        "pITT": null,
+        "sNAA": 1792832936173,
+        "wBACPI": [
+          "PLAYER_9"
+        ],
+        "eventsData": [],
+        "pre": 1792832930671,
+        "mEV": 0,
+        "fV": "0.1.72",
+        "sN": 1792832935385
+      }
+    },
+    {
+      "localReceiveSequence": 4,
+      "localReceivedAt": 1792832936340,
+      "connectionGeneration": 1,
+      "event": "gC",
+      "payload": {
+        "cPI": "PLAYER_1",
+        "now": 1792832936247,
+        "sNA": null,
+        "pASA": 1792832936247,
+        "pITT": "PLAYER_1",
+        "sNAA": null,
+        "mAVTB": 256,
+        "eventsData": [],
+        "pre": 1792832935373,
+        "mEV": 0,
+        "fV": "0.1.72",
+        "sN": 1792832936251
+      }
+    },
+    {
+      "localReceiveSequence": 5,
+      "localReceivedAt": 1792832937766,
+      "connectionGeneration": 1,
+      "event": "gC",
+      "payload": {
+        "tB": {
+          "PLAYER_1": 2
+        },
+        "now": 1792832937663,
+        "pGS": {},
+        "sNA": "NSAA",
+        "cRPI": [
+          "PLAYER_10",
+          "PLAYER_1"
+        ],
+        "pITT": null,
+        "sNAA": 1792832938463,
+        "wBACPI": [
+          "PLAYER_9"
+        ],
+        "eventsData": [],
+        "pre": 1792832936247,
+        "mEV": 0,
+        "fV": "0.1.72",
+        "sN": 1792832937676
+      }
+    },
+    {
+      "localReceiveSequence": 6,
+      "localReceivedAt": 1792832938569,
+      "connectionGeneration": 1,
+      "event": "gC",
+      "payload": {
+        "cPI": "PLAYER_2",
+        "now": 1792832938470,
+        "sNA": null,
+        "pASA": 1792832938470,
+        "pITT": "PLAYER_2",
+        "sNAA": null,
+        "mAVTB": 235,
+        "eventsData": [],
+        "pre": 1792832937663,
+        "mEV": 0,
+        "fV": "0.1.72",
+        "sN": 1792832938473
+      }
+    },
+    {
+      "localReceiveSequence": 7,
+      "localReceivedAt": 1792832939135,
+      "connectionGeneration": 1,
+      "event": "gC",
+      "payload": {
+        "tB": {
+          "PLAYER_2": 2
+        },
+        "now": 1792832939033,
+        "pGS": {},
+        "sNA": "NSAA",
+        "cRPI": [
+          "PLAYER_10",
+          "PLAYER_1",
+          "PLAYER_2"
+        ],
+        "pITT": null,
+        "sNAA": 1792832939833,
+        "wBACPI": [
+          "PLAYER_9"
+        ],
+        "eventsData": [],
+        "pre": 1792832938470,
+        "mEV": 0,
+        "fV": "0.1.72",
+        "sN": 1792832939046
+      }
+    },
+    {
+      "localReceiveSequence": 8,
+      "localReceivedAt": 1792832939940,
+      "connectionGeneration": 1,
+      "event": "gC",
+      "payload": {
+        "cPI": "PLAYER_3",
+        "now": 1792832939850,
+        "sNA": null,
+        "pASA": 1792832939850,
+        "pITT": "PLAYER_3",
+        "sNAA": null,
+        "mAVTB": 240,
+        "eventsData": [],
+        "pre": 1792832939033,
+        "mEV": 0,
+        "fV": "0.1.72",
+        "sN": 1792832939852
+      }
+    },
+    {
+      "localReceiveSequence": 9,
+      "localReceivedAt": 1792832942593,
+      "connectionGeneration": 1,
+      "event": "gC",
+      "payload": {
+        "tB": {
+          "PLAYER_3": 2
+        },
+        "now": 1792832942486,
+        "pGS": {},
+        "sNA": "NSAA",
+        "cRPI": [
+          "PLAYER_10",
+          "PLAYER_1",
+          "PLAYER_2",
+          "PLAYER_3"
+        ],
+        "pITT": null,
+        "sNAA": 1792832943286,
+        "wBACPI": [
+          "PLAYER_9"
+        ],
+        "eventsData": [],
+        "pre": 1792832939850,
+        "mEV": 0,
+        "fV": "0.1.72",
+        "sN": 1792832942503
+      }
+    },
+    {
+      "localReceiveSequence": 10,
+      "localReceivedAt": 1792832943428,
+      "connectionGeneration": 1,
+      "event": "gC",
+      "payload": {
+        "cPI": "PLAYER_5",
+        "now": 1792832943337,
+        "sNA": null,
+        "pASA": 1792832943337,
+        "pITT": "PLAYER_5",
+        "sNAA": null,
+        "mAVTB": 255,
+        "eventsData": [],
+        "pre": 1792832942486,
+        "mEV": 0,
+        "fV": "0.1.72",
+        "sN": 1792832943340
+      }
+    },
+    {
+      "localReceiveSequence": 11,
+      "localReceivedAt": 1792832943730,
+      "connectionGeneration": 1,
+      "event": "gC",
+      "payload": {
+        "tB": {
+          "PLAYER_5": 2
+        },
+        "now": 1792832943630,
+        "pGS": {},
+        "sNA": "NSAA",
+        "cRPI": [
+          "PLAYER_10",
+          "PLAYER_1",
+          "PLAYER_2",
+          "PLAYER_3",
+          "PLAYER_5"
+        ],
+        "pITT": null,
+        "sNAA": 1792832944430,
+        "wBACPI": [
+          "PLAYER_9"
+        ],
+        "eventsData": [],
+        "pre": 1792832943337,
+        "mEV": 0,
+        "fV": "0.1.72",
+        "sN": 1792832943642
+      }
+    },
+    {
+      "localReceiveSequence": 12,
+      "localReceivedAt": 1792832944579,
+      "connectionGeneration": 1,
+      "event": "gC",
+      "payload": {
+        "cPI": "PLAYER_9",
+        "now": 1792832944488,
+        "sNA": null,
+        "pASA": 1792832944488,
+        "pITT": "PLAYER_9",
+        "sNAA": null,
+        "mAVTB": 248,
+        "eventsData": [],
+        "pre": 1792832943630,
+        "mEV": 0,
+        "fV": "0.1.72",
+        "sN": 1792832944490
+      }
+    },
+    {
+      "localReceiveSequence": 13,
+      "localReceivedAt": 1792832950057,
+      "connectionGeneration": 1,
+      "event": "gC",
+      "payload": {
+        "now": 1792832949957,
+        "sNA": "NSAA",
+        "pITT": null,
+        "sNAA": 1792832950757,
+        "wBACPI": [],
+        "eventsData": [],
+        "bigBlindCheck": true,
+        "pre": 1792832944488,
+        "mEV": 0,
+        "fV": "0.1.72",
+        "sN": 1792832949967
+      }
+    },
+    {
+      "localReceiveSequence": 14,
+      "localReceivedAt": 1792832950993,
+      "connectionGeneration": 1,
+      "event": "gC",
+      "payload": {
+        "gT": [
+          1,
+          1
+        ],
+        "mR": 2,
+        "pC": {
+          "PLAYER_1": {
+            "name1": "pair (Q)",
+            "name2": "<D>",
+            "name1RH": null
+          },
+          "PLAYER_2": {
+            "name1": null,
+            "name2": null,
+            "name1RH": null
+          },
+          "PLAYER_3": {
+            "name1": null,
+            "name2": null,
+            "name1RH": null
+          },
+          "PLAYER_5": {
+            "name1": null,
+            "name2": null,
+            "name1RH": null
+          },
+          "PLAYER_9": {
+            "name1": null,
+            "name2": null,
+            "name1RH": null
+          },
+          "PLAYER_10": {
+            "name1": null,
+            "name2": null,
+            "name1RH": null
+          }
+        },
+        "tB": {
+          "PLAYER_5": "<D>",
+          "PLAYER_9": "<D>",
+          "PLAYER_10": "<D>",
+          "PLAYER_1": "<D>",
+          "PLAYER_2": "<D>",
+          "PLAYER_3": "<D>"
+        },
+        "cHB": 0,
+        "cPI": "PLAYER_5",
+        "now": 1792832950886,
+        "oTC": {
+          "1": [
+            "6h",
+            "Qh",
+            "3s"
+          ]
+        },
+        "pot": 12,
+        "sNA": null,
+        "cRPI": [],
+        "pASA": 1792832950886,
+        "pITT": "PLAYER_5",
+        "sNAA": null,
+        "mAVTB": 253,
+        "players": {
+          "PLAYER_5": {
+            "stack": 253
+          },
+          "PLAYER_3": {
+            "stack": 238
+          },
+          "PLAYER_10": {
+            "stack": 266
+          },
+          "PLAYER_2": {
+            "stack": 233
+          },
+          "PLAYER_9": {
+            "stack": 246
+          },
+          "PLAYER_1": {
+            "stack": 254
+          }
+        },
+        "eventsData": [],
+        "bigBlindCheck": false,
+        "pre": 1792832949957,
+        "mEV": 0,
+        "fV": "0.1.72",
+        "sN": 1792832950904
+      }
+    },
+    {
+      "localReceiveSequence": 15,
+      "localReceivedAt": 1792832955181,
+      "connectionGeneration": 1,
+      "event": "gC",
+      "payload": {
+        "mR": 4,
+        "tB": {
+          "PLAYER_5": 2
+        },
+        "cHB": 2,
+        "now": 1792832955080,
+        "pGS": {},
+        "sNA": "NSAA",
+        "cRPI": [
+          "PLAYER_5"
+        ],
+        "pITT": null,
+        "sNAA": 1792832955880,
+        "wBACPI": [],
+        "eventsData": [],
+        "pre": 1792832950886,
+        "mEV": 0,
+        "fV": "0.1.72",
+        "sN": 1792832955094
+      }
+    },
+    {
+      "localReceiveSequence": 16,
+      "localReceivedAt": 1792832955986,
+      "connectionGeneration": 1,
+      "event": "gC",
+      "payload": {
+        "cPI": "PLAYER_9",
+        "now": 1792832955895,
+        "sNA": null,
+        "pASA": 1792832955895,
+        "pITT": "PLAYER_9",
+        "sNAA": null,
+        "mAVTB": 246,
+        "eventsData": [],
+        "pre": 1792832955080,
+        "mEV": 0,
+        "fV": "0.1.72",
+        "sN": 1792832955897
+      }
+    },
+    {
+      "localReceiveSequence": 17,
+      "localReceivedAt": 1792832958090,
+      "connectionGeneration": 1,
+      "event": "gC",
+      "payload": {
+        "tB": {
+          "PLAYER_9": 2
+        },
+        "now": 1792832957986,
+        "pGS": {},
+        "sNA": "NSAA",
+        "cRPI": [
+          "PLAYER_5",
+          "PLAYER_9"
+        ],
+        "pITT": null,
+        "sNAA": 1792832958786,
+        "wBACPI": [],
+        "eventsData": [],
+        "pre": 1792832955895,
+        "mEV": 0,
+        "fV": "0.1.72",
+        "sN": 1792832957998
+      }
+    },
+    {
+      "localReceiveSequence": 18,
+      "localReceivedAt": 1792832958984,
+      "connectionGeneration": 1,
+      "event": "gC",
+      "payload": {
+        "cPI": "PLAYER_10",
+        "now": 1792832958895,
+        "sNA": null,
+        "pASA": 1792832958895,
+        "pITT": "PLAYER_10",
+        "sNAA": null,
+        "mAVTB": 266,
+        "eventsData": [],
+        "pre": 1792832957986,
+        "mEV": 0,
+        "fV": "0.1.72",
+        "sN": 1792832958897
+      }
+    },
+    {
+      "localReceiveSequence": 19,
+      "localReceivedAt": 1792832959700,
+      "connectionGeneration": 1,
+      "event": "gC",
+      "payload": {
+        "tB": {
+          "PLAYER_10": 2
+        },
+        "now": 1792832959600,
+        "pGS": {},
+        "sNA": "NSAA",
+        "cRPI": [
+          "PLAYER_5",
+          "PLAYER_9",
+          "PLAYER_10"
+        ],
+        "pITT": null,
+        "sNAA": 1792832960400,
+        "wBACPI": [],
+        "eventsData": [],
+        "pre": 1792832958895,
+        "mEV": 0,
+        "fV": "0.1.72",
+        "sN": 1792832959612
+      }
+    },
+    {
+      "localReceiveSequence": 20,
+      "localReceivedAt": 1792832960591,
+      "connectionGeneration": 1,
+      "event": "gC",
+      "payload": {
+        "cPI": "PLAYER_1",
+        "now": 1792832960494,
+        "sNA": null,
+        "pASA": 1792832960494,
+        "pITT": "PLAYER_1",
+        "sNAA": null,
+        "mAVTB": 254,
+        "eventsData": [],
+        "pre": 1792832959600,
+        "mEV": 0,
+        "fV": "0.1.72",
+        "sN": 1792832960496
+      }
+    },
+    {
+      "localReceiveSequence": 21,
+      "localReceivedAt": 1792832973609,
+      "connectionGeneration": 1,
+      "event": "gC",
+      "payload": {
+        "tB": {
+          "PLAYER_1": 2
+        },
+        "now": 1792832973510,
+        "pGS": {},
+        "sNA": "NSAA",
+        "cRPI": [
+          "PLAYER_5",
+          "PLAYER_9",
+          "PLAYER_10",
+          "PLAYER_1"
+        ],
+        "pITT": null,
+        "sNAA": 1792832974310,
+        "wBACPI": [],
+        "eventsData": [],
+        "pre": 1792832960494,
+        "mEV": 0,
+        "fV": "0.1.72",
+        "sN": 1792832973523
+      }
+    },
+    {
+      "localReceiveSequence": 22,
+      "localReceivedAt": 1792832974441,
+      "connectionGeneration": 1,
+      "event": "gC",
+      "payload": {
+        "cPI": "PLAYER_2",
+        "now": 1792832974352,
+        "sNA": null,
+        "pASA": 1792832974352,
+        "pITT": "PLAYER_2",
+        "sNAA": null,
+        "mAVTB": 233,
+        "eventsData": [],
+        "pre": 1792832973510,
+        "mEV": 0,
+        "fV": "0.1.72",
+        "sN": 1792832974353
+      }
+    }
+  ]
+}

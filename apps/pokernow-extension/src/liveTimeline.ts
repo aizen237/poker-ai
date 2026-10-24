@@ -150,6 +150,7 @@ export function createTimelineRuntime(options: TimelineRuntimeOptions) {
           coFacingOpenProof: connected ? firstUtgSource.coFacingOpenProof() : null,
           // Observational certificate only; no decision/legality adapter consumes it.
           flopObservationProof: connected ? firstUtgSource.flopProof() : null,
+          historicalFlopAcceptance: connected ? firstUtgSource.flopAcceptanceProof() : null,
           // Compatibility/display view of the same contract, not another validator.
           firstUtg: firstUtgProof?.witness ?? null,
           firstUtgEvidence: firstUtgSource.diagnostic(),
