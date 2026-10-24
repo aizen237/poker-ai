@@ -7,6 +7,7 @@ import { inspectLiveUnopenedEvidence } from "./unopenedEvidence.js";
 import { currentFirstUtg, currentHj, currentCo, currentBtn, currentSb, currentFacingOpen, currentCoFacingOpen } from "./firstUtgLive.js";
 import { openingSizeEvidence } from "./openingSizeEvidence.js";
 import { callLegalityEvidence } from "./callLegalityEvidence.js";
+import { flopCallEvidence } from "./flopCallEvidence.js";
 
 /** Translate existing evidence only; socket chronology and observed log rows are never certified as a complete window. */
 export function buildLiveDecisionProofs(read: LiveTableRead, assessment: LiveStateAssessment,
@@ -168,6 +169,8 @@ export function buildLiveDecisionProofs(read: LiveTableRead, assessment: LiveSta
   }
   return { evidence: envelope, activation, unopened, openingSize: opening.size,
     responseWindow, responseStrategy, callLegality,
+    // Separate diagnostic; never promotes a general decision scope or permission.
+    postflopCall: flopCallEvidence(read, assessment, timeline, epoch),
     coResponse: coFacing && responseWindow ? { binding: { decisionEpoch: epoch, tableId: coFacing.tableId,
       handId: coFacing.handId, heroId: coFacing.heroId, heroCards: coFacing.heroCards,
       generation: coFacing.generation, cursor: coFacing.cursor, receivedAt: coFacing.receivedAt, expiresAt: responseWindow.expiresAt },

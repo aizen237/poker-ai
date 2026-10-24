@@ -8592,6 +8592,29 @@
       contradictions
     };
   }
+  function assessCallControlReadiness(control, gap, activatedAt, now, mismatch = "Observed CALL amount disagrees with the certified source gap.") {
+    let status = "unobserved";
+    const reasons = [];
+    if (!control) reasons.push("No CALL-control observation in this read.");
+    else if (!Number.isSafeInteger(control.observedAt) || control.observedAt < activatedAt || control.observedAt > now || now - control.observedAt >= 1e4) {
+      status = "unusable";
+      reasons.push("CALL observation is stale, pre-activation or from a future clock; it cannot refresh source proof.");
+    } else if (control.issues.length) {
+      status = control.contradictions.length ? "contradicted" : "unusable";
+      reasons.push(...control.issues);
+    } else if (control.visibleCount === 0) reasons.push("No visible CALL control; absence does not prove an action is illegal.");
+    else if (control.amountChips !== gap) {
+      status = "contradicted";
+      reasons.push(mismatch);
+    } else if (control.enabled !== true) {
+      status = "unusable";
+      reasons.push("CALL control is not enabled; readiness is unavailable.");
+    } else {
+      status = "observed_matching";
+      reasons.push("One enabled native CALL label agrees with the source gap; UI readiness is not server authorization.");
+    }
+    return { status, observation: control, reasons };
+  }
 
   // src/stackRead.ts
   function readStackDisplay(container, winner) {
@@ -9218,26 +9241,13 @@
       reasons: []
     };
     const control = read.callControl ?? null;
-    let readiness = "unobserved";
-    const reasons = [];
-    if (!control) reasons.push("No CALL-control observation in this read.");
-    else if (!Number.isSafeInteger(control.observedAt) || control.observedAt < source.receivedAt || control.observedAt > now || now - control.observedAt >= 1e4) {
-      readiness = "unusable";
-      reasons.push("CALL observation is stale, pre-activation or from a future clock; it cannot refresh source proof.");
-    } else if (control.issues.length) {
-      readiness = control.contradictions.length ? "contradicted" : "unusable";
-      reasons.push(...control.issues);
-    } else if (control.visibleCount === 0) reasons.push("No visible CALL control; absence does not prove an action is illegal.");
-    else if (control.amountChips !== gap) {
-      readiness = "contradicted";
-      reasons.push("Observed CALL amount disagrees with the certified five-chip source gap.");
-    } else if (control.enabled !== true) {
-      readiness = "unusable";
-      reasons.push("CALL control is not enabled; readiness is unavailable.");
-    } else {
-      readiness = "observed_matching";
-      reasons.push("One enabled native CALL label agrees with the source gap; UI readiness is not server authorization.");
-    }
+    const { status: readiness, reasons } = assessCallControlReadiness(
+      control,
+      gap,
+      source.receivedAt,
+      now,
+      "Observed CALL amount disagrees with the certified five-chip source gap."
+    );
     const binding = {
       decisionEpoch: epoch,
       profile: source.openingSizeProfile,
@@ -9321,6 +9331,341 @@
       },
       authorized: false,
       historyComplete: false
+    };
+  }
+
+  // src/flopWindow.ts
+  var object3 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+  var integer3 = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+  var same2 = (a, b) => {
+    if (a === b) return true;
+    if (Array.isArray(a)) return Array.isArray(b) && a.length === b.length && a.every((v, i) => same2(v, b[i]));
+    return object3(a) && object3(b) && Object.keys(a).length === Object.keys(b).length && Object.keys(a).every((k) => Object.hasOwn(b, k) && same2(a[k], b[k]));
+  };
+  var exact = (v, keys) => Object.keys(v).length === keys.length && keys.every((k) => Object.hasOwn(v, k));
+  var common2 = ["now", "pre", "eventsData", "mEV", "fV", "sN"];
+  function flopPatchKind(raw) {
+    if (!object3(raw) || !integer3(raw.now) || !integer3(raw.pre) || raw.now <= raw.pre || !integer3(raw.sN) || raw.mEV !== 0 || raw.fV !== "0.1.72" || !same2(raw.eventsData, [])) return null;
+    const opening = hjPatchKind(raw);
+    if (opening) return opening;
+    const action2 = raw.sNA === "NSAA" && raw.pITT === null && integer3(raw.sNAA);
+    const contribution3 = object3(raw.tB) && Object.keys(raw.tB).length === 1 && Object.values(raw.tB)[0] === 2 && same2(raw.pGS, {}) && Array.isArray(raw.cRPI) && Array.isArray(raw.wBACPI);
+    if (action2 && contribution3 && exact(raw, [...common2, "tB", "pGS", "sNA", "cRPI", "pITT", "sNAA", "wBACPI"])) return "contribution";
+    if (action2 && contribution3 && raw.mR === 4 && raw.cHB === 2 && exact(raw, [...common2, "mR", "tB", "cHB", "pGS", "sNA", "cRPI", "pITT", "sNAA", "wBACPI"])) return "bet";
+    if (action2 && raw.bigBlindCheck === true && same2(raw.wBACPI, []) && exact(raw, [...common2, "sNA", "pITT", "sNAA", "wBACPI", "bigBlindCheck"])) return "bb_check";
+    if (exact(raw, [
+      ...common2,
+      "gT",
+      "mR",
+      "pC",
+      "tB",
+      "cHB",
+      "cPI",
+      "oTC",
+      "pot",
+      "sNA",
+      "cRPI",
+      "pASA",
+      "pITT",
+      "sNAA",
+      "mAVTB",
+      "players",
+      "bigBlindCheck"
+    ]) && same2(raw.gT, [1, 1]) && raw.mR === 2 && raw.cHB === 0 && (raw.pot === 10 || raw.pot === 12) && raw.cPI === raw.pITT && typeof raw.cPI === "string" && raw.pASA === raw.now && raw.sNA === null && raw.sNAA === null && integer3(raw.mAVTB) && raw.bigBlindCheck === false && same2(raw.cRPI, []) && object3(raw.oTC) && exact(raw.oTC, ["1"]) && Array.isArray(raw.oTC["1"]) && raw.oTC["1"].length === 3 && raw.oTC["1"].every((c) => typeof c === "string" && /^[2-9TJQKA][shdc]$/.test(c)) && object3(raw.tB) && Object.keys(raw.tB).length === raw.pot / 2 && Object.values(raw.tB).every((v) => v === "<D>") && object3(raw.players) && Object.keys(raw.players).length === raw.pot / 2 && Object.values(raw.players).every((p) => object3(p) && exact(p, ["stack"]) && integer3(p.stack)) && object3(raw.pC) && Object.keys(raw.pC).length === 6 && Object.values(raw.pC).every((p) => object3(p) && exact(p, ["name1", "name2", "name1RH"]) && p.name1RH === null && (p.name1 === null || typeof p.name1 === "string" && p.name1.length <= 32) && (p.name2 === null || p.name2 === "<D>"))) return "deal";
+    return null;
+  }
+  var HAND243_STACKS = { UTG: 268, HJ: 256, CO: 235, BTN: 240, SB: 255, BB: 248 };
+  function matchesFlopCallContract(w) {
+    return !!w.openingSizeProfile && w.players.length === 6 && w.players.find((p) => p.playerId === w.heroId)?.position === "HJ" && same2(w.heroCards, ["9d", "Qc"]) && w.players.every((p) => p.sourceStack === HAND243_STACKS[p.position]);
+  }
+  function contributionAccounting(pending, next) {
+    const { witness: w, transition: t, preflopObservations: pre, observations: flop } = pending;
+    if (pending.profile !== "hand243" || !t || !pre) return null;
+    const street = (observations, preflop2) => {
+      const contributions = w.players.map((p) => {
+        const forcedChips = preflop2 ? p.contribution : 0;
+        const voluntaryInvestmentChips = observations.filter((o) => o.playerId === p.playerId).reduce((sum, o) => sum + o.contribution - o.priorContribution, 0);
+        const streetTotalChips = forcedChips + voluntaryInvestmentChips;
+        return {
+          playerId: p.playerId,
+          seat: p.seat,
+          position: p.position,
+          forcedChips,
+          voluntaryInvestmentChips,
+          streetTotalChips,
+          remainingCapacityChips: (preflop2 ? p.sourceStack : t.observedStacks[p.playerId]) - streetTotalChips
+        };
+      });
+      return {
+        units: "chips",
+        contributions,
+        streetContributionSumChips: contributions.reduce((sum, p) => sum + p.streetTotalChips, 0),
+        contestablePotChips: null,
+        provenance: "Hand243 closed source prefix: forced posts plus distinct observed increases. Remaining capacity is arithmetic, not an observed stack decrement or CALL permission."
+      };
+    };
+    const preflop = street(pre, true), current = street(flop, false);
+    if (preflop.contributions.some((p) => p.streetTotalChips !== t.clearedContributions[p.playerId] || p.remainingCapacityChips !== t.observedStacks[p.playerId]) || current.contributions.some((p) => p.streetTotalChips !== (next.tB[p.playerId] ?? 0)) || preflop.streetContributionSumChips !== t.observedPotChips) return null;
+    const cumulativeInvestments = preflop.contributions.map((p, i) => ({
+      playerId: p.playerId,
+      seat: p.seat,
+      preflopChips: p.streetTotalChips,
+      flopChips: current.contributions[i].streetTotalChips,
+      investedChips: p.streetTotalChips + current.contributions[i].streetTotalChips,
+      observedSourceStackChips: next.players[p.playerId].stack
+    }));
+    return {
+      scope: "hand243_contribution_prefix",
+      coverage: "validated_prefix",
+      units: "chips",
+      preflop,
+      flop: current,
+      preflopObservations: structuredClone(pre),
+      cumulativeInvestments,
+      cumulativeInvestmentSumChips: cumulativeInvestments.reduce((sum, p) => sum + p.investedChips, 0),
+      sourcePot: { valueChips: t.observedPotChips, sequence: t.sequence, cursor: t.cursor, receivedAt: t.receivedAt },
+      sourcePotPlusStreetChips: t.observedPotChips + current.streetContributionSumChips,
+      displayedTotalPotChips: null,
+      contestablePotChips: null,
+      netCommittedChips: null,
+      returnedUncalledChips: null,
+      rakeOrDropChips: null,
+      potLedger: null
+    };
+  }
+  function advanceFlopWindow(pending, data, previous, next, sequence, at) {
+    const w = pending.witness, raw = data.flopPatch ?? data.hjPatch, kind2 = flopPatchKind(raw), step = pending.step;
+    const hand243 = pending.profile === "hand243";
+    if (hand243 && !matchesFlopCallContract(w)) return null;
+    if (!raw || !kind2 || data.event !== "gC" || data.heroId !== w.heroId || sequence !== pending.anchor.sequence + step + 1) return null;
+    const projected = ["now", "pre", "eventsData", "fV", "tB", "pGS", "cRPI", "pITT", "cPI", "gT", "pC", "oTC", "players"];
+    const expected = Object.fromEntries(projected.filter((k) => Object.hasOwn(raw, k)).map((k) => [k, k === "pC" ? {} : raw[k]]));
+    if (!same2(data.frame, expected)) return null;
+    const role = (position2) => w.players.find((p) => p.position === position2);
+    const utg = role("UTG"), hj = role("HJ"), co = role("CO"), btn = role("BTN"), sb = role("SB"), bb = role("BB");
+    const actors = [
+      utg,
+      hj,
+      hj,
+      co,
+      co,
+      btn,
+      btn,
+      sb,
+      sb,
+      bb,
+      bb,
+      sb,
+      sb,
+      bb,
+      bb,
+      utg,
+      ...hand243 ? [utg, hj, hj, co] : []
+    ];
+    const kinds = [
+      "contribution",
+      "turn",
+      "contribution",
+      "turn",
+      "contribution",
+      "turn",
+      "fold",
+      "turn",
+      "contribution",
+      "turn",
+      "bb_check",
+      "deal",
+      "bet",
+      "turn",
+      "contribution",
+      "turn",
+      ...hand243 ? ["contribution", "turn", "contribution", "turn"] : []
+    ];
+    if (hand243) kinds[6] = "contribution";
+    const actor = actors[step];
+    if (!actor || kind2 !== kinds[step]) return null;
+    const totals = (through) => Object.fromEntries(w.players.map((p) => {
+      if (through >= 11) return [
+        p.playerId,
+        p.position === "SB" && through >= 12 || p.position === "BB" && through >= 14 || hand243 && (p.position === "UTG" && through >= 16 || p.position === "HJ" && through >= 18) ? 2 : 0
+      ];
+      const contributed = p.position === "UTG" && through >= 0 || p.position === "HJ" && through >= 2 || p.position === "CO" && through >= 4 || p.position === "SB" && through >= 8 || hand243 && p.position === "BTN" && through >= 6;
+      return [p.playerId, contributed ? 2 : p.contribution];
+    }));
+    const stable = (state, through) => state.id === w.tableId && state.hI === w.handId && state.gN === w.handNumber && state.dealerID === btn.playerId && state.dealerSeat === btn.seat && state.sBPI === sb.playerId && state.bBPI === bb.playerId && same2(state.seats, [...w.players].sort((a, b) => a.seat - b.seat).map((p) => [p.seat, p.playerId])) && state.iHPI.length === 6 && w.players.every((p) => state.iHPI.includes(p.playerId)) && Object.keys(state.pC).length === 6 && same2(state.gT, through >= 11 ? [1, 1] : [1, 0]) && same2(state.oTC, through >= 11 ? { "1": pending.transition?.board ?? raw.oTC?.["1"] } : { "1": [] }) && Object.keys(state.players).length === 6 && Object.keys(state.pGS).length === 6 && w.players.every((p) => state.pGS[p.playerId] === (!hand243 && p.position === "BTN" && through >= 6 ? "fold" : "inGame") && state.players[p.playerId].stack === p.sourceStack - (through >= 11 && (hand243 || p.position !== "BTN") ? 2 : 0) && !Object.hasOwn(state.players[p.playerId], "disconnectedSince") && same2(state.pC[p.playerId].cards, (p.playerId === w.heroId ? w.heroCards : [null, null]).map((value) => ({ value, showing: false })))) && Object.keys(state.tB).every((id) => w.players.some((p) => p.playerId === id)) && w.players.every((p) => (state.tB[p.playerId] ?? 0) === totals(through)[p.playerId]);
+    if (!stable(previous, step - 1) || !stable(next, step)) return null;
+    if (kind2 === "turn" || kind2 === "deal") {
+      if (previous.pITT !== null || next.cPI !== actor.playerId || next.pITT !== actor.playerId || raw.mAVTB !== actor.sourceStack - (step >= 11 ? 2 : 0)) return null;
+    } else if (previous.cPI !== actor.playerId || previous.pITT !== actor.playerId || next.cPI !== actor.playerId || next.pITT !== null) return null;
+    if (kind2 === "contribution" || kind2 === "bet") {
+      const responders = step < 11 ? [utg, hj, co, ...hand243 ? [btn] : [], sb].filter((p) => totals(step)[p.playerId] === 2) : [sb, bb, ...hand243 ? [utg, hj] : []].filter((p) => totals(step)[p.playerId] === 2);
+      if (!same2(raw.tB, { [actor.playerId]: 2 }) || !same2(raw.cRPI, responders.map((p) => p.playerId)) || !same2(raw.wBACPI, step < 11 ? [bb.playerId] : [])) return null;
+    }
+    if (kind2 === "fold" && (!same2(raw.pGS, { [btn.playerId]: "fold" }) || !same2(raw.wBACPI, [bb.playerId]))) return null;
+    let transition = pending.transition;
+    if (kind2 === "deal") {
+      const board = raw.oTC["1"];
+      if (hand243 && !same2(board, ["6h", "Qh", "3s"]) || (/* @__PURE__ */ new Set([...board, ...w.heroCards])).size !== 5 || raw.pot !== (hand243 ? 12 : 10) || !same2(raw.tB, Object.fromEntries(w.players.filter((p) => hand243 || p.position !== "BTN").map((p) => [p.playerId, "<D>"]))) || Object.keys(next.tB).length !== 0 || !same2(raw.players, Object.fromEntries(w.players.filter((p) => hand243 || p.position !== "BTN").map((p) => [p.playerId, { stack: p.sourceStack - 2 }]))) || !same2(Object.keys(raw.pC).sort(), w.players.map((p) => p.playerId).sort()) || w.players.some((p) => p.playerId !== w.heroId && !same2(raw.pC[p.playerId], { name1: null, name2: null, name1RH: null }))) return null;
+      transition = {
+        sequence,
+        cursor: next.now,
+        previousCursor: previous.now,
+        receivedAt: at,
+        board: [...board],
+        from: "preflop",
+        to: "flop",
+        clearedContributions: structuredClone(previous.tB),
+        observedStacks: Object.fromEntries(w.players.map((p) => [p.playerId, next.players[p.playerId].stack])),
+        observedPotChips: raw.pot
+      };
+    }
+    const observations = [...pending.observations];
+    if (kind2 === "bet" || kind2 === "contribution" && step > 11) observations.push({
+      sequence,
+      playerId: actor.playerId,
+      priorContribution: previous.tB[actor.playerId] ?? 0,
+      contribution: next.tB[actor.playerId],
+      receivedAt: at
+    });
+    const advanced = { ...pending, step: step + 1, ...transition ? { transition } : {}, observations };
+    if (pending.preflopObservations && kind2 === "contribution" && step < 11) {
+      advanced.preflopObservations = [...pending.preflopObservations, {
+        sequence,
+        playerId: actor.playerId,
+        priorContribution: previous.tB[actor.playerId] ?? 0,
+        contribution: next.tB[actor.playerId],
+        receivedAt: at
+      }];
+    }
+    const accounting = contributionAccounting(advanced, next);
+    const activation = { sequence, cursor: next.now, previousCursor: previous.now, receivedAt: at, playerId: actor.playerId };
+    if (hand243 && step === 17) advanced.heroActivation = activation;
+    if (hand243 && step >= 18) {
+      if (!pending.heroActivation || !transition || step > 19) return null;
+      if (step === 18) {
+        if (actor.playerId !== w.heroId || previous.tB[hj.playerId] !== void 0 || Math.max(...w.players.map((p) => previous.tB[p.playerId] ?? 0)) !== 2 || Math.max(...w.players.map((p) => next.tB[p.playerId] ?? 0)) !== 2 || previous.players[hj.playerId].stack !== 254 || raw.pre !== pending.heroActivation.cursor) return null;
+        advanced.acceptance = {
+          sequence,
+          cursor: next.now,
+          previousCursor: previous.now,
+          receivedAt: at,
+          street: "flop",
+          action: "call",
+          actor: { playerId: hj.playerId, seat: hj.seat, position: "HJ" },
+          priorContributionChips: 0,
+          newContributionChips: 2,
+          investmentChips: 2,
+          previousHighestContributionChips: 2,
+          observedRaiseIncrementChips: 0,
+          evidence: { source: "pokernow_gC", contract: "hand243_hj_flop_call2_v1", raw: structuredClone(raw) }
+        };
+      }
+      if (!advanced.acceptance || step === 19 && raw.pre !== advanced.acceptance.cursor) return null;
+      return { pending: step === 19 ? null : advanced, historical: {
+        version: 1,
+        scope: "historical_flop_call2",
+        historyComplete: false,
+        liveRecommendationsAllowed: false,
+        witness: structuredClone(w),
+        anchor: structuredClone(pending.anchor),
+        transition: structuredClone(transition),
+        heroActivation: structuredClone(pending.heroActivation),
+        originalHeroExpiresAt: pending.heroActivation.receivedAt + 1e4,
+        acceptance: structuredClone(advanced.acceptance),
+        nextActivation: step === 19 ? activation : null,
+        observations,
+        contributions: totals(step),
+        facts: { amountToCallChips: null, contestablePotChips: null, legalActions: null },
+        ...accounting ? { accounting } : {}
+      } };
+    }
+    const heroStep = hand243 ? 17 : 15;
+    if (step !== 11 && step !== heroStep) return { pending: advanced };
+    return { pending: !hand243 && step === heroStep ? null : advanced, proof: {
+      version: 1,
+      scope: step === 11 ? "flop_transition" : "flop_hero_activation",
+      historyComplete: false,
+      liveRecommendationsAllowed: false,
+      expiresAt: at + 1e4,
+      witness: {
+        ...structuredClone(w),
+        cursor: next.now,
+        previousCursor: previous.now,
+        receivedAt: at,
+        provenance: `Hand${hand243 ? 243 : 239} closed source observation prefix; original positions frozen at hand start. No legality, contestable-pot, complete history or live recommendation authority.`
+      },
+      anchor: structuredClone(pending.anchor),
+      transition: structuredClone(transition),
+      activation,
+      observations,
+      contributions: totals(step),
+      facts: { amountToCallChips: null, contestablePotChips: null, legalActions: null },
+      ...accounting ? { accounting } : {}
+    } };
+  }
+
+  // src/flopCallEvidence.ts
+  function flopCallEvidence(read, assessment, timeline, epoch) {
+    const source = timeline?.sourceStatus, proof = source?.flopObservationProof;
+    const w = proof?.witness, id = source?.identity, chain = proof?.continuity;
+    const now = Date.now();
+    if (!epoch || !timeline || !source?.connected || !proof || !w || !id || !chain || proof.version !== 1 || proof.scope !== "flop_hero_activation" || !matchesFlopCallContract(w) || proof.accounting?.scope !== "hand243_contribution_prefix" || proof.historyComplete !== false || proof.liveRecommendationsAllowed !== false || !Number.isSafeInteger(now) || now < proof.activation.receivedAt || now >= proof.expiresAt || proof.expiresAt !== proof.activation.receivedAt + 1e4 || w.receivedAt !== proof.activation.receivedAt || w.cursor !== proof.activation.cursor || proof.activation.playerId !== w.heroId || proof.transition.to !== "flop" || id.tableId !== w.tableId || id.handId !== w.handId || id.handNumber !== w.handNumber || id.heroPlayerId !== w.heroId || id.frameCursor !== proof.anchor.cursor || id.chainGap || timeline.current.handId !== `${w.tableId}:hand:${w.handId}` || timeline.current.handNumber !== w.handNumber || chain.status !== "validated_prefix" || chain.generation !== w.generation || chain.tableId !== w.tableId || chain.handId !== w.handId || chain.cursor !== w.cursor || chain.throughSequence !== proof.activation.sequence || chain.throughSequence <= chain.baselineSequence || timeline.current.coverage.issues.some((i) => i.code === "metadata_gap" || i.code === "identity_conflict")) return null;
+    const rows = proof.accounting.flop.contributions;
+    const hero = rows.find((p) => p.playerId === w.heroId);
+    if (!hero || hero.seat !== w.heroSeat || hero.position !== "HJ" || rows.length !== 6 || new Set(rows.map((p) => p.playerId)).size !== 6 || rows.some((p) => !w.players.some((original) => original.playerId === p.playerId && original.seat === p.seat && original.position === p.position) || !Number.isSafeInteger(p.streetTotalChips) || p.streetTotalChips < 0 || !Number.isSafeInteger(p.remainingCapacityChips) || p.remainingCapacityChips < 0 || p.streetTotalChips !== proof.contributions[p.playerId] || p.remainingCapacityChips !== proof.transition.observedStacks[p.playerId] - p.streetTotalChips)) return null;
+    const highest = Math.max(...rows.filter((p) => p.playerId !== w.heroId).map((p) => p.streetTotalChips));
+    const gap = highest - hero.streetTotalChips, remaining = hero.remainingCapacityChips;
+    if (highest !== 2 || hero.streetTotalChips !== 0 || gap !== 2 || remaining < gap || remaining !== 254) return null;
+    const provenance = "Hand243 validated source prefix through HJ flop activation: explicit zero reset, SB/BB/UTG totals2, HJ total0, collected ordinary HJ stack254 unchanged through activation. Payable cost if CALL is authorized is2; no pot, UI or historical acceptance supplies this arithmetic.";
+    const ui = assessCallControlReadiness(read.callControl ?? null, gap, proof.activation.receivedAt, now);
+    const state = assessment.state, seats = state?.seats.filter((s) => s.isOccupied) ?? [];
+    const card = (c) => `${"23456789TJQKA"[c.rank - 2]}${c.suit}`;
+    const domHero = seats.find((s) => s.isYou);
+    const domMatches = !!state && state.street === "flop" && JSON.stringify(state.board.map(card)) === JSON.stringify(proof.transition.board) && JSON.stringify(domHero?.holeCards.map(card).sort()) === JSON.stringify([...w.heroCards].sort()) && assessment.smallBlind === w.smallBlind && assessment.bigBlind === w.bigBlind && (assessment.amountToCall === null || assessment.amountToCall === gap) && read.context.dealerSeatNumber === w.players.find((p) => p.position === "BTN")?.seat && !read.context.readErrors.length && timeline.current.seatMapping.status !== "invalid" && !timeline.current.seatMapping.entries.some((e) => !w.players.some((p) => p.playerId === e.playerId && p.seat === e.seat)) && seats.length === 6 && new Set(seats.map((s) => s.seatNumber)).size === 6 && seats.filter((s) => s.isYou).length === 1 && seats.filter((s) => s.isCurrentToAct).length === 1 && rows.every((p) => {
+      const s = seats.find((s2) => s2.seatNumber === p.seat);
+      return !!s && !s.isFolded && !s.isAllIn && !s.isOffline && !s.isSettling && !s.betReadError && s.isYou === (p.playerId === w.heroId) && s.isCurrentToAct === (p.playerId === w.heroId) && assessment.positions.get(p.seat) === p.position && s.stack === p.remainingCapacityChips && (s.currentBet === null ? p.streetTotalChips === 0 : s.currentBet === p.streetTotalChips);
+    });
+    if (!domMatches) {
+      ui.status = !state || read.context.readErrors.length ? "unusable" : "contradicted";
+      ui.reasons.push("Current DOM identity/actor, street/cards, contributions or capacity is unavailable or does not match the source opportunity; no matching UI readiness.");
+    }
+    return {
+      version: 1,
+      scope: "hand243_hj_flop_call2_cost",
+      binding: {
+        decisionEpoch: epoch,
+        tableId: w.tableId,
+        handId: w.handId,
+        handNumber: w.handNumber,
+        heroId: w.heroId,
+        heroSeat: w.heroSeat,
+        heroCards: [...w.heroCards],
+        board: [...proof.transition.board],
+        street: "flop",
+        generation: w.generation,
+        cursor: w.cursor,
+        activationSequence: proof.activation.sequence,
+        receivedAt: proof.activation.receivedAt,
+        expiresAt: proof.expiresAt
+      },
+      actor: { playerId: w.heroId, seat: w.heroSeat, position: "HJ" },
+      facts: {
+        units: "chips",
+        highestContributionChips: highest,
+        priorContributionChips: hero.streetTotalChips,
+        contributionGapChips: gap,
+        remainingCapacityChips: remaining,
+        capacitySufficient: true,
+        resultingContributionIfCalledChips: hero.streetTotalChips + gap,
+        remainingCapacityIfCalledChips: remaining - gap
+      },
+      payableIfCallAuthorizedChips: known(gap, provenance),
+      ui,
+      serverLegality: unknown("Historical hand243 CALL2 acceptance is recorded separately, after the original deadline. No captured within-window source/DOM/control binding establishes live permission."),
+      permission: null,
+      fullActionSetCertified: false,
+      historyComplete: false,
+      liveRecommendationsAllowed: false
     };
   }
 
@@ -9533,6 +9878,8 @@
       responseWindow,
       responseStrategy,
       callLegality,
+      // Separate diagnostic; never promotes a general decision scope or permission.
+      postflopCall: flopCallEvidence(read, assessment, timeline, epoch),
       coResponse: coFacing && responseWindow ? {
         binding: {
           decisionEpoch: epoch,
@@ -9736,13 +10083,13 @@
 
   // src/pokerNowTransport.ts
   var TIMELINE_CHANNEL = "poker-ai:hand-source:v1";
-  var object3 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
+  var object4 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
   var token2 = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(v);
   function tableIdFromPath(path) {
     return /^\/games\/([A-Za-z0-9_-]{1,160})\/?$/.exec(path)?.[1] ?? null;
   }
   function validHandIdentity(value, tableId) {
-    return object3(value) && value.tableId === tableId && token2(value.handId) && Number.isSafeInteger(value.handNumber) && Number(value.handNumber) > 0 && (value.heroPlayerId === null || token2(value.heroPlayerId)) && (value.frameCursor === null || typeof value.frameCursor === "string" && value.frameCursor.length < 160 || typeof value.frameCursor === "number" && Number.isSafeInteger(value.frameCursor)) && typeof value.chainGap === "boolean" && ["registered.gameState", "rup", "gC"].includes(String(value.source));
+    return object4(value) && value.tableId === tableId && token2(value.handId) && Number.isSafeInteger(value.handNumber) && Number(value.handNumber) > 0 && (value.heroPlayerId === null || token2(value.heroPlayerId)) && (value.frameCursor === null || typeof value.frameCursor === "string" && value.frameCursor.length < 160 || typeof value.frameCursor === "number" && Number.isSafeInteger(value.frameCursor)) && typeof value.chainGap === "boolean" && ["registered.gameState", "rup", "gC"].includes(String(value.source));
   }
 
   // src/sourceMetadata.ts
@@ -9782,7 +10129,7 @@
     "complete"
   ]);
   var containers = /* @__PURE__ */ new Set(["meta", "metadata", "pagination", "coverage"]);
-  var object4 = (x) => !!x && typeof x === "object" && !Array.isArray(x);
+  var object5 = (x) => !!x && typeof x === "object" && !Array.isArray(x);
   var kind = (x) => x === null ? "null" : Array.isArray(x) ? "array" : typeof x;
   var scalar = (x) => x === null || typeof x === "boolean" || typeof x === "number" && Number.isFinite(x) || typeof x === "string" && x.length <= VALUE_LIMIT;
   var allowedPath = (path) => {
@@ -9792,7 +10139,7 @@
   function inspectMetadataFields(input) {
     const result = { fields: [], truncated: false };
     const visit = (value, prefix, depth2) => {
-      if (!object4(value)) return;
+      if (!object5(value)) return;
       for (const [key, field] of Object.entries(value)) {
         if (result.fields.length === FIELD_LIMIT) {
           result.truncated = true;
@@ -9802,7 +10149,7 @@
         const entry = { path, type: kind(field) };
         if (allowedPath(path) && scalar(field)) entry.value = field;
         result.fields.push(entry);
-        if (containers.has(key) && object4(field)) {
+        if (containers.has(key) && object5(field)) {
           if (depth2 < 2) visit(field, path + ".", depth2 + 1);
           else result.truncated = true;
         }
@@ -9812,12 +10159,12 @@
     return result;
   }
   function validateSocketMetadata(value) {
-    if (!object4(value) || typeof value.event !== "string" || !["registered", "rup", "gC"].includes(value.event) || !Number.isSafeInteger(value.wrapperLength) || Number(value.wrapperLength) < 2 || !Array.isArray(value.extraWrapperItems) || value.extraWrapperItems.length > 2) return null;
+    if (!object5(value) || typeof value.event !== "string" || !["registered", "rup", "gC"].includes(value.event) || !Number.isSafeInteger(value.wrapperLength) || Number(value.wrapperLength) < 2 || !Array.isArray(value.extraWrapperItems) || value.extraWrapperItems.length > 2) return null;
     const inventory = (raw) => {
-      if (!object4(raw) || !Array.isArray(raw.fields) || raw.fields.length > FIELD_LIMIT || typeof raw.truncated !== "boolean") return null;
+      if (!object5(raw) || !Array.isArray(raw.fields) || raw.fields.length > FIELD_LIMIT || typeof raw.truncated !== "boolean") return null;
       const fields = [];
       for (const entry of raw.fields) {
-        if (!object4(entry) || typeof entry.path !== "string" || entry.path.length > 200 || typeof entry.type !== "string" || !["null", "array", "string", "number", "boolean", "object", "undefined"].includes(entry.type)) return null;
+        if (!object5(entry) || typeof entry.path !== "string" || entry.path.length > 200 || typeof entry.type !== "string" || !["null", "array", "string", "number", "boolean", "object", "undefined"].includes(entry.type)) return null;
         const field = { path: entry.path, type: entry.type };
         if (Object.hasOwn(entry, "value")) {
           if (!allowedPath(entry.path) || !scalar(entry.value) || kind(entry.value) !== entry.type) return null;
@@ -10058,22 +10405,22 @@
   }
 
   // src/firstUtgState.ts
-  var object5 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+  var object6 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
   var token3 = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(v) && !["__proto__", "prototype", "constructor"].includes(v);
-  var integer3 = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+  var integer4 = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
   var chips3 = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= Number.MAX_SAFE_INTEGER;
-  var dictionary = (v) => object5(v) && Object.keys(v).length <= 10 && Object.keys(v).every(token3);
+  var dictionary = (v) => object6(v) && Object.keys(v).length <= 10 && Object.keys(v).every(token3);
   var ids = (v) => Array.isArray(v) && v.length <= 10 && v.every(token3) && new Set(v).size === v.length;
   var allowed = new Set("id hI gN now pre r gT seats iHPI dealerID dealerSeat sBPI bBPI tB pGS cPI pITT smallBlind bigBlind ante deadButton gM mode aD aS cM cR players pC cRPI eventsData rHP rHC oTC gameResult version fV nR mTB rIT sPM".split(" "));
   function validateFrame(frame) {
-    if (!object5(frame) || JSON.stringify(frame).length > 4e4) throw new Error("Malformed or oversized source projection.");
+    if (!object6(frame) || JSON.stringify(frame).length > 4e4) throw new Error("Malformed or oversized source projection.");
     for (const [k, v] of Object.entries(frame)) {
       if (!allowed.has(k)) throw new Error(`Unsupported projected field ${k}.`);
       let valid2 = true;
       if (["id", "hI", "dealerID", "sBPI", "bBPI"].includes(k)) valid2 = token3(v);
       if (["cPI", "pITT"].includes(k)) valid2 = v === null || token3(v);
-      if (["gN", "now", "pre"].includes(k)) valid2 = integer3(v);
-      if (k === "dealerSeat") valid2 = integer3(v) && v >= 1 && v <= 10;
+      if (["gN", "now", "pre"].includes(k)) valid2 = integer4(v);
+      if (k === "dealerSeat") valid2 = integer4(v) && v >= 1 && v <= 10;
       if (["smallBlind", "bigBlind"].includes(k)) valid2 = chips3(v) && v > 0;
       if (k === "ante") valid2 = v === null || chips3(v);
       if (["r", "deadButton", "aD", "aS", "cM", "cR"].includes(k)) valid2 = typeof v === "boolean";
@@ -10081,30 +10428,30 @@
       if (["version", "fV", "rIT"].includes(k)) valid2 = typeof v === "string" && v.length <= 32;
       if (k === "sPM") valid2 = typeof v === "boolean";
       if (k === "mTB") valid2 = v === null || chips3(v);
-      if (k === "nR") valid2 = Array.isArray(v) && v.length <= 10 && v.every(integer3);
-      if (k === "gT") valid2 = Array.isArray(v) && v.length === 2 && v.every(integer3);
+      if (k === "nR") valid2 = Array.isArray(v) && v.length <= 10 && v.every(integer4);
+      if (k === "gT") valid2 = Array.isArray(v) && v.length === 2 && v.every(integer4);
       if (["iHPI", "cRPI", "rHP"].includes(k)) valid2 = ids(v);
       if (k === "rHC") valid2 = v === null;
       if (k === "eventsData") valid2 = Array.isArray(v) && v.length === 0;
       if (k === "gameResult") valid2 = v === "<D>";
-      if (k === "seats") valid2 = Array.isArray(v) && v.length <= 10 && v.every((s, i) => Array.isArray(s) && s.length === 2 && integer3(s[0]) && s[0] >= 1 && s[0] <= 10 && token3(s[1]) && (i === 0 || v[i - 1][0] < s[0])) && new Set(v.map((s) => s[1])).size === v.length;
-      if (k === "oTC") valid2 = object5(v) && Object.keys(v).length === 1 && Array.isArray(v["1"]) && v["1"].length <= 5 && v["1"].every((c) => typeof c === "string" && /^[2-9TJQKA][shdc]$/.test(c));
+      if (k === "seats") valid2 = Array.isArray(v) && v.length <= 10 && v.every((s, i) => Array.isArray(s) && s.length === 2 && integer4(s[0]) && s[0] >= 1 && s[0] <= 10 && token3(s[1]) && (i === 0 || v[i - 1][0] < s[0])) && new Set(v.map((s) => s[1])).size === v.length;
+      if (k === "oTC") valid2 = object6(v) && Object.keys(v).length === 1 && Array.isArray(v["1"]) && v["1"].length <= 5 && v["1"].every((c) => typeof c === "string" && /^[2-9TJQKA][shdc]$/.test(c));
       if (k === "tB") valid2 = dictionary(v) && Object.values(v).every((x) => x === "<D>" || chips3(x));
       if (k === "pGS") valid2 = dictionary(v) && Object.values(v).every((x) => typeof x === "string" && ["inGame", "fold", "allIn", "<D>"].includes(x));
-      if (k === "players") valid2 = dictionary(v) && Object.entries(v).every(([id, p]) => p === "<D>" || object5(p) && Object.entries(p).every(([field, value]) => field === "id" ? value === id : field === "stack" ? chips3(value) : field === "status" ? typeof value === "string" && value.length <= 32 : field === "disconnectedSince" ? integer3(value) || value === "<D>" : false));
-      if (k === "pC") valid2 = dictionary(v) && Object.values(v).every((h) => object5(h) && Object.keys(h).length === 1 && Array.isArray(h.cards) && h.cards.length === 2 && h.cards.every((c) => object5(c) && Object.keys(c).every((f) => ["value", "showing"].includes(f)) && typeof c.showing === "boolean" && (c.value === null || typeof c.value === "string" && /^[2-9TJQKA][shdc]$/.test(c.value))));
+      if (k === "players") valid2 = dictionary(v) && Object.entries(v).every(([id, p]) => p === "<D>" || object6(p) && Object.entries(p).every(([field, value]) => field === "id" ? value === id : field === "stack" ? chips3(value) : field === "status" ? typeof value === "string" && value.length <= 32 : field === "disconnectedSince" ? integer4(value) || value === "<D>" : false));
+      if (k === "pC") valid2 = dictionary(v) && Object.values(v).every((h) => object6(h) && Object.keys(h).length === 1 && Array.isArray(h.cards) && h.cards.length === 2 && h.cards.every((c) => object6(c) && Object.keys(c).every((f) => ["value", "showing"].includes(f)) && typeof c.showing === "boolean" && (c.value === null || typeof c.value === "string" && /^[2-9TJQKA][shdc]$/.test(c.value))));
       if (!valid2) throw new Error(`Malformed or unsupported source ${k}.`);
     }
   }
   function validateState(state, tableId, heroId) {
     validateFrame(state);
-    if (state.id !== tableId || !token3(state.hI) || !integer3(state.gN) || state.gN < 1 || !integer3(state.now) || !Array.isArray(state.seats) || !dictionary(state.players) || !object5(state.pGS) || !Array.isArray(state.gT) || !ids(state.iHPI) || !object5(state.pC) || !Object.hasOwn(state.players, heroId)) throw new Error("Incomplete registered/carried source identity or player state.");
-    for (const [id, p] of Object.entries(state.players)) if (!object5(p) || p.id !== id || !chips3(p.stack) || typeof p.status !== "string") {
+    if (state.id !== tableId || !token3(state.hI) || !integer4(state.gN) || state.gN < 1 || !integer4(state.now) || !Array.isArray(state.seats) || !dictionary(state.players) || !object6(state.pGS) || !Array.isArray(state.gT) || !ids(state.iHPI) || !object6(state.pC) || !Object.hasOwn(state.players, heroId)) throw new Error("Incomplete registered/carried source identity or player state.");
+    for (const [id, p] of Object.entries(state.players)) if (!object6(p) || p.id !== id || !chips3(p.stack) || typeof p.status !== "string") {
       throw new Error("Incomplete or contradictory source player identity/stack.");
     }
     if (state.seats.some((s) => !Object.hasOwn(state.players, s[1]))) throw new Error("Seat references an unavailable source player.");
     for (const key of ["pGS", "tB", "pC"]) {
-      const missing = object5(state[key]) && Object.keys(state[key]).find((id) => !Object.hasOwn(state.players, id));
+      const missing = object6(state[key]) && Object.keys(state[key]).find((id) => !Object.hasOwn(state.players, id));
       if (missing) throw new Error(`Player-keyed source ${key}.${missing} references an unavailable player.`);
     }
     if (state.dealerID !== void 0 && state.dealerSeat !== void 0 && !state.seats.some((s) => s[0] === state.dealerSeat && s[1] === state.dealerID)) {
@@ -10120,17 +10467,17 @@
   function advanceUtgState(previous, patch, tableId, heroId) {
     validateFrame(patch);
     if (patch.r === true) throw new Error("Full-refresh/backfill continuity is not supported by the carried proof.");
-    if (!integer3(patch.now) || patch.now <= previous.now || patch.pre !== previous.now) throw new Error("Source predecessor mismatch, stale or replayed update.");
+    if (!integer4(patch.now) || patch.now <= previous.now || patch.pre !== previous.now) throw new Error("Source predecessor mismatch, stale or replayed update.");
     if (Object.hasOwn(patch, "id") && patch.id !== tableId) throw new Error("Conflicting source table identity.");
     const changedHand = Object.hasOwn(patch, "hI") && patch.hI !== previous.hI || Object.hasOwn(patch, "gN") && patch.gN !== previous.gN;
-    if (changedHand && (!token3(patch.hI) || patch.hI === previous.hI || patch.gN !== previous.gN + 1 || !Array.isArray(patch.iHPI) || !object5(patch.pC) || !object5(patch.tB) || JSON.stringify(patch.gT) !== "[1,0]")) {
+    if (changedHand && (!token3(patch.hI) || patch.hI === previous.hI || patch.gN !== previous.gN + 1 || !Array.isArray(patch.iHPI) || !object6(patch.pC) || !object6(patch.tB) || JSON.stringify(patch.gT) !== "[1,0]")) {
       throw new Error("Conflicting or incomplete new-hand transition.");
     }
     const next = structuredClone(previous);
     const removed = Object.entries(patch.players ?? {}).filter(([, p]) => p === "<D>").map(([id]) => id);
     if (removed.length) {
       const roster = patch.iHPI;
-      if (!Array.isArray(roster) || !Array.isArray(patch.seats) || !object5(patch.pC) || Object.keys(patch.pC).length !== roster.length || patch.seats.length !== roster.length || !roster.every((id) => Object.hasOwn(patch.pC, id) && patch.seats.some((s) => s[1] === id)) || removed.some((id) => id === heroId || !Object.hasOwn(previous.players, id) || roster.includes(id) || patch.pGS?.[id] !== "<D>" || Object.hasOwn(patch.pC, id))) {
+      if (!Array.isArray(roster) || !Array.isArray(patch.seats) || !object6(patch.pC) || Object.keys(patch.pC).length !== roster.length || patch.seats.length !== roster.length || !roster.every((id) => Object.hasOwn(patch.pC, id) && patch.seats.some((s) => s[1] === id)) || removed.some((id) => id === heroId || !Object.hasOwn(previous.players, id) || roster.includes(id) || patch.pGS?.[id] !== "<D>" || Object.hasOwn(patch.pC, id))) {
         throw new Error("Player deletion lacks a consistent explicit roster/card snapshot and status deletion.");
       }
       next.pC = {};
@@ -10243,276 +10590,6 @@
       folds: structuredClone(pending.folds),
       hjActivation: structuredClone(pending.hjActivation),
       activation: { sequence, sourcePatch: structuredClone(raw) }
-    } };
-  }
-
-  // src/flopWindow.ts
-  var object6 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
-  var integer4 = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
-  var same2 = (a, b) => {
-    if (a === b) return true;
-    if (Array.isArray(a)) return Array.isArray(b) && a.length === b.length && a.every((v, i) => same2(v, b[i]));
-    return object6(a) && object6(b) && Object.keys(a).length === Object.keys(b).length && Object.keys(a).every((k) => Object.hasOwn(b, k) && same2(a[k], b[k]));
-  };
-  var exact = (v, keys) => Object.keys(v).length === keys.length && keys.every((k) => Object.hasOwn(v, k));
-  var common2 = ["now", "pre", "eventsData", "mEV", "fV", "sN"];
-  function flopPatchKind(raw) {
-    if (!object6(raw) || !integer4(raw.now) || !integer4(raw.pre) || raw.now <= raw.pre || !integer4(raw.sN) || raw.mEV !== 0 || raw.fV !== "0.1.72" || !same2(raw.eventsData, [])) return null;
-    const opening = hjPatchKind(raw);
-    if (opening) return opening;
-    const action2 = raw.sNA === "NSAA" && raw.pITT === null && integer4(raw.sNAA);
-    const contribution3 = object6(raw.tB) && Object.keys(raw.tB).length === 1 && Object.values(raw.tB)[0] === 2 && same2(raw.pGS, {}) && Array.isArray(raw.cRPI) && Array.isArray(raw.wBACPI);
-    if (action2 && contribution3 && exact(raw, [...common2, "tB", "pGS", "sNA", "cRPI", "pITT", "sNAA", "wBACPI"])) return "contribution";
-    if (action2 && contribution3 && raw.mR === 4 && raw.cHB === 2 && exact(raw, [...common2, "mR", "tB", "cHB", "pGS", "sNA", "cRPI", "pITT", "sNAA", "wBACPI"])) return "bet";
-    if (action2 && raw.bigBlindCheck === true && same2(raw.wBACPI, []) && exact(raw, [...common2, "sNA", "pITT", "sNAA", "wBACPI", "bigBlindCheck"])) return "bb_check";
-    if (exact(raw, [
-      ...common2,
-      "gT",
-      "mR",
-      "pC",
-      "tB",
-      "cHB",
-      "cPI",
-      "oTC",
-      "pot",
-      "sNA",
-      "cRPI",
-      "pASA",
-      "pITT",
-      "sNAA",
-      "mAVTB",
-      "players",
-      "bigBlindCheck"
-    ]) && same2(raw.gT, [1, 1]) && raw.mR === 2 && raw.cHB === 0 && (raw.pot === 10 || raw.pot === 12) && raw.cPI === raw.pITT && typeof raw.cPI === "string" && raw.pASA === raw.now && raw.sNA === null && raw.sNAA === null && integer4(raw.mAVTB) && raw.bigBlindCheck === false && same2(raw.cRPI, []) && object6(raw.oTC) && exact(raw.oTC, ["1"]) && Array.isArray(raw.oTC["1"]) && raw.oTC["1"].length === 3 && raw.oTC["1"].every((c) => typeof c === "string" && /^[2-9TJQKA][shdc]$/.test(c)) && object6(raw.tB) && Object.keys(raw.tB).length === raw.pot / 2 && Object.values(raw.tB).every((v) => v === "<D>") && object6(raw.players) && Object.keys(raw.players).length === raw.pot / 2 && Object.values(raw.players).every((p) => object6(p) && exact(p, ["stack"]) && integer4(p.stack)) && object6(raw.pC) && Object.keys(raw.pC).length === 6 && Object.values(raw.pC).every((p) => object6(p) && exact(p, ["name1", "name2", "name1RH"]) && p.name1RH === null && (p.name1 === null || typeof p.name1 === "string" && p.name1.length <= 32) && (p.name2 === null || p.name2 === "<D>"))) return "deal";
-    return null;
-  }
-  var HAND243_STACKS = { UTG: 268, HJ: 256, CO: 235, BTN: 240, SB: 255, BB: 248 };
-  function matchesFlopCallContract(w) {
-    return !!w.openingSizeProfile && w.players.length === 6 && w.players.find((p) => p.playerId === w.heroId)?.position === "HJ" && same2(w.heroCards, ["9d", "Qc"]) && w.players.every((p) => p.sourceStack === HAND243_STACKS[p.position]);
-  }
-  function contributionAccounting(pending, next) {
-    const { witness: w, transition: t, preflopObservations: pre, observations: flop } = pending;
-    if (pending.profile !== "hand243" || !t || !pre) return null;
-    const street = (observations, preflop2) => {
-      const contributions = w.players.map((p) => {
-        const forcedChips = preflop2 ? p.contribution : 0;
-        const voluntaryInvestmentChips = observations.filter((o) => o.playerId === p.playerId).reduce((sum, o) => sum + o.contribution - o.priorContribution, 0);
-        const streetTotalChips = forcedChips + voluntaryInvestmentChips;
-        return {
-          playerId: p.playerId,
-          seat: p.seat,
-          position: p.position,
-          forcedChips,
-          voluntaryInvestmentChips,
-          streetTotalChips,
-          remainingCapacityChips: (preflop2 ? p.sourceStack : t.observedStacks[p.playerId]) - streetTotalChips
-        };
-      });
-      return {
-        units: "chips",
-        contributions,
-        streetContributionSumChips: contributions.reduce((sum, p) => sum + p.streetTotalChips, 0),
-        contestablePotChips: null,
-        provenance: "Hand243 closed source prefix: forced posts plus distinct observed increases. Remaining capacity is arithmetic, not an observed stack decrement or CALL permission."
-      };
-    };
-    const preflop = street(pre, true), current = street(flop, false);
-    if (preflop.contributions.some((p) => p.streetTotalChips !== t.clearedContributions[p.playerId] || p.remainingCapacityChips !== t.observedStacks[p.playerId]) || current.contributions.some((p) => p.streetTotalChips !== (next.tB[p.playerId] ?? 0)) || preflop.streetContributionSumChips !== t.observedPotChips) return null;
-    const cumulativeInvestments = preflop.contributions.map((p, i) => ({
-      playerId: p.playerId,
-      seat: p.seat,
-      preflopChips: p.streetTotalChips,
-      flopChips: current.contributions[i].streetTotalChips,
-      investedChips: p.streetTotalChips + current.contributions[i].streetTotalChips,
-      observedSourceStackChips: next.players[p.playerId].stack
-    }));
-    return {
-      scope: "hand243_contribution_prefix",
-      coverage: "validated_prefix",
-      units: "chips",
-      preflop,
-      flop: current,
-      preflopObservations: structuredClone(pre),
-      cumulativeInvestments,
-      cumulativeInvestmentSumChips: cumulativeInvestments.reduce((sum, p) => sum + p.investedChips, 0),
-      sourcePot: { valueChips: t.observedPotChips, sequence: t.sequence, cursor: t.cursor, receivedAt: t.receivedAt },
-      sourcePotPlusStreetChips: t.observedPotChips + current.streetContributionSumChips,
-      displayedTotalPotChips: null,
-      contestablePotChips: null,
-      netCommittedChips: null,
-      returnedUncalledChips: null,
-      rakeOrDropChips: null,
-      potLedger: null
-    };
-  }
-  function advanceFlopWindow(pending, data, previous, next, sequence, at) {
-    const w = pending.witness, raw = data.flopPatch ?? data.hjPatch, kind2 = flopPatchKind(raw), step = pending.step;
-    const hand243 = pending.profile === "hand243";
-    if (hand243 && !matchesFlopCallContract(w)) return null;
-    if (!raw || !kind2 || data.event !== "gC" || data.heroId !== w.heroId || sequence !== pending.anchor.sequence + step + 1) return null;
-    const projected = ["now", "pre", "eventsData", "fV", "tB", "pGS", "cRPI", "pITT", "cPI", "gT", "pC", "oTC", "players"];
-    const expected = Object.fromEntries(projected.filter((k) => Object.hasOwn(raw, k)).map((k) => [k, k === "pC" ? {} : raw[k]]));
-    if (!same2(data.frame, expected)) return null;
-    const role = (position2) => w.players.find((p) => p.position === position2);
-    const utg = role("UTG"), hj = role("HJ"), co = role("CO"), btn = role("BTN"), sb = role("SB"), bb = role("BB");
-    const actors = [
-      utg,
-      hj,
-      hj,
-      co,
-      co,
-      btn,
-      btn,
-      sb,
-      sb,
-      bb,
-      bb,
-      sb,
-      sb,
-      bb,
-      bb,
-      utg,
-      ...hand243 ? [utg, hj, hj, co] : []
-    ];
-    const kinds = [
-      "contribution",
-      "turn",
-      "contribution",
-      "turn",
-      "contribution",
-      "turn",
-      "fold",
-      "turn",
-      "contribution",
-      "turn",
-      "bb_check",
-      "deal",
-      "bet",
-      "turn",
-      "contribution",
-      "turn",
-      ...hand243 ? ["contribution", "turn", "contribution", "turn"] : []
-    ];
-    if (hand243) kinds[6] = "contribution";
-    const actor = actors[step];
-    if (!actor || kind2 !== kinds[step]) return null;
-    const totals = (through) => Object.fromEntries(w.players.map((p) => {
-      if (through >= 11) return [
-        p.playerId,
-        p.position === "SB" && through >= 12 || p.position === "BB" && through >= 14 || hand243 && (p.position === "UTG" && through >= 16 || p.position === "HJ" && through >= 18) ? 2 : 0
-      ];
-      const contributed = p.position === "UTG" && through >= 0 || p.position === "HJ" && through >= 2 || p.position === "CO" && through >= 4 || p.position === "SB" && through >= 8 || hand243 && p.position === "BTN" && through >= 6;
-      return [p.playerId, contributed ? 2 : p.contribution];
-    }));
-    const stable = (state, through) => state.id === w.tableId && state.hI === w.handId && state.gN === w.handNumber && state.dealerID === btn.playerId && state.dealerSeat === btn.seat && state.sBPI === sb.playerId && state.bBPI === bb.playerId && same2(state.seats, [...w.players].sort((a, b) => a.seat - b.seat).map((p) => [p.seat, p.playerId])) && state.iHPI.length === 6 && w.players.every((p) => state.iHPI.includes(p.playerId)) && Object.keys(state.pC).length === 6 && same2(state.gT, through >= 11 ? [1, 1] : [1, 0]) && same2(state.oTC, through >= 11 ? { "1": pending.transition?.board ?? raw.oTC?.["1"] } : { "1": [] }) && Object.keys(state.players).length === 6 && Object.keys(state.pGS).length === 6 && w.players.every((p) => state.pGS[p.playerId] === (!hand243 && p.position === "BTN" && through >= 6 ? "fold" : "inGame") && state.players[p.playerId].stack === p.sourceStack - (through >= 11 && (hand243 || p.position !== "BTN") ? 2 : 0) && !Object.hasOwn(state.players[p.playerId], "disconnectedSince") && same2(state.pC[p.playerId].cards, (p.playerId === w.heroId ? w.heroCards : [null, null]).map((value) => ({ value, showing: false })))) && Object.keys(state.tB).every((id) => w.players.some((p) => p.playerId === id)) && w.players.every((p) => (state.tB[p.playerId] ?? 0) === totals(through)[p.playerId]);
-    if (!stable(previous, step - 1) || !stable(next, step)) return null;
-    if (kind2 === "turn" || kind2 === "deal") {
-      if (previous.pITT !== null || next.cPI !== actor.playerId || next.pITT !== actor.playerId || raw.mAVTB !== actor.sourceStack - (step >= 11 ? 2 : 0)) return null;
-    } else if (previous.cPI !== actor.playerId || previous.pITT !== actor.playerId || next.cPI !== actor.playerId || next.pITT !== null) return null;
-    if (kind2 === "contribution" || kind2 === "bet") {
-      const responders = step < 11 ? [utg, hj, co, ...hand243 ? [btn] : [], sb].filter((p) => totals(step)[p.playerId] === 2) : [sb, bb, ...hand243 ? [utg, hj] : []].filter((p) => totals(step)[p.playerId] === 2);
-      if (!same2(raw.tB, { [actor.playerId]: 2 }) || !same2(raw.cRPI, responders.map((p) => p.playerId)) || !same2(raw.wBACPI, step < 11 ? [bb.playerId] : [])) return null;
-    }
-    if (kind2 === "fold" && (!same2(raw.pGS, { [btn.playerId]: "fold" }) || !same2(raw.wBACPI, [bb.playerId]))) return null;
-    let transition = pending.transition;
-    if (kind2 === "deal") {
-      const board = raw.oTC["1"];
-      if (hand243 && !same2(board, ["6h", "Qh", "3s"]) || (/* @__PURE__ */ new Set([...board, ...w.heroCards])).size !== 5 || raw.pot !== (hand243 ? 12 : 10) || !same2(raw.tB, Object.fromEntries(w.players.filter((p) => hand243 || p.position !== "BTN").map((p) => [p.playerId, "<D>"]))) || Object.keys(next.tB).length !== 0 || !same2(raw.players, Object.fromEntries(w.players.filter((p) => hand243 || p.position !== "BTN").map((p) => [p.playerId, { stack: p.sourceStack - 2 }]))) || !same2(Object.keys(raw.pC).sort(), w.players.map((p) => p.playerId).sort()) || w.players.some((p) => p.playerId !== w.heroId && !same2(raw.pC[p.playerId], { name1: null, name2: null, name1RH: null }))) return null;
-      transition = {
-        sequence,
-        cursor: next.now,
-        previousCursor: previous.now,
-        receivedAt: at,
-        board: [...board],
-        from: "preflop",
-        to: "flop",
-        clearedContributions: structuredClone(previous.tB),
-        observedStacks: Object.fromEntries(w.players.map((p) => [p.playerId, next.players[p.playerId].stack])),
-        observedPotChips: raw.pot
-      };
-    }
-    const observations = [...pending.observations];
-    if (kind2 === "bet" || kind2 === "contribution" && step > 11) observations.push({
-      sequence,
-      playerId: actor.playerId,
-      priorContribution: previous.tB[actor.playerId] ?? 0,
-      contribution: next.tB[actor.playerId],
-      receivedAt: at
-    });
-    const advanced = { ...pending, step: step + 1, ...transition ? { transition } : {}, observations };
-    if (pending.preflopObservations && kind2 === "contribution" && step < 11) {
-      advanced.preflopObservations = [...pending.preflopObservations, {
-        sequence,
-        playerId: actor.playerId,
-        priorContribution: previous.tB[actor.playerId] ?? 0,
-        contribution: next.tB[actor.playerId],
-        receivedAt: at
-      }];
-    }
-    const accounting = contributionAccounting(advanced, next);
-    const activation = { sequence, cursor: next.now, previousCursor: previous.now, receivedAt: at, playerId: actor.playerId };
-    if (hand243 && step === 17) advanced.heroActivation = activation;
-    if (hand243 && step >= 18) {
-      if (!pending.heroActivation || !transition || step > 19) return null;
-      if (step === 18) {
-        if (actor.playerId !== w.heroId || previous.tB[hj.playerId] !== void 0 || Math.max(...w.players.map((p) => previous.tB[p.playerId] ?? 0)) !== 2 || Math.max(...w.players.map((p) => next.tB[p.playerId] ?? 0)) !== 2 || previous.players[hj.playerId].stack !== 254 || raw.pre !== pending.heroActivation.cursor) return null;
-        advanced.acceptance = {
-          sequence,
-          cursor: next.now,
-          previousCursor: previous.now,
-          receivedAt: at,
-          street: "flop",
-          action: "call",
-          actor: { playerId: hj.playerId, seat: hj.seat, position: "HJ" },
-          priorContributionChips: 0,
-          newContributionChips: 2,
-          investmentChips: 2,
-          previousHighestContributionChips: 2,
-          observedRaiseIncrementChips: 0,
-          evidence: { source: "pokernow_gC", contract: "hand243_hj_flop_call2_v1", raw: structuredClone(raw) }
-        };
-      }
-      if (!advanced.acceptance || step === 19 && raw.pre !== advanced.acceptance.cursor) return null;
-      return { pending: step === 19 ? null : advanced, historical: {
-        version: 1,
-        scope: "historical_flop_call2",
-        historyComplete: false,
-        liveRecommendationsAllowed: false,
-        witness: structuredClone(w),
-        anchor: structuredClone(pending.anchor),
-        transition: structuredClone(transition),
-        heroActivation: structuredClone(pending.heroActivation),
-        originalHeroExpiresAt: pending.heroActivation.receivedAt + 1e4,
-        acceptance: structuredClone(advanced.acceptance),
-        nextActivation: step === 19 ? activation : null,
-        observations,
-        contributions: totals(step),
-        facts: { amountToCallChips: null, contestablePotChips: null, legalActions: null },
-        ...accounting ? { accounting } : {}
-      } };
-    }
-    const heroStep = hand243 ? 17 : 15;
-    if (step !== 11 && step !== heroStep) return { pending: advanced };
-    return { pending: !hand243 && step === heroStep ? null : advanced, proof: {
-      version: 1,
-      scope: step === 11 ? "flop_transition" : "flop_hero_activation",
-      historyComplete: false,
-      liveRecommendationsAllowed: false,
-      expiresAt: at + 1e4,
-      witness: {
-        ...structuredClone(w),
-        cursor: next.now,
-        previousCursor: previous.now,
-        receivedAt: at,
-        provenance: `Hand${hand243 ? 243 : 239} closed source observation prefix; original positions frozen at hand start. No legality, contestable-pot, complete history or live recommendation authority.`
-      },
-      anchor: structuredClone(pending.anchor),
-      transition: structuredClone(transition),
-      activation,
-      observations,
-      contributions: totals(step),
-      facts: { amountToCallChips: null, contestablePotChips: null, legalActions: null },
-      ...accounting ? { accounting } : {}
     } };
   }
 
@@ -11181,7 +11258,7 @@
             sbProof: connected ? firstUtgSource.sbProof() : null,
             facingOpenProof: connected ? firstUtgSource.facingOpenProof() : null,
             coFacingOpenProof: connected ? firstUtgSource.coFacingOpenProof() : null,
-            // Observational certificate only; no decision/legality adapter consumes it.
+            // Observations support a dependent CALL-cost diagnostic, never advice.
             flopObservationProof: connected ? firstUtgSource.flopProof() : null,
             historicalFlopAcceptance: connected ? firstUtgSource.flopAcceptanceProof() : null,
             // Compatibility/display view of the same contract, not another validator.

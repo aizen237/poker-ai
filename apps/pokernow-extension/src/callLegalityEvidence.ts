@@ -4,6 +4,7 @@ import type { LiveTableRead } from "./tableRead.js";
 import type { LiveTimelineDiagnostic } from "./liveTimeline.js";
 import { currentFacingOpen } from "./firstUtgLive.js";
 import { HJ_CALL_RULE as CALL_RULE, matchesHjCallContract } from "./bettingWindow.js";
+import { assessCallControlReadiness } from "./callControlRead.js";
 
 /** Empirical coverage is deliberately no wider than hand238's starting stack
  * vector. This is not a general sufficient-stack rule or a strategy reference. */
@@ -35,23 +36,8 @@ export function callLegalityEvidence(read: LiveTableRead, assessment: LiveStateA
   const costProof: ScopedProof = { scope: "callCost", status: "proven", confidence: "high",
     provenance: [provenance], reasons: [] };
   const control = read.callControl ?? null;
-  let readiness: "unobserved" | "unusable" | "contradicted" | "observed_matching" = "unobserved";
-  const reasons: string[] = [];
-  if (!control) reasons.push("No CALL-control observation in this read.");
-  else if (!Number.isSafeInteger(control.observedAt) || control.observedAt < source.receivedAt || control.observedAt > now ||
-      now - control.observedAt >= 10_000) {
-    readiness = "unusable"; reasons.push("CALL observation is stale, pre-activation or from a future clock; it cannot refresh source proof.");
-  } else if (control.issues.length) {
-    readiness = control.contradictions.length ? "contradicted" : "unusable"; reasons.push(...control.issues);
-  } else if (control.visibleCount === 0) reasons.push("No visible CALL control; absence does not prove an action is illegal.");
-  else if (control.amountChips !== gap) {
-    readiness = "contradicted"; reasons.push("Observed CALL amount disagrees with the certified five-chip source gap.");
-  } else if (control.enabled !== true) {
-    readiness = "unusable"; reasons.push("CALL control is not enabled; readiness is unavailable.");
-  } else {
-    readiness = "observed_matching";
-    reasons.push("One enabled native CALL label agrees with the source gap; UI readiness is not server authorization.");
-  }
+  const { status: readiness, reasons } = assessCallControlReadiness(control, gap, source.receivedAt, now,
+    "Observed CALL amount disagrees with the certified five-chip source gap.");
   const binding = { decisionEpoch: epoch, profile: source.openingSizeProfile, tableId: source.tableId,
       handId: source.handId, handNumber: source.handNumber, heroId: source.heroId, heroSeat: source.heroSeat,
       heroCards: [...source.heroCards], generation: source.generation, cursor: source.cursor,

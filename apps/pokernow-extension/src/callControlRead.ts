@@ -34,3 +34,27 @@ export function readCallControl(root: ParentNode = document,
     issues: [...contradictions, ...issues], contradictions,
   };
 }
+
+/** Readiness only. Callers own source freshness, identity and cost authority. */
+export function assessCallControlReadiness(control: ReturnType<typeof readCallControl> | null,
+  gap: number, activatedAt: number, now: number,
+  mismatch = "Observed CALL amount disagrees with the certified source gap.") {
+  let status: "unobserved" | "unusable" | "contradicted" | "observed_matching" = "unobserved";
+  const reasons: string[] = [];
+  if (!control) reasons.push("No CALL-control observation in this read.");
+  else if (!Number.isSafeInteger(control.observedAt) || control.observedAt < activatedAt || control.observedAt > now ||
+      now - control.observedAt >= 10_000) {
+    status = "unusable"; reasons.push("CALL observation is stale, pre-activation or from a future clock; it cannot refresh source proof.");
+  } else if (control.issues.length) {
+    status = control.contradictions.length ? "contradicted" : "unusable"; reasons.push(...control.issues);
+  } else if (control.visibleCount === 0) reasons.push("No visible CALL control; absence does not prove an action is illegal.");
+  else if (control.amountChips !== gap) {
+    status = "contradicted"; reasons.push(mismatch);
+  } else if (control.enabled !== true) {
+    status = "unusable"; reasons.push("CALL control is not enabled; readiness is unavailable.");
+  } else {
+    status = "observed_matching";
+    reasons.push("One enabled native CALL label agrees with the source gap; UI readiness is not server authorization.");
+  }
+  return { status, observation: control, reasons };
+}

@@ -179,6 +179,7 @@ describe("recorded flop MAIN -> source runtime -> decision/display boundary", ()
         .map(c => ["card-container", `card-${c[1]}`, `card-s-${c[0]}`, "flipped"]);
     }
     read.raw.dealerSeatNumber = hand === 239 ? 5 : 3;
+    read.context.dealerSeatNumber = read.raw.dealerSeatNumber;
     read.evidence.dealerClasses = ["dealer-button-ctn", `dealer-position-${read.raw.dealerSeatNumber}`];
     read.raw.boardCards = (hand === 239 ? ["8d", "Jh", "Ts"] : ["6h", "Qh", "3s"]).map(c => ({ valueText: c[0], suitText: c[1] }));
     read.raw.potMainValueText = hand === 239 ? "10" : "12"; read.raw.potTotalValueText = hand === 239 ? "14" : "18";
@@ -218,6 +219,11 @@ describe("recorded flop MAIN -> source runtime -> decision/display boundary", ()
       for (const scope of ["actionWindow", "legalActions", "accounting", "pot"])
         expect(p.evidence.proofs.find((proof: any) => proof.scope === scope)?.status, scope).not.toBe("proven");
       expect(p.responseWindow).toBeNull(); expect(p.callLegality).toBeNull();
+      if (hand === 243 && d.handTimeline.sourceStatus.flopObservationProof?.scope === "flop_hero_activation") {
+        expect(p.postflopCall).toMatchObject({ payableIfCallAuthorizedChips: { status: "proven", value: 2 },
+          ui: { status: "observed_matching" }, permission: null, liveRecommendationsAllowed: false,
+          binding: { expiresAt: expiry } });
+      } else expect(p.postflopCall).toBeNull();
       expect(d.handTimeline.current.historyComplete).toBe(false);
       expect(d.handTimeline.current.events).toEqual([]);
       expect(document.querySelector('#poker-ai-reader-overlay [style*="font-size:16px"]')).toBeNull();
