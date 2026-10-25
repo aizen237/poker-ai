@@ -9,6 +9,11 @@ import { inspectSocketMetadata } from "../../../apps/pokernow-extension/src/sour
 import { readCallControl } from "../../../apps/pokernow-extension/src/callControlRead.js";
 import { flopCallEvidence } from "../../../apps/pokernow-extension/src/flopCallEvidence.js";
 import { buildLiveDecisionProofs } from "../../../apps/pokernow-extension/src/decisionProofs.js";
+import { liveProofRevision } from "../../../apps/pokernow-extension/src/decisionProofs.js";
+import { decisionFingerprint } from "../../../apps/pokernow-extension/src/requestIdentity.js";
+import { capturePostflopReadiness } from "../../../apps/pokernow-extension/src/postflopReadinessCapture.js";
+import { RawSocketCapture } from "../../../apps/pokernow-extension/src/rawSocketCapture.js";
+import { RaiseEvidenceCollector } from "../../../apps/pokernow-extension/src/raiseEvidenceCapture.js";
 
 const load = (name: string) => JSON.parse(readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url), "utf8"));
 const frames = (): any[] => load("pokernow-flop-243").frames;
@@ -199,5 +204,146 @@ describe("hand243 independent cost, UI readiness and historical acceptance", () 
       payload: { now: last.payload.now + 1, pre: last.payload.now,
         ...(variant === "actor" ? { cPI: "PLAYER_2", pITT: "PLAYER_2" } : {}) } });
     f.control(); expect(f.evidence()).toBeNull();
+  });
+});
+
+describe("development-only paired postflop readiness capture", () => {
+  function paired(markup?: string) {
+    const f = replay(undefined, markup), url = "https://www.pokernow.com/games/TABLE_TEST";
+    const epoch = { decisionEpoch: "7", stateJson: JSON.stringify([
+      decisionFingerprint(url, f.read.raw, f.read.context, f.read.raiseControl), liveProofRevision(f.runtime.snapshot()),
+    ]) };
+    const d = { snapshot: vi.fn(() => f.runtime.snapshot()), read: vi.fn(() => { f.control(markup); return f.read; }),
+      epoch: vi.fn(() => ({ ...epoch })), tableUrl: vi.fn(() => url), now: () => Date.now() };
+    const raw = new RawSocketCapture(true);
+    for (const frame of frames().slice(0, 20)) raw.observe("42" + JSON.stringify([frame.event, frame.payload]), frame.connectionGeneration, frame.localReceivedAt);
+    const source = vi.fn(async () => ({ source: null, error: null, postflop: capturePostflopReadiness(d) }));
+    const raiseDOM = vi.fn(), disarm = vi.fn();
+    const collector = new RaiseEvidenceCollector(true, { raw, dom: raiseDOM, source, tableUrl: d.tableUrl,
+      now: d.now, monotonic: () => 123, disarm });
+    return { ...f, d, epoch, raw, source, raiseDOM, collector, disarm, capture: () => capturePostflopReadiness(d),
+      export: () => JSON.parse(collector.exportJSON()) };
+  }
+  it("brackets a fresh real source prefix and simulated DOM with the existing epoch/deadline", async () => {
+    const f = paired(), before = f.runtime.snapshot();
+    expect(await f.collector.checkpoint("postflop_call")).toMatchObject({ accepted: true, retained: true, readinessMatched: true, reasons: [] });
+    const exported = f.export(), cp = exported.checkpoints[0], pair = cp.postflop;
+    expect(pair).toMatchObject({ readinessMatched: true, authoritative: false, legalityCertified: false,
+      historyComplete: false, contestablePotCertified: false, liveRecommendationsAllowed: false,
+      binding: { decisionEpoch: "7", handId: "HAND_243", heroId: "PLAYER_1", street: "flop", generation: 1, expiresAt: expiry },
+      startedAt: activation, completedAt: activation,
+      read: { callControl: { observedAt: activation, amountChips: 2, enabled: true, visibleCount: 1 } } });
+    expect(pair.before).toEqual(pair.after);
+    expect(pair.before.sourceState).toMatchObject({ localBridgeSequence: 20, generation: 1,
+      fields: { cPI: "PLAYER_1", pITT: "PLAYER_1", gT: [1, 1], now: 1792832960494 } });
+    expect(cp.rawRecorderBefore).toEqual(cp.rawRecorderAfter);
+    expect(cp.rawRecorderBefore.lastRetainedFrame.sourceCursor).toBe(pair.binding.cursor);
+    expect(exported.rawSocket.frames).toEqual(frames().slice(0, 20));
+    expect(f.runtime.snapshot()).toEqual(before); expect(f.epoch.decisionEpoch).toBe("7");
+    expect(f.raiseDOM).not.toHaveBeenCalled(); expect(f.disarm).toHaveBeenCalledOnce();
+  });
+  it.each([
+    ['<button type="button" disabled>Call 2</button>', false, 2],
+    ['<button type="button" aria-disabled="true">Call 2</button>', false, 2],
+    ['<div inert><button type="button">Call 2</button></div>', false, 2],
+    ['<button type="button">Call 3</button>', true, 3],
+    ['<button type="button" hidden>Call 2</button>', null, null],
+    ["", null, null],
+    ['<button type="button">Call 2</button><button type="button">Call 2</button>', null, null],
+  ] as const)("retains but rejects unavailable/contradictory control: %s", async (markup, enabled, amountChips) => {
+    const f = paired(markup);
+    expect(await f.collector.checkpoint("postflop_call")).toMatchObject({ accepted: false, retained: true, readinessMatched: false });
+    const cp = f.export().checkpoints[0];
+    expect(cp.postflop.read.callControl).toMatchObject({ enabled, amountChips, observedAt: activation });
+    expect(cp.legalityCertified).toBe(false); expect(cp.postflop.evidence.permission).toBeNull();
+  });
+  it.each(["epoch", "not-polled", "actor", "street", "amount", "stack", "hand", "generation", "deadline", "cursor"])(
+    "rejects mismatched %s without advancing the epoch or source", variant => {
+      const f = paired();
+      if (variant === "epoch") f.d.epoch.mockReturnValueOnce({ ...f.epoch, decisionEpoch: "6" });
+      if (variant === "not-polled") f.epoch.stateJson = "old poll";
+      if (variant === "actor") f.read.raw.seats[0].statusClasses = ["table-player", "you-player"];
+      if (variant === "street") f.read.raw.boardCards.push({ valueText: "A", suitText: "h" });
+      if (variant === "amount") f.read.raw.seats[0].betValueText = "1";
+      if (variant === "stack") f.read.raw.seats[0].stackText = f.read.raw.seats[0].stackContainerText = "1";
+      if (["hand", "generation", "deadline", "cursor"].includes(variant)) {
+        const s = f.runtime.snapshot();
+        if (variant === "hand") s.sourceStatus.identity!.handId = "OTHER";
+        if (variant === "generation") s.sourceStatus.firstUtgEvidence.carriedState!.generation++;
+        if (variant === "cursor") s.sourceStatus.firstUtgEvidence.carriedState!.projection.frame.now++;
+        if (variant === "deadline") s.sourceStatus.flopObservationProof!.expiresAt++;
+        f.d.snapshot.mockReturnValue(s);
+      }
+      expect(f.capture().readinessMatched).toBe(false); expect(f.epoch.decisionEpoch).toBe("7");
+    });
+  it.each(["pre-activation", "stale-control", "future-control", "during-expiry", "clock-regression"])("rejects invalid timing: %s", variant => {
+    const f = paired();
+    if (variant === "pre-activation") f.at(activation - 1);
+    f.d.read.mockImplementation(() => {
+      f.control();
+      if (variant === "stale-control") f.read.callControl.observedAt--;
+      if (variant === "future-control") f.read.callControl.observedAt++;
+      if (variant === "during-expiry") f.at(expiry);
+      if (variant === "clock-regression") f.at(activation - 1);
+      return f.read;
+    });
+    expect(f.capture().readinessMatched).toBe(false);
+  });
+  it("retains the original deadline on repeated capture, then rejects expiry and historical acceptance", async () => {
+    const f = paired();
+    f.at(expiry - 1); expect(await f.collector.checkpoint("postflop_call")).toMatchObject({ accepted: true });
+    f.at(expiry); expect(await f.collector.checkpoint("postflop_call")).toMatchObject({ accepted: false });
+    f.accept(frames()[20]); expect(await f.collector.checkpoint("postflop_call")).toMatchObject({ accepted: false });
+    const rows = f.export().checkpoints;
+    expect(rows[0].postflop.binding.expiresAt).toBe(expiry);
+    expect(rows[1].postflop.binding).toBeNull(); expect(rows[2].postflop.binding).toBeNull();
+    expect(f.runtime.snapshot().sourceStatus.historicalFlopAcceptance?.originalHeroExpiresAt).toBe(expiry);
+  });
+  it("rejects source advancement during the synchronous read", () => {
+    const f = paired(), last = frames()[19];
+    f.d.read.mockImplementation(() => {
+      f.accept({ ...last, localReceiveSequence: 21, localReceivedAt: activation + 1,
+        payload: { pre: last.payload.now, now: last.payload.now + 1 } });
+      f.control(); return f.read;
+    });
+    expect(f.capture().readinessMatched).toBe(false);
+  });
+  it.each(["new-frame", "late-reply", "stale-reply", "wrong-cursor", "wrong-generation", "rejected-frame", "no-registration", "stopped", "wrong-url", "missing-reply"])(
+    "rejects outer recorder/bridge mismatch: %s", async variant => {
+      const f = paired(), pair = f.capture();
+      if (variant === "wrong-cursor") f.raw.observe('42["gC",{"now":123}]', 1, activation);
+      if (variant === "wrong-generation") f.raw.observe('42["gC",{"now":1792832960494}]', 2, activation);
+      if (variant === "rejected-frame") f.raw.observe('42["gC",', 1, activation);
+      if (variant === "no-registration") vi.spyOn(f.raw, "status").mockReturnValue({ ...f.raw.status(), registeredCaptured: false });
+      if (variant === "stale-reply") f.at(activation + 1);
+      if (variant === "stopped") f.raw.stop();
+      f.source.mockImplementation(async () => {
+        if (variant === "new-frame") f.raw.observe('42["gC",{"now":123}]', 1, activation);
+        if (variant === "late-reply") f.at(expiry);
+        if (variant === "wrong-url") f.d.tableUrl.mockReturnValue("https://www.pokernow.com/games/OTHER");
+        return variant === "missing-reply" ? { source: null, error: null, postflop: null as any } : { source: null, error: null, postflop: pair };
+      });
+      expect(await f.collector.checkpoint("postflop_call")).toMatchObject({ accepted: false, retained: true });
+      expect(f.export().checkpoints[0].readinessMatched).toBe(false);
+    });
+  it("does not assume raw recorder and source bridge local sequence numbers are interchangeable", async () => {
+    const f = paired();
+    // A distinct raw-only earlier frame can shift the local raw index. Cursor
+    // and generation still bind the last frame; raw records remain reviewable.
+    const shifted = new RawSocketCapture(true);
+    shifted.observe('42["rup",{}]', 1, activation - 100000);
+    for (const frame of frames().slice(0, 20)) shifted.observe("42" + JSON.stringify([frame.event, frame.payload]), 1, frame.localReceivedAt);
+    const c = new RaiseEvidenceCollector(true, { raw: shifted, dom: f.raiseDOM, source: f.source,
+      tableUrl: f.d.tableUrl, now: Date.now, monotonic: () => 0, disarm: vi.fn() });
+    expect(await c.checkpoint("postflop_call")).toMatchObject({ accepted: true });
+    expect(JSON.parse(c.exportJSON()).checkpoints[0].rawRecorderAfter.frameCount).toBe(21);
+  });
+  it("rejects a stable different table URL even if its DOM fingerprint was polled", async () => {
+    const f = paired(), url = "https://www.pokernow.com/games/OTHER";
+    f.d.tableUrl.mockReturnValue(url);
+    f.epoch.stateJson = JSON.stringify([
+      decisionFingerprint(url, f.read.raw, f.read.context, f.read.raiseControl), liveProofRevision(f.runtime.snapshot()),
+    ]);
+    expect(await f.collector.checkpoint("postflop_call")).toMatchObject({ accepted: false, retained: true, reasons: ["Table URL mismatch."] });
   });
 });

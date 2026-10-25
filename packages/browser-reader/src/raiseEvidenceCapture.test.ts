@@ -166,12 +166,12 @@ describe("manual RAISE evidence: never proof or poker interaction", () => {
   });
   it("rejects unsupported labels before any source request", async () => {
     const f = fixture(); expect(await f.c.checkpoint("submit_raise")).toMatchObject({ accepted: false });
-    expect(f.sourceRead).not.toHaveBeenCalled(); expect(CHECKPOINT_LABELS).toHaveLength(3);
+    expect(f.sourceRead).not.toHaveBeenCalled(); expect(CHECKPOINT_LABELS).toHaveLength(4);
   });
 });
 
 describe("opt-in diagnostic bridge", () => {
-  function browser(on: boolean, respond = true) {
+  function browser(on: boolean, respond = true, postflopRead?: () => any) {
     const { document } = parseHTML(html);
     for (const e of document.querySelectorAll("*")) e.getBoundingClientRect = () => ({ width: 10, height: 10 } as DOMRect);
     vi.stubGlobal("getComputedStyle", () => ({ display: "block", visibility: "visible" }));
@@ -183,7 +183,7 @@ describe("opt-in diagnostic bridge", () => {
       postMessage: vi.fn((data: unknown) => { for (const l of [...listeners]) l({ source: target, origin: target.location.origin, data }); }) };
     const runtime = createTimelineRuntime({ tableId: "table", sessionId: "bridge", now: Date.now, fetchLog: vi.fn() });
     const snapshot = vi.fn(() => runtime.snapshot());
-    if (respond) installRaiseEvidenceResponder(target, snapshot);
+    if (respond) installRaiseEvidenceResponder(target, snapshot, postflopRead);
     const raw = new RawSocketCapture(on); installRaiseEvidenceCollector(target, raw);
     return { target, settings, snapshot, runtime, raw };
   }
@@ -206,5 +206,26 @@ describe("opt-in diagnostic bridge", () => {
     await f.target.pokerAIRaiseCapture.checkpoint("panel_opened");
     const cp = JSON.parse(f.target.pokerAIRaiseCapture.exportJSON()).checkpoints[0];
     expect(cp.source).toBeNull(); expect(cp.missingEvidence.some((r: string) => r.includes("timed out"))).toBe(true);
+  });
+  it("does not read postflop DOM or send requests unless enabled before load", async () => {
+    const read = vi.fn(), f = browser(false, true, read);
+    expect(await f.target.pokerAIRaiseCapture.checkpoint("postflop_call")).toMatchObject({ accepted: false });
+    expect(read).not.toHaveBeenCalled(); expect(f.target.postMessage).not.toHaveBeenCalled();
+  });
+  it("rejects a missing paired callback instead of substituting an old or preflop snapshot", async () => {
+    const f = browser(true);
+    expect(await f.target.pokerAIRaiseCapture.checkpoint("postflop_call")).toMatchObject({ accepted: false, retained: true });
+    expect(f.snapshot).not.toHaveBeenCalled();
+    const cp = JSON.parse(f.target.pokerAIRaiseCapture.exportJSON()).checkpoints[0];
+    expect(cp.postflop).toBeNull(); expect(cp.reasons.join(" ")).toContain("paired reader unavailable");
+  });
+  it.each(["missing", "oversized", "throws"])("rejects %s paired source replies", async kind => {
+    const read = vi.fn(() => { if (kind === "throws") throw new Error("read failed"); return { payload: "x".repeat(33000) }; });
+    const f = browser(true, kind !== "missing", read);
+    expect(await f.target.pokerAIRaiseCapture.checkpoint("postflop_call")).toMatchObject({ accepted: false, retained: true });
+    const cp = JSON.parse(f.target.pokerAIRaiseCapture.exportJSON()).checkpoints[0];
+    expect(cp.postflop).toBeNull();
+    expect(cp.reasons.join(" ")).toContain(kind === "missing" ? "timed out" : kind === "oversized" ? "32KiB" : "unavailable");
+    expect(f.snapshot).not.toHaveBeenCalled();
   });
 });

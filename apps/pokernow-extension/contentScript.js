@@ -11332,7 +11332,7 @@
         generation: carried.generation,
         localBridgeSequence: carried.sequence,
         // Only present fields are copied: missing differs from explicit null.
-        fields: Object.fromEntries(["id", "hI", "gN", "now", "pre", "cPI", "pITT"].filter((k) => Object.hasOwn(frame, k)).map((k) => [k, frame[k]]))
+        fields: Object.fromEntries(["id", "hI", "gN", "now", "pre", "cPI", "pITT", "gT"].filter((k) => Object.hasOwn(frame, k)).map((k) => [k, frame[k]]))
       } : null,
       firstUtgProof: s.firstUtgProof,
       freshness: s.firstUtgEvidence.freshness,
@@ -11340,24 +11340,79 @@
       historyComplete: false
     };
   }
-  function installRaiseEvidenceResponder(target, snapshot) {
+  function installRaiseEvidenceResponder(target, snapshot, postflopRead) {
     if (!enabled(target)) return;
     let remainingRequests = 8;
     target.addEventListener("message", (event) => {
       if (!enabled(target) || remainingRequests <= 0 || event.source !== target || event.origin !== target.location.origin || event.data?.channel !== CHANNEL || event.data.type !== "checkpoint_source" || typeof event.data.requestId !== "string" || event.data.requestId.length > 100) return;
       remainingRequests--;
       let source = null, error = null;
+      let postflop = null;
       try {
-        source = raiseSourceObservation(snapshot(), Date.now());
-        if (bytes(JSON.stringify(source)) > 32 * 1024) {
+        if (event.data.label === "postflop_call") {
+          postflop = postflopRead?.() ?? null;
+          if (!postflop) error = "Postflop paired reader unavailable; no cached observation substituted.";
+        } else source = raiseSourceObservation(snapshot(), Date.now());
+        if (bytes(JSON.stringify({ source, postflop })) > 32 * 1024) {
           source = null;
+          postflop = null;
           error = "Source observation exceeds 32KiB; rejected without truncation.";
         }
       } catch {
         error = "Source observation unavailable.";
       }
-      target.postMessage({ channel: CHANNEL, type: "checkpoint_source_result", requestId: event.data.requestId, source, error }, target.location.origin);
+      target.postMessage({ channel: CHANNEL, type: "checkpoint_source_result", requestId: event.data.requestId, source, postflop, error }, target.location.origin);
     });
+  }
+
+  // src/postflopReadinessCapture.ts
+  function capturePostflopReadiness(d) {
+    const copySource = (s, at) => {
+      const { connected, identity: identity3, currentHand, sourceState } = raiseSourceObservation(s, at);
+      return structuredClone({ connected, identity: identity3, currentHand, sourceState, proof: s.sourceStatus.flopObservationProof });
+    };
+    const startedAt = d.now(), tableUrl = d.tableUrl(), epochBefore = { ...d.epoch() };
+    const first = d.snapshot(), before = copySource(first, startedAt);
+    const read = d.read();
+    const evidence = flopCallEvidence(read, assessLiveState(read.raw, read.context), first, epochBefore.decisionEpoch);
+    const last = d.snapshot(), after = copySource(last, d.now()), epochAfter = { ...d.epoch() };
+    const completedAt = d.now(), binding = evidence?.binding ?? null;
+    const reasons = [];
+    if (!evidence || evidence.ui.status !== "observed_matching") reasons.push("No fresh matching Phase6E source/DOM/CALL observation.");
+    const stateJson = (s) => JSON.stringify([
+      decisionFingerprint(tableUrl, read.raw, read.context, read.raiseControl),
+      liveProofRevision(s)
+    ]);
+    if (!epochBefore.decisionEpoch || epochBefore.stateJson === null || JSON.stringify(epochBefore) !== JSON.stringify(epochAfter) || epochBefore.stateJson !== stateJson(first) || epochAfter.stateJson !== stateJson(last))
+      reasons.push("Current read/source does not match the existing decision epoch; wait for an ordinary poll, never mint a capture epoch.");
+    if (JSON.stringify(before) !== JSON.stringify(after) || tableUrl !== d.tableUrl()) reasons.push("Source or table changed across the read.");
+    const state = before.sourceState, fields = state?.fields;
+    if (!binding || !state || state.generation !== binding.generation || state.localBridgeSequence !== before.proof?.continuity.throughSequence || fields?.now !== binding.cursor || fields?.hI !== binding.handId || fields?.gN !== binding.handNumber || fields?.cPI !== binding.heroId || fields?.pITT !== binding.heroId || JSON.stringify(fields?.gT) !== "[1,1]")
+      reasons.push("Carried source hand/actor/street/generation/cursor does not match the original opportunity.");
+    const observedAt = read.callControl?.observedAt;
+    if (![startedAt, completedAt, observedAt].every(Number.isSafeInteger) || observedAt < startedAt || observedAt > completedAt || completedAt < startedAt || !binding || startedAt < binding.receivedAt || completedAt >= binding.expiresAt || binding.expiresAt !== binding.receivedAt + 1e4)
+      reasons.push("Read is stale, unbracketed, clock-inconsistent or outside the original ten-second window.");
+    return {
+      version: 1,
+      developmentOnly: true,
+      authoritative: false,
+      legalityCertified: false,
+      historyComplete: false,
+      contestablePotCertified: false,
+      liveRecommendationsAllowed: false,
+      readinessMatched: reasons.length === 0,
+      startedAt,
+      completedAt,
+      tableUrl,
+      epochBefore,
+      epochAfter,
+      binding,
+      before,
+      after,
+      read: structuredClone(read),
+      evidence,
+      reasons
+    };
   }
 
   // src/contentScript.ts
@@ -11654,7 +11709,13 @@
   var currentDiagnosticPacket = null;
   var handTimeline = startLiveTimeline();
   try {
-    installRaiseEvidenceResponder(window, () => handTimeline.snapshot());
+    installRaiseEvidenceResponder(window, () => handTimeline.snapshot(), () => capturePostflopReadiness({
+      snapshot: () => handTimeline.snapshot(),
+      read: readLiveTable,
+      epoch: () => ({ decisionEpoch: String(requestSequence), stateJson: lastStateJson }),
+      tableUrl: () => location.origin + location.pathname,
+      now: () => Date.now()
+    }));
   } catch {
   }
   var displayLifetime = null;

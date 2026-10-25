@@ -53,6 +53,18 @@ describe("temporary raw socket capture (synthetic transport tests, not live sema
     expect(frames.map((f: any) => f.connectionGeneration)).toEqual([1, 1, 2, 1]);
     expect(frames.map((f: any) => f.localReceiveSequence)).toEqual([1, 2, 3, 4]);
   });
+  it("exposes only an exact last-frame cursor for diagnostic pairing, never a wall clock or carried cursor", () => {
+    const capture = new RawSocketCapture(true);
+    capture.observe(packet("registered", { gameState: { now: 123 } }), 1, 1000);
+    expect(capture.status().lastRetainedFrame).toMatchObject({ sourceCursor: 123, localReceivedAt: 1000 });
+    capture.observe(packet("gC", { now: 124 }), 1, 1001);
+    expect(capture.status().lastRetainedFrame?.sourceCursor).toBe(124);
+    for (const raw of ['{}', '{"now":null}', '{"now":"125"}', '{"now":9007199254740993}', '{"now":1.5}']) {
+      capture.observe(`42["gC",${raw}]`, 1, 1002);
+      expect(capture.status().lastRetainedFrame?.sourceCursor).toBeNull();
+    }
+    expect(capture.exportJSON()).toContain('"now":9007199254740993');
+  });
 
   it("stops at frame capacity without evicting registration", () => {
     const capture = new RawSocketCapture(true, { frames: 2, characters: 1000 });

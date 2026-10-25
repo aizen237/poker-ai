@@ -4,6 +4,10 @@ Historical Phase 1 procedure; no repeat of the completed capture is needed.
 See [Phase 2](PREFLOP_RAISE_PHASE2.md) for the later exact-five-chip contract.
 The collector itself remains observational and disabled by default.
 
+The same collector now has a separate read-only `postflop_call` checkpoint.
+See [Phase 6F](POSTFLOP_PHASE6F.md) for its source/epoch pairing and manual
+procedure; the historical Raise-panel operations below are not needed for it.
+
 This development-only collector is disabled by default. It does not recommend
 or perform any poker action. Manual labels are your description of an operation,
 not proof that PokerNow accepted an amount. Nothing is uploaded or logged

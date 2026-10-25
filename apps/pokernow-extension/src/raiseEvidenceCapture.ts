@@ -1,11 +1,13 @@
 import { isControlVisible, RAISE_SELECTORS, readRaiseControl } from "./raiseControlRead.js";
 import { RAW_CAPTURE_KEY, type RawSocketCapture } from "./rawSocketCapture.js";
 import type { LiveTimelineDiagnostic } from "./liveTimeline.js";
+import type { PostflopReadinessCapture } from "./postflopReadinessCapture.js";
+import { tableIdFromPath } from "./pokerNowTransport.js";
 
 // Diagnostics only. This channel is never consumed by the source reducer/policy.
 export const RAISE_CAPTURE_KEY = "poker-ai:raise-evidence-capture";
 const CHANNEL = "poker-ai:raise-evidence-diagnostics:v1";
-export const CHECKPOINT_LABELS = ["panel_opened", "min_raise_selected", "five_chips_entered"] as const;
+export const CHECKPOINT_LABELS = ["panel_opened", "min_raise_selected", "five_chips_entered", "postflop_call"] as const;
 const LIMITS = { checkpoints: 8, bytes: 128 * 1024 };
 const bytes = (text: string) => new TextEncoder().encode(text).byteLength;
 const enabled = (target: Window) => {
@@ -51,7 +53,7 @@ export function raiseSourceObservation(snapshot: LiveTimelineDiagnostic, at: num
     currentHand: { handId: snapshot.current.handId, handNumber: snapshot.current.handNumber },
     sourceState: carried ? { generation: carried.generation, localBridgeSequence: carried.sequence,
       // Only present fields are copied: missing differs from explicit null.
-      fields: Object.fromEntries(["id", "hI", "gN", "now", "pre", "cPI", "pITT"]
+      fields: Object.fromEntries(["id", "hI", "gN", "now", "pre", "cPI", "pITT", "gT"]
         .filter(k => Object.hasOwn(frame!, k)).map(k => [k, frame![k]])) } : null,
     firstUtgProof: s.firstUtgProof,
     freshness: s.firstUtgEvidence.freshness,
@@ -60,7 +62,8 @@ export function raiseSourceObservation(snapshot: LiveTimelineDiagnostic, at: num
 export type RaiseSourceObservation = ReturnType<typeof raiseSourceObservation>;
 
 /** Install in ISOLATED, opt-in only; responses cannot update runtime state. */
-export function installRaiseEvidenceResponder(target: Window, snapshot: () => LiveTimelineDiagnostic) {
+export function installRaiseEvidenceResponder(target: Window, snapshot: () => LiveTimelineDiagnostic,
+  postflopRead?: () => PostflopReadinessCapture) {
   if (!enabled(target)) return;
   let remainingRequests = 8;
   target.addEventListener("message", event => {
@@ -69,19 +72,25 @@ export function installRaiseEvidenceResponder(target: Window, snapshot: () => Li
         typeof event.data.requestId !== "string" || event.data.requestId.length > 100) return;
     remainingRequests--;
     let source: RaiseSourceObservation | null = null, error: string | null = null;
+    let postflop: PostflopReadinessCapture | null = null;
     try {
-      source = raiseSourceObservation(snapshot(), Date.now());
-      if (bytes(JSON.stringify(source)) > 32 * 1024) { source = null; error = "Source observation exceeds 32KiB; rejected without truncation."; }
+      if (event.data.label === "postflop_call") {
+        postflop = postflopRead?.() ?? null;
+        if (!postflop) error = "Postflop paired reader unavailable; no cached observation substituted.";
+      } else source = raiseSourceObservation(snapshot(), Date.now());
+      if (bytes(JSON.stringify({ source, postflop })) > 32 * 1024) {
+        source = null; postflop = null; error = "Source observation exceeds 32KiB; rejected without truncation.";
+      }
     } catch { error = "Source observation unavailable."; }
-    target.postMessage({ channel: CHANNEL, type: "checkpoint_source_result", requestId: event.data.requestId, source, error }, target.location.origin);
+    target.postMessage({ channel: CHANNEL, type: "checkpoint_source_result", requestId: event.data.requestId, source, postflop, error }, target.location.origin);
   });
 }
 
-export interface SourceReply { source: RaiseSourceObservation | null; error: string | null }
+export interface SourceReply { source: RaiseSourceObservation | null; error: string | null; postflop?: PostflopReadinessCapture | null }
 type Dependencies = {
   raw: RawSocketCapture;
   dom: () => ReturnType<typeof readRaiseCheckpointDOM>;
-  source: () => Promise<SourceReply>;
+  source: (label: string) => Promise<SourceReply>;
   tableUrl: () => string;
   now: () => number;
   monotonic: () => number;
@@ -105,6 +114,14 @@ export class RaiseEvidenceCollector {
     busy: this.busy, checkpointCount: this.records.length, retainedBytes: this.retainedBytes,
     refusedCheckpoints: this.refused, stopReason: this.stopReason, limits: { ...this.limits }, rawRecorder: this.d.raw.status() }; }
   private refuse(reason: string) { this.refused++; return { accepted: false, reason }; }
+  private retain(record: unknown) {
+    const json = JSON.stringify(record);
+    const size = this.retainedBytes + bytes(json) + (this.records.length ? 1 : 0);
+    if (size > this.limits.bytes) { this.stop("checkpoint_byte_limit"); return this.refuse("checkpoint_byte_limit; whole checkpoint rejected, no truncation"); }
+    this.records.push(json); this.retainedBytes = size;
+    if (this.records.length === this.limits.checkpoints) this.stop("checkpoint_limit");
+    return { accepted: true, checkpoint: this.records.length };
+  }
   stop(reason = "manually_disabled") {
     this.active = false; this.stopReason = reason; this.d.raw.stop(); this.d.disarm();
   }
@@ -116,10 +133,33 @@ export class RaiseEvidenceCollector {
     this.busy = true;
     try {
       const at = this.d.now(), performanceTime = this.d.monotonic(), tableUrl = this.d.tableUrl();
-      const rawBefore = this.d.raw.status(), dom = this.d.dom();
-      const reply = await this.d.source();
+      const rawBefore = this.d.raw.status(), dom = label === "postflop_call" ? null : this.d.dom();
+      const reply = await this.d.source(label);
       if (!this.active) return this.refuse("capture_stopped_while_checkpoint_pending");
       const completedAt = this.d.now(), rawAfter = this.d.raw.status(), source = reply.source;
+      if (label === "postflop_call") {
+        const pair = reply.postflop ?? null, b = pair?.binding, last = rawAfter.lastRetainedFrame;
+        const reasons = [...(pair?.reasons ?? ["No paired isolated-world observation."]), ...(reply.error ? [reply.error] : [])];
+        if (!pair?.readinessMatched || !b || pair.evidence?.ui.status !== "observed_matching") reasons.push("Postflop readiness did not match.");
+        if (!pair || !b || ![at, completedAt, pair.startedAt, pair.completedAt].every(Number.isSafeInteger) ||
+            at > pair.startedAt || pair.startedAt > pair.completedAt || pair.completedAt > completedAt ||
+            at < b.receivedAt || completedAt >= b.expiresAt || b.expiresAt !== b.receivedAt + 10_000)
+          reasons.push("Capture/reply is stale or outside the original source deadline.");
+        if (!rawBefore.active || !rawAfter.active || !rawAfter.registeredCaptured || rawAfter.rejectedFrames ||
+            JSON.stringify(rawBefore) !== JSON.stringify(rawAfter) || !last || !b ||
+            last.sourceCursor !== b.cursor || last.connectionGeneration !== b.generation || last.localReceivedAt > at)
+          reasons.push("Raw recorder is missing, changed, rejected frames, or does not match the source cursor/generation.");
+        if (tableUrl !== this.d.tableUrl() || pair?.tableUrl !== tableUrl ||
+            !b || tableIdFromPath(new URL(tableUrl).pathname) !== b.tableId) reasons.push("Table URL mismatch.");
+        const readinessMatched = reasons.length === 0;
+        const saved = this.retain({ label, capturedAt: at, completedAt, performanceTime, tableUrl, postflop: pair,
+          rawRecorderBefore: rawBefore, rawRecorderAfter: rawAfter, readinessMatched, reasons,
+          legalityCertified: false, historyComplete: false, liveRecommendationsAllowed: false,
+          correlation: "Local read/receipt pairing only; independent recorder/bridge sequences, never server permission or screenshot timing." });
+        if (saved.accepted && !readinessMatched) this.refused++;
+        return saved.accepted ? { ...saved, accepted: readinessMatched, retained: true, readinessMatched, reasons } : saved;
+      }
+      if (!dom) return this.refuse("Missing Raise DOM read.");
       const missing: string[] = ["Independent minimum, denomination and five-chip server legality are not certified by this collector."], contradictions: string[] = [];
       if (reply.error) missing.push(reply.error);
       if (!source) missing.push("No isolated-world source snapshot; source identity/proof unavailable.");
@@ -158,12 +198,9 @@ export class RaiseEvidenceCollector {
         rawRecorderBefore: rawBefore, rawRecorderAfter: rawAfter,
         correlation: "Local timestamps/frame counts only; raw capture sequence is not bridge/source sequence. No atomic or authoritative association claimed.",
         missingEvidence: missing, contradictions, legalityCertified: false, historyComplete: false };
-      const json = JSON.stringify(record);
-      const size = this.retainedBytes + bytes(json) + (this.records.length ? 1 : 0);
-      if (size > this.limits.bytes) { this.stop("checkpoint_byte_limit"); return this.refuse("checkpoint_byte_limit; whole checkpoint rejected, no truncation"); }
-      this.records.push(json); this.retainedBytes = size; this.priorBinding = binding;
-      if (this.records.length === this.limits.checkpoints) this.stop("checkpoint_limit");
-      return { accepted: true, checkpoint: this.records.length, missingEvidence: missing, contradictions };
+      const saved = this.retain(record);
+      if (saved.accepted) this.priorBinding = binding;
+      return { ...saved, missingEvidence: missing, contradictions };
     } catch {
       return this.refuse("checkpoint_read_failed; no partial record retained");
     } finally { this.busy = false; }
@@ -175,7 +212,7 @@ export class RaiseEvidenceCollector {
     this.exported = true;
     if (this.active) this.stop("exported");
     // Embed original raw JSON tokens, not parsed/re-serialized source numbers.
-    return `{"version":1,"origin":"temporary local RAISE diagnostics; never legality proof","exportedAt":${this.d.now()},"capture":${JSON.stringify(this.status())},"checkpoints":[${this.records.join(",")}],"rawSocket":${this.d.raw.exportJSON()}}`;
+    return `{"version":1,"origin":"temporary local action-control diagnostics; never legality proof","exportedAt":${this.d.now()},"capture":${JSON.stringify(this.status())},"checkpoints":[${this.records.join(",")}],"rawSocket":${this.d.raw.exportJSON()}}`;
   }
 }
 
@@ -185,7 +222,7 @@ export function installRaiseEvidenceCollector(target: Window, raw: RawSocketCapt
     raw, dom: () => readRaiseCheckpointDOM(target.document), tableUrl: () => target.location.origin + target.location.pathname,
     now: () => Date.now(), monotonic: () => target.performance.now(),
     disarm: () => { try { target.sessionStorage.removeItem(RAISE_CAPTURE_KEY); target.sessionStorage.removeItem(RAW_CAPTURE_KEY); } catch { /* optional storage */ } },
-    source: () => new Promise<SourceReply>(resolve => {
+    source: (label) => new Promise<SourceReply>(resolve => {
       const requestId = crypto.randomUUID();
       const finish = (result: SourceReply) => { target.clearTimeout(timer); target.removeEventListener("message", receive); resolve(result); };
       const receive = (event: MessageEvent) => {
@@ -193,12 +230,12 @@ export function installRaiseEvidenceCollector(target: Window, raw: RawSocketCapt
             event.data.type !== "checkpoint_source_result" || event.data.requestId !== requestId) return;
         try {
           if (bytes(JSON.stringify(event.data)) > 34 * 1024) { finish({ source: null, error: "Source reply exceeds diagnostic limit." }); return; }
-          finish({ source: event.data.source ?? null, error: event.data.error ?? null });
+          finish({ source: event.data.source ?? null, postflop: event.data.postflop ?? null, error: event.data.error ?? null });
         } catch { finish({ source: null, error: "Unreadable diagnostic source reply." }); }
       };
       const timer = target.setTimeout(() => finish({ source: null, error: "Source diagnostic response timed out; no cached proof substituted." }), 750);
       target.addEventListener("message", receive);
-      target.postMessage({ channel: CHANNEL, type: "checkpoint_source", requestId }, target.location.origin);
+      target.postMessage({ channel: CHANNEL, type: "checkpoint_source", requestId, label }, target.location.origin);
     }),
   });
   Object.defineProperty(target, "pokerAIRaiseCapture", { configurable: true, value: Object.freeze({

@@ -25,6 +25,7 @@ import { decisionFingerprint, decisionRequestKey } from "./requestIdentity.js";
 import { RecommendationSchema, lockedEngineRecommendation, validateReasoningConsistency } from "@poker-ai/ai-core";
 import { startLiveTimeline } from "./liveTimeline.js";
 import { installRaiseEvidenceResponder } from "./raiseEvidenceCapture.js";
+import { capturePostflopReadiness } from "./postflopReadinessCapture.js";
 import { buildLiveDecisionProofs, liveProofRevision, activationLabel } from "./decisionProofs.js";
 console.log("[Poker AI Reader] Content script loaded on:", window.location.href);
 
@@ -422,7 +423,13 @@ let previousGameState: GameState | null = null;
 let actionHistory: ActionHistory = emptyActionHistory();
 let currentDiagnosticPacket: DecisionPacket | null = null;
 const handTimeline = startLiveTimeline();
-try { installRaiseEvidenceResponder(window, () => handTimeline.snapshot()); } catch { /* Optional diagnostics only. */ }
+try {
+  installRaiseEvidenceResponder(window, () => handTimeline.snapshot(), () => capturePostflopReadiness({
+    snapshot: () => handTimeline.snapshot(), read: readLiveTable,
+    epoch: () => ({ decisionEpoch: String(requestSequence), stateJson: lastStateJson }),
+    tableUrl: () => location.origin + location.pathname, now: () => Date.now(),
+  }));
+} catch { /* Optional diagnostics only. */ }
 
 // Display-only deadline: never renews evidence or participates in activation.
 // No old action is retained after expiry or any decision/source change.

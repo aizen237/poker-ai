@@ -184,6 +184,7 @@ describe("recorded flop MAIN -> source runtime -> decision/display boundary", ()
     read.raw.boardCards = (hand === 239 ? ["8d", "Jh", "Ts"] : ["6h", "Qh", "3s"]).map(c => ({ valueText: c[0], suitText: c[1] }));
     read.raw.potMainValueText = hand === 239 ? "10" : "12"; read.raw.potTotalValueText = hand === 239 ? "14" : "18";
     const { document } = parseHTML('<html><body><button type="button">Call 2</button></body></html>');
+    const click = vi.spyOn(document.querySelector("button")!, "click");
     const location = new URL("https://www.pokernow.com/games/TABLE_TEST");
     const listeners: Array<(e: any) => void> = [];
     let now = fs[0].localReceivedAt, poll = () => {}, refresh = () => {};
@@ -192,10 +193,14 @@ describe("recorded flop MAIN -> source runtime -> decision/display boundary", ()
       constructor(public url: string) { super(); }
       incoming(f: any) { this.dispatchEvent(new MessageEvent("message", { data: "42" + JSON.stringify([f.event, f.payload]) })); }
     }
-    const win = { location, WebSocket: Socket, setTimeout: () => 1, clearTimeout() {},
+    const captureSettings = new Map(hand === 243 ? [["poker-ai:raise-evidence-capture", "1"], ["poker-ai:raw-socket-capture", "1"]] : []);
+    const win = { location, WebSocket: Socket, performance, setTimeout: () => 1, clearTimeout() {},
       addEventListener: (type: string, cb: (e: any) => void) => { if (type === "message") listeners.push(cb); },
+      removeEventListener: (type: string, cb: (e: any) => void) => { if (type === "message") {
+        const index = listeners.indexOf(cb); if (index >= 0) listeners.splice(index, 1);
+      } },
       postMessage: (data: unknown) => { for (const cb of listeners) cb({ source: win, origin: location.origin, data }); },
-      sessionStorage: { getItem: () => null } };
+      sessionStorage: { getItem: (key: string) => captureSettings.get(key) ?? null, removeItem: (key: string) => captureSettings.delete(key) } };
     vi.stubGlobal("window", win); vi.stubGlobal("document", document); vi.stubGlobal("location", location);
     vi.stubGlobal("localStorage", { getItem: () => "1", removeItem() {} });
     vi.spyOn(Date, "now").mockImplementation(() => now);
@@ -236,10 +241,16 @@ describe("recorded flop MAIN -> source runtime -> decision/display boundary", ()
       preflop: { streetContributionSumChips: 12 }, flop: { streetContributionSumChips: 6 },
       cumulativeInvestmentSumChips: 18, sourcePot: { valueChips: 12 }, contestablePotChips: null, potLedger: null,
     });
+    if (hand === 243) {
+      const capture = await (win as any).pokerAIRaiseCapture.checkpoint("postflop_call");
+      expect(capture, JSON.stringify(capture)).toMatchObject({ accepted: true, readinessMatched: true });
+      expect(blocked()?.expiresAt).toBe(expiry);
+    }
     // Log refresh and polling cannot renew the source opportunity.
     await new Promise(resolve => setTimeout(resolve, 0));
     now = last.localReceivedAt + 9999; refresh(); expect(blocked()?.expiresAt).toBe(expiry);
     now++; refresh(); expect(blocked()).toBeNull();
+    if (hand === 243) expect(await (win as any).pokerAIRaiseCapture.checkpoint("postflop_call")).toMatchObject({ accepted: false, retained: true });
     if (hand === 243) {
       for (const f of fs.slice(20)) {
         now = f.localReceivedAt; socket.incoming(f);
@@ -261,5 +272,14 @@ describe("recorded flop MAIN -> source runtime -> decision/display boundary", ()
     expect(blocked()).toBeNull();
     expect(diagnostic().handTimeline.sourceStatus.historicalFlopAcceptance).toBeNull();
     socket.dispatchEvent(new Event("close")); expect(blocked()).toBeNull();
+    if (hand === 243) {
+      const captured = JSON.parse((win as any).pokerAIRaiseCapture.exportJSON());
+      expect(captured.checkpoints.map((cp: any) => cp.readinessMatched)).toEqual([true, false]);
+      expect(captured.checkpoints[0].postflop.binding).toMatchObject({ expiresAt: expiry, activationSequence: 20 });
+      expect(captured.checkpoints[0].postflop.binding.decisionEpoch).not.toBe("diagnostic");
+      expect(captured.checkpoints[0].postflop.read.callControl).toMatchObject({ enabled: true, amountChips: 2 });
+      expect(captured.rawSocket.frames.slice(0, 20)).toEqual(fs.slice(0, 20));
+      expect(socket.send).not.toHaveBeenCalled(); expect(click).not.toHaveBeenCalled(); expect(captureSettings.size).toBe(0);
+    }
   });
 });

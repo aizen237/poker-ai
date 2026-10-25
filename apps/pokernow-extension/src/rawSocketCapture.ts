@@ -108,13 +108,17 @@ export class RawSocketCapture {
 
   status() {
     const last = this.frames.at(-1);
+    const payload = last ? JSON.parse(last.payloadJSON) : null;
+    const cursor = last?.event === "registered" ? payload?.gameState?.now : payload?.now;
     return { temporaryDiagnosticsOnly: true, authoritativeOrdering: false, historyCompletenessProof: false,
       active: this.active, stopReason: this.stopReason, frameCount: this.frames.length,
       retainedJsonCharacters: this.characters, rejectedFrames: this.rejectedFrames,
       retainedSourceCharacters: this.sourceCharacters,
       registeredCaptured: this.frames.some(frame => frame.event === "registered"),
       lastRetainedFrame: last ? { localReceiveSequence: last.localReceiveSequence, localReceivedAt: last.localReceivedAt,
-        connectionGeneration: last.connectionGeneration, event: last.event } : null,
+        connectionGeneration: last.connectionGeneration, event: last.event,
+        // Diagnostic linkage only; raw and bridge sequences are independent.
+        sourceCursor: Number.isSafeInteger(cursor) ? cursor as number : null } : null,
       limits: { ...this.limits } };
   }
 
