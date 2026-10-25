@@ -161,11 +161,12 @@ describe("hand239 recorded flop observations through the sole source authority",
 });
 
 describe("recorded flop MAIN -> source runtime -> decision/display boundary", () => {
-  it.each([[239, false], [243, false], [243, true], [244, false], [246, false]] as const)("hand%i withholds advice, legality and history (unknown return: %s)", async (hand, unknownReturn) => {
+  it.each([[239, false], [243, false], [243, true], [244, false], [246, false], [248, false]] as const)("hand%i withholds advice, legality and history (unknown return: %s)", async (hand, unknownReturn) => {
     vi.resetModules();
-    const fs: any[] = hand === 239 ? frames() : JSON.parse(readFileSync(new URL("./fixtures/pokernow-flop-243.json", import.meta.url), "utf8")).frames;
+    const fs: any[] = hand === 239 ? frames() : JSON.parse(readFileSync(new URL(`./fixtures/pokernow-flop-${hand === 248 ? 248 : 243}.json`, import.meta.url), "utf8")).frames;
+    const synthetic = hand === 244 || hand === 246;
     // Synthetic ordinary profile, explicitly outside both certified hands.
-    if (hand >= 244) for (const entry of fs) {
+    if (synthetic) for (const entry of fs) {
       const frame = entry.payload.gameState ?? entry.payload;
       if (frame.gN) frame.gN += hand - 243;
       if (frame.hI) frame.hI = frame.hI === "HAND_243" ? `HAND_${hand}` : `HAND_${hand - 1}`;
@@ -183,7 +184,7 @@ describe("recorded flop MAIN -> source runtime -> decision/display boundary", ()
       fs.splice(19, 0, ...extra);
       fs.forEach((f, i) => { f.localReceiveSequence = i + 1; });
     }
-    const prefixCount = hand === 246 ? 29 : 20;
+    const prefixCount = hand === 248 ? 30 : hand === 246 ? 29 : 20;
     const last = fs[prefixCount - 1], expiry = last.localReceivedAt + 10000;
     // This read/HTML is explicit test scaffolding, NOT a recovered screenshot
     // timestamp or DOM capture. Raw source envelopes/times remain unchanged.
@@ -192,18 +193,22 @@ describe("recorded flop MAIN -> source runtime -> decision/display boundary", ()
       : { 1: 254, 2: 233, 3: 238, 5: 251, 9: 244, 10: 264 };
     for (const seat of read.raw.seats) if (seat.isOccupied) {
       seat.isYou = seat.seatNumber === 1;
-      seat.stackText = seat.stackContainerText = String(stacks[seat.seatNumber] + (hand >= 244 ? 50 : 0));
+      seat.stackText = seat.stackContainerText = String(stacks[seat.seatNumber] + (synthetic ? 50 : 0));
       seat.betValueText = (hand !== 239 ? [5, 9, 10] : [9, 10]).includes(seat.seatNumber) ? "2" : "0";
       seat.statusClasses = ["table-player", `table-player-${seat.seatNumber}`,
         ...(seat.isYou ? ["you-player", "decision-current"] : []), ...(hand === 239 && seat.seatNumber === 5 ? ["fold"] : [])];
-      if (seat.isYou) seat.holeCardClassLists = (hand === 239 ? ["3s", "Js"] : hand >= 244 ? ["As", "Kd"] : ["9d", "Qc"])
+      if (seat.isYou) seat.holeCardClassLists = (hand === 239 ? ["3s", "Js"] : synthetic ? ["As", "Kd"] : ["9d", "Qc"])
         .map(c => ["card-container", `card-${c[1]}`, `card-s-${c[0]}`, "flipped"]);
     }
     read.raw.dealerSeatNumber = hand === 239 ? 5 : 3;
     read.context.dealerSeatNumber = read.raw.dealerSeatNumber;
     read.evidence.dealerClasses = ["dealer-button-ctn", `dealer-position-${read.raw.dealerSeatNumber}`];
-    read.raw.boardCards = (hand === 239 ? ["8d", "Jh", "Ts"] : hand >= 244 ? ["Ah", "7c", "2s"] : ["6h", "Qh", "3s"]).map(c => ({ valueText: c[0], suitText: c[1] }));
+    read.raw.boardCards = (hand === 239 ? ["8d", "Jh", "Ts"] : synthetic ? ["Ah", "7c", "2s"] : ["6h", "Qh", "3s"]).map(c => ({ valueText: c[0], suitText: c[1] }));
     read.raw.potMainValueText = hand === 239 ? "10" : "12"; read.raw.potTotalValueText = hand === 239 ? "14" : "18";
+    // Real saved table read for hand248. The installed bridge/clock/control
+    // invocation below is a replay, not a new real checkpoint or recovered epoch.
+    if (hand === 248) Object.assign(read, JSON.parse(readFileSync(new URL("./fixtures/pokernow-flop-248-checkpoint.json", import.meta.url), "utf8"))
+      .checkpoint.observation.unverifiedObservations.ui);
     const { document } = parseHTML('<html><body><button type="button">Call 2</button></body></html>');
     const click = vi.spyOn(document.querySelector("button")!, "click");
     const location = new URL("https://www.pokernow.com/games/TABLE_TEST");
@@ -257,6 +262,7 @@ describe("recorded flop MAIN -> source runtime -> decision/display boundary", ()
     const socket = new win.WebSocket("wss://www.pokernow.com/socket.io/?gameID=TABLE_TEST");
     for (const f of fs.slice(0, prefixCount)) { now = f.localReceivedAt; socket.incoming(f); }
     if (hand === 246) now += 3703;
+    if (hand === 248) now += 1625;
     const diagnostic = () => JSON.parse(logs.filter(args => String(args[0]).includes("Copyable snapshot JSON")).at(-1)![1]);
     const blocked = () => {
       poll(); const d = diagnostic(), p = d.decision.scopedProofs;
@@ -278,8 +284,10 @@ describe("recorded flop MAIN -> source runtime -> decision/display boundary", ()
       expect(socket.send).not.toHaveBeenCalled();
       return d.handTimeline.sourceStatus.flopObservationProof;
     };
-    if (hand >= 244) expect(blocked()).toBeNull();
-    else expect(blocked()).toMatchObject({ scope: "flop_hero_activation", activation: { sequence: 20 }, expiresAt: expiry });
+    if (synthetic) expect(blocked()).toBeNull();
+    else expect(blocked()).toMatchObject({ scope: "flop_hero_activation", activation: { sequence: prefixCount }, expiresAt: expiry });
+    if (hand === 248) expect(blocked()?.accounting).toMatchObject({ scope: "hand248_contribution_prefix",
+      preflop: { streetContributionSumChips: 12 }, flop: { streetContributionSumChips: 8 }, cumulativeInvestmentSumChips: 20 });
     if (hand === 243) expect(blocked()?.accounting).toMatchObject({
       preflop: { streetContributionSumChips: 12 }, flop: { streetContributionSumChips: 6 },
       cumulativeInvestmentSumChips: 18, sourcePot: { valueChips: 12 }, contestablePotChips: null, potLedger: null,
@@ -292,14 +300,18 @@ describe("recorded flop MAIN -> source runtime -> decision/display boundary", ()
     const captureTimeline = diagnostic().handTimeline;
     const observed = await (win as any).pokerAIRaiseCapture.checkpoint("postflop_observation");
     expect(observed, JSON.stringify(observed)).toMatchObject({ accepted: true, retained: true, observationPaired: true });
-    if (hand >= 244) {
+    if (synthetic) {
       expect(observed.profile).toBe("unsupported_or_uncertified");
+      expect(await (win as any).pokerAIRaiseCapture.checkpoint("postflop_call")).toMatchObject({ accepted: false, retained: true });
+    }
+    if (hand === 248) {
+      expect(observed.profile).toBe("existing_narrow_source_certificate");
       expect(await (win as any).pokerAIRaiseCapture.checkpoint("postflop_call")).toMatchObject({ accepted: false, retained: true });
     }
     // Log refresh and polling cannot renew the source opportunity.
     await new Promise(resolve => setTimeout(resolve, 0));
     now = last.localReceivedAt + 9999; refresh();
-    if (hand >= 244) expect(blocked()).toBeNull(); else expect(blocked()?.expiresAt).toBe(expiry);
+    if (synthetic) expect(blocked()).toBeNull(); else expect(blocked()?.expiresAt).toBe(expiry);
     now++; refresh(); expect(blocked()).toBeNull();
     if (hand === 243) expect(await (win as any).pokerAIRaiseCapture.checkpoint("postflop_call")).toMatchObject({ accepted: false, retained: true });
     if (hand === 243) {
@@ -317,6 +329,17 @@ describe("recorded flop MAIN -> source runtime -> decision/display boundary", ()
       }
       now += 10000; refresh(); expect(blocked()).toBeNull();
       if (!unknownReturn) expect(diagnostic().handTimeline.sourceStatus.historicalFlopAcceptance.originalHeroExpiresAt).toBe(expiry);
+    }
+    if (hand === 248) {
+      for (const f of fs.slice(30)) {
+        now = f.localReceivedAt; socket.incoming(f); expect(blocked()).toBeNull();
+        expect(diagnostic().handTimeline.sourceStatus.historicalFlopAcceptance).toMatchObject({
+          originalHeroExpiresAt: expiry, acceptance: { sequence: 31, actor: { position: "CO" },
+            evidence: { contract: "hand248_co_flop_call2_v1" } },
+          nextActivation: f.localReceiveSequence === 32 ? { sequence: 32, playerId: "PLAYER_2" } : null,
+          accounting: { cumulativeInvestmentSumChips: 22, contestablePotChips: null },
+        });
+      }
     }
     const tail = fs.at(-1);
     socket.incoming({ ...tail, payload: { now: tail.payload.now + 1, pre: tail.payload.now } });
@@ -355,7 +378,9 @@ describe("recorded flop MAIN -> source runtime -> decision/display boundary", ()
       expect(cp).toMatchObject({ observationPaired: true, permission: null, liveRecommendationsAllowed: false });
       expect(cp.observation.epochBefore.decisionEpoch).not.toBe("diagnostic");
       expect(cp.observation.unverifiedObservations.ui.callControl).toMatchObject({ enabled: true, amountChips: 2 });
-      if (hand >= 244) expect(cp.observation.sourceVerifiedFacts).toBeNull();
+      if (synthetic) expect(cp.observation.sourceVerifiedFacts).toBeNull();
+      if (hand === 248) expect(cp.observation.sourceVerifiedFacts.proof).toMatchObject({
+        activation: { sequence: 30 }, expiresAt: expiry, accountingScope: "hand248_contribution_prefix" });
       expect(captured.rawSocket.frames.slice(0, prefixCount)).toEqual(fs.slice(0, prefixCount));
       expect(socket.send).not.toHaveBeenCalled(); expect(click).not.toHaveBeenCalled(); expect(captureSettings.size).toBe(0);
     }

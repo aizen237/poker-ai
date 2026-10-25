@@ -1,0 +1,1245 @@
+{
+  "provenance": "Full real Phase6G checkpoint from the same export as pokernow-flop-248.json, with identical bijective identity/name substitutions including embedded diagnostic strings. Original clocks, epoch IDs, flags, limitations and recorder counts preserved. Saved unsupported profile and null source facts are historical capture results, never rewritten as new certificates.",
+  "checkpoint": {
+    "label": "postflop_observation",
+    "capturedAt": 1792933815900,
+    "completedAt": 1792933815913,
+    "performanceTime": 75361.5,
+    "tableUrl": "https://www.pokernow.com/games/TABLE_TEST",
+    "observation": {
+      "version": 1,
+      "mode": "postflop_observation",
+      "developmentOnly": true,
+      "authoritative": false,
+      "permission": null,
+      "legalityCertified": false,
+      "historyComplete": false,
+      "liveRecommendationsAllowed": false,
+      "startedAt": 1792933815901,
+      "completedAt": 1792933815907,
+      "tableUrl": "https://www.pokernow.com/games/TABLE_TEST",
+      "epochBefore": {
+        "decisionEpoch": "30",
+        "stateAvailable": true,
+        "matchesRead": true
+      },
+      "epochAfter": {
+        "decisionEpoch": "30",
+        "stateAvailable": true,
+        "matchesRead": true
+      },
+      "epochStatus": "observed_matching",
+      "before": {
+        "connected": true,
+        "identity": {
+          "tableId": "TABLE_TEST",
+          "handId": "HAND_248",
+          "handNumber": 248,
+          "frameCursor": 1792933772201,
+          "heroPlayerId": "PLAYER_1",
+          "chainGap": false,
+          "source": "gC"
+        },
+        "currentHand": {
+          "handId": "TABLE_TEST:hand:HAND_248",
+          "handNumber": 248
+        },
+        "head": {
+          "sequence": 30,
+          "generation": 1,
+          "receivedAt": 1792933814283,
+          "cursor": 1792933814692
+        },
+        "continuity": {
+          "generation": 1,
+          "status": "observed_continuous",
+          "chainGap": false,
+          "reasons": [],
+          "linkedUpdates": 29,
+          "duplicateCandidates": 0,
+          "scope": "Observed socket metadata within one connection generation only. Not full-hand, reconnect/backfill or log coverage proof.",
+          "baselineSequence": 1
+        },
+        "coverageIssues": [],
+        "carried": {
+          "generation": 1,
+          "sequence": 30,
+          "heroId": "PLAYER_1",
+          "fields": {
+            "id": "TABLE_TEST",
+            "hI": "HAND_248",
+            "gN": 248,
+            "now": 1792933814692,
+            "pre": 1792933813880,
+            "cPI": "PLAYER_1",
+            "pITT": "PLAYER_1",
+            "gT": [
+              1,
+              1
+            ],
+            "oTC": {
+              "1": [
+                "3s",
+                "7d",
+                "2d"
+              ]
+            },
+            "tB": {
+              "PLAYER_3": 2,
+              "PLAYER_5": 2,
+              "PLAYER_9": 2,
+              "PLAYER_10": 2
+            },
+            "seats": [
+              [
+                1,
+                "PLAYER_1"
+              ],
+              [
+                2,
+                "PLAYER_2"
+              ],
+              [
+                3,
+                "PLAYER_3"
+              ],
+              [
+                5,
+                "PLAYER_5"
+              ],
+              [
+                9,
+                "PLAYER_9"
+              ],
+              [
+                10,
+                "PLAYER_10"
+              ]
+            ],
+            "players": {
+              "PLAYER_5": {
+                "id": "PLAYER_5",
+                "stack": 241,
+                "status": "inGame"
+              },
+              "PLAYER_3": {
+                "id": "PLAYER_3",
+                "stack": 228,
+                "status": "inGame"
+              },
+              "PLAYER_10": {
+                "id": "PLAYER_10",
+                "stack": 253,
+                "status": "inGame"
+              },
+              "PLAYER_2": {
+                "id": "PLAYER_2",
+                "stack": 228,
+                "status": "inGame"
+              },
+              "PLAYER_9": {
+                "id": "PLAYER_9",
+                "stack": 234,
+                "status": "inGame"
+              },
+              "PLAYER_1": {
+                "id": "PLAYER_1",
+                "stack": 306,
+                "status": "inGame"
+              }
+            },
+            "pGS": {
+              "PLAYER_5": "inGame",
+              "PLAYER_3": "inGame",
+              "PLAYER_10": "inGame",
+              "PLAYER_2": "inGame",
+              "PLAYER_9": "inGame",
+              "PLAYER_1": "inGame"
+            }
+          }
+        },
+        "reducerReason": "Validated source state carried forward; this update is not a supported first-UTG boundary.",
+        "existingFlopProof": null,
+        "priorCertificate": null
+      },
+      "after": {
+        "connected": true,
+        "identity": {
+          "tableId": "TABLE_TEST",
+          "handId": "HAND_248",
+          "handNumber": 248,
+          "frameCursor": 1792933772201,
+          "heroPlayerId": "PLAYER_1",
+          "chainGap": false,
+          "source": "gC"
+        },
+        "currentHand": {
+          "handId": "TABLE_TEST:hand:HAND_248",
+          "handNumber": 248
+        },
+        "head": {
+          "sequence": 30,
+          "generation": 1,
+          "receivedAt": 1792933814283,
+          "cursor": 1792933814692
+        },
+        "continuity": {
+          "generation": 1,
+          "status": "observed_continuous",
+          "chainGap": false,
+          "reasons": [],
+          "linkedUpdates": 29,
+          "duplicateCandidates": 0,
+          "scope": "Observed socket metadata within one connection generation only. Not full-hand, reconnect/backfill or log coverage proof.",
+          "baselineSequence": 1
+        },
+        "coverageIssues": [],
+        "carried": {
+          "generation": 1,
+          "sequence": 30,
+          "heroId": "PLAYER_1",
+          "fields": {
+            "id": "TABLE_TEST",
+            "hI": "HAND_248",
+            "gN": 248,
+            "now": 1792933814692,
+            "pre": 1792933813880,
+            "cPI": "PLAYER_1",
+            "pITT": "PLAYER_1",
+            "gT": [
+              1,
+              1
+            ],
+            "oTC": {
+              "1": [
+                "3s",
+                "7d",
+                "2d"
+              ]
+            },
+            "tB": {
+              "PLAYER_3": 2,
+              "PLAYER_5": 2,
+              "PLAYER_9": 2,
+              "PLAYER_10": 2
+            },
+            "seats": [
+              [
+                1,
+                "PLAYER_1"
+              ],
+              [
+                2,
+                "PLAYER_2"
+              ],
+              [
+                3,
+                "PLAYER_3"
+              ],
+              [
+                5,
+                "PLAYER_5"
+              ],
+              [
+                9,
+                "PLAYER_9"
+              ],
+              [
+                10,
+                "PLAYER_10"
+              ]
+            ],
+            "players": {
+              "PLAYER_5": {
+                "id": "PLAYER_5",
+                "stack": 241,
+                "status": "inGame"
+              },
+              "PLAYER_3": {
+                "id": "PLAYER_3",
+                "stack": 228,
+                "status": "inGame"
+              },
+              "PLAYER_10": {
+                "id": "PLAYER_10",
+                "stack": 253,
+                "status": "inGame"
+              },
+              "PLAYER_2": {
+                "id": "PLAYER_2",
+                "stack": 228,
+                "status": "inGame"
+              },
+              "PLAYER_9": {
+                "id": "PLAYER_9",
+                "stack": 234,
+                "status": "inGame"
+              },
+              "PLAYER_1": {
+                "id": "PLAYER_1",
+                "stack": 306,
+                "status": "inGame"
+              }
+            },
+            "pGS": {
+              "PLAYER_5": "inGame",
+              "PLAYER_3": "inGame",
+              "PLAYER_10": "inGame",
+              "PLAYER_2": "inGame",
+              "PLAYER_9": "inGame",
+              "PLAYER_1": "inGame"
+            }
+          }
+        },
+        "reducerReason": "Validated source state carried forward; this update is not a supported first-UTG boundary.",
+        "existingFlopProof": null,
+        "priorCertificate": null
+      },
+      "profile": "unsupported_or_uncertified",
+      "sourceVerifiedFacts": null,
+      "unverifiedObservations": {
+        "source": {
+          "generation": 1,
+          "sequence": 30,
+          "heroId": "PLAYER_1",
+          "fields": {
+            "id": "TABLE_TEST",
+            "hI": "HAND_248",
+            "gN": 248,
+            "now": 1792933814692,
+            "pre": 1792933813880,
+            "cPI": "PLAYER_1",
+            "pITT": "PLAYER_1",
+            "gT": [
+              1,
+              1
+            ],
+            "oTC": {
+              "1": [
+                "3s",
+                "7d",
+                "2d"
+              ]
+            },
+            "tB": {
+              "PLAYER_3": 2,
+              "PLAYER_5": 2,
+              "PLAYER_9": 2,
+              "PLAYER_10": 2
+            },
+            "seats": [
+              [
+                1,
+                "PLAYER_1"
+              ],
+              [
+                2,
+                "PLAYER_2"
+              ],
+              [
+                3,
+                "PLAYER_3"
+              ],
+              [
+                5,
+                "PLAYER_5"
+              ],
+              [
+                9,
+                "PLAYER_9"
+              ],
+              [
+                10,
+                "PLAYER_10"
+              ]
+            ],
+            "players": {
+              "PLAYER_5": {
+                "id": "PLAYER_5",
+                "stack": 241,
+                "status": "inGame"
+              },
+              "PLAYER_3": {
+                "id": "PLAYER_3",
+                "stack": 228,
+                "status": "inGame"
+              },
+              "PLAYER_10": {
+                "id": "PLAYER_10",
+                "stack": 253,
+                "status": "inGame"
+              },
+              "PLAYER_2": {
+                "id": "PLAYER_2",
+                "stack": 228,
+                "status": "inGame"
+              },
+              "PLAYER_9": {
+                "id": "PLAYER_9",
+                "stack": 234,
+                "status": "inGame"
+              },
+              "PLAYER_1": {
+                "id": "PLAYER_1",
+                "stack": 306,
+                "status": "inGame"
+              }
+            },
+            "pGS": {
+              "PLAYER_5": "inGame",
+              "PLAYER_3": "inGame",
+              "PLAYER_10": "inGame",
+              "PLAYER_2": "inGame",
+              "PLAYER_9": "inGame",
+              "PLAYER_1": "inGame"
+            }
+          }
+        },
+        "ui": {
+          "raw": {
+            "seats": [
+              {
+                "seatNumber": 1,
+                "isOccupied": true,
+                "isYou": true,
+                "playerNameText": "PLAYER_1_NAME",
+                "stackText": "306",
+                "stackIsSettlement": false,
+                "stackContainerText": "306",
+                "statusClasses": [
+                  "table-player",
+                  "table-player-1",
+                  "decision-current",
+                  "you-player"
+                ],
+                "holeCardClassLists": [
+                  [
+                    "card-container",
+                    "card-s",
+                    "card-s-2",
+                    "flipped",
+                    "card-p1",
+                    "med"
+                  ],
+                  [
+                    "card-container",
+                    "card-s",
+                    "card-s-7",
+                    "flipped",
+                    "card-p2",
+                    "med"
+                  ]
+                ],
+                "betValueText": null
+              },
+              {
+                "seatNumber": 2,
+                "isOccupied": true,
+                "isYou": false,
+                "playerNameText": "PLAYER_2_NAME",
+                "stackText": "228",
+                "stackIsSettlement": false,
+                "stackContainerText": "228",
+                "statusClasses": [
+                  "table-player",
+                  "table-player-2"
+                ],
+                "holeCardClassLists": [
+                  [
+                    "card-container",
+                    "card-p1",
+                    "med"
+                  ],
+                  [
+                    "card-container",
+                    "card-p2",
+                    "med"
+                  ]
+                ],
+                "betValueText": null
+              },
+              {
+                "seatNumber": 3,
+                "isOccupied": true,
+                "isYou": false,
+                "playerNameText": "PLAYER_3_NAME",
+                "stackText": "226",
+                "stackIsSettlement": false,
+                "stackContainerText": "226",
+                "statusClasses": [
+                  "table-player",
+                  "table-player-3"
+                ],
+                "holeCardClassLists": [
+                  [
+                    "card-container",
+                    "card-p1",
+                    "med"
+                  ],
+                  [
+                    "card-container",
+                    "card-p2",
+                    "med"
+                  ]
+                ],
+                "betValueText": "2"
+              },
+              {
+                "seatNumber": 4,
+                "isOccupied": false,
+                "isYou": false,
+                "playerNameText": null,
+                "stackText": null,
+                "stackIsSettlement": false,
+                "stackContainerText": null,
+                "statusClasses": [],
+                "holeCardClassLists": [],
+                "betValueText": null
+              },
+              {
+                "seatNumber": 5,
+                "isOccupied": true,
+                "isYou": false,
+                "playerNameText": "PLAYER_5_NAME",
+                "stackText": "239",
+                "stackIsSettlement": false,
+                "stackContainerText": "239",
+                "statusClasses": [
+                  "table-player",
+                  "table-player-5"
+                ],
+                "holeCardClassLists": [
+                  [
+                    "card-container",
+                    "card-p1",
+                    "med"
+                  ],
+                  [
+                    "card-container",
+                    "card-p2",
+                    "med"
+                  ]
+                ],
+                "betValueText": "2"
+              },
+              {
+                "seatNumber": 6,
+                "isOccupied": false,
+                "isYou": false,
+                "playerNameText": null,
+                "stackText": null,
+                "stackIsSettlement": false,
+                "stackContainerText": null,
+                "statusClasses": [],
+                "holeCardClassLists": [],
+                "betValueText": null
+              },
+              {
+                "seatNumber": 7,
+                "isOccupied": false,
+                "isYou": false,
+                "playerNameText": null,
+                "stackText": null,
+                "stackIsSettlement": false,
+                "stackContainerText": null,
+                "statusClasses": [],
+                "holeCardClassLists": [],
+                "betValueText": null
+              },
+              {
+                "seatNumber": 8,
+                "isOccupied": false,
+                "isYou": false,
+                "playerNameText": null,
+                "stackText": null,
+                "stackIsSettlement": false,
+                "stackContainerText": null,
+                "statusClasses": [],
+                "holeCardClassLists": [],
+                "betValueText": null
+              },
+              {
+                "seatNumber": 9,
+                "isOccupied": true,
+                "isYou": false,
+                "playerNameText": "PLAYER_9_NAME",
+                "stackText": "232",
+                "stackIsSettlement": false,
+                "stackContainerText": "232",
+                "statusClasses": [
+                  "table-player",
+                  "table-player-9"
+                ],
+                "holeCardClassLists": [
+                  [
+                    "card-container",
+                    "card-p1",
+                    "med"
+                  ],
+                  [
+                    "card-container",
+                    "card-p2",
+                    "med"
+                  ]
+                ],
+                "betValueText": "2"
+              },
+              {
+                "seatNumber": 10,
+                "isOccupied": true,
+                "isYou": false,
+                "playerNameText": "PLAYER_10_NAME",
+                "stackText": "251",
+                "stackIsSettlement": false,
+                "stackContainerText": "251",
+                "statusClasses": [
+                  "table-player",
+                  "table-player-10"
+                ],
+                "holeCardClassLists": [
+                  [
+                    "card-container",
+                    "card-p1",
+                    "med"
+                  ],
+                  [
+                    "card-container",
+                    "card-p2",
+                    "med"
+                  ]
+                ],
+                "betValueText": "2"
+              }
+            ],
+            "boardCards": [
+              {
+                "valueText": "3",
+                "suitText": "s"
+              },
+              {
+                "valueText": "7",
+                "suitText": "d"
+              },
+              {
+                "valueText": "2",
+                "suitText": "d"
+              }
+            ],
+            "potMainValueText": "12",
+            "potTotalValueText": "20"
+          },
+          "context": {
+            "blindTexts": [
+              "1",
+              "2"
+            ],
+            "dealerSeatNumber": 2,
+            "readErrors": []
+          },
+          "raiseControl": {
+            "formVisible": false,
+            "amountControlVisible": false,
+            "selectedRaiseToText": null,
+            "selectedRaiseToChips": null,
+            "selectedRaiseToSource": null,
+            "displayedBBText": null,
+            "submitText": null,
+            "raiseSubmitVisible": false,
+            "raiseSubmitEnabled": null,
+            "issues": []
+          },
+          "callControl": {
+            "source": "visible native CALL label; observation only",
+            "observedAt": 1792933815904,
+            "serverAuthorization": "unproven",
+            "visibleCount": 1,
+            "tag": "BUTTON",
+            "type": "button",
+            "rawText": "Call 2",
+            "amountChips": 2,
+            "enabled": true,
+            "issues": [],
+            "contradictions": []
+          },
+          "evidence": {
+            "selectors": {
+              "board": ".table-cards",
+              "boardCard": ".card-container",
+              "boardValue": ".value",
+              "boardSuit": ".suit:not(.sub-suit)",
+              "boardAllSuits": ".suit",
+              "seat": ".table-player-N (N=1..10)",
+              "name": ".table-player-name a",
+              "stack": ".table-player-stack > .chips-value > .normal-value, .table-player-stack > .normal-value",
+              "stackPrize": ".table-player-stack > .table-player-stack-prize",
+              "stackContainer": ".table-player-stack",
+              "holeCard": ".table-player-cards .card-container",
+              "bet": ".table-player-bet-value",
+              "mainPot": ".table-pot-size .main-value .normal-value",
+              "addOnPot": ".table-pot-size .add-on-container .normal-value",
+              "potContainer": ".table-pot-size",
+              "blind": ".blind-value .chips-value .normal-value",
+              "dealer": "[class*=\"dealer-position-\"]"
+            },
+            "seatEvidence": [
+              {
+                "seatNumber": 1,
+                "seatMatches": 1,
+                "nameFound": true,
+                "stackValueFound": true,
+                "betFound": false,
+                "stackDisplay": {
+                  "status": "ordinary_display",
+                  "reason": null,
+                  "displayedBaseText": "306",
+                  "displayedBaseChips": 306,
+                  "awardText": null,
+                  "awardChips": null,
+                  "normalValueCount": 1,
+                  "prizeCount": 0,
+                  "winnerClass": false,
+                  "remainingStackReason": null,
+                  "source": "PokerNow stack DOM; prize is display evidence only, never a ledger adjustment"
+                },
+                "stackContainerText": "306",
+                "seatText": "591Selecttwo pair (7,2)2ss7ssPLAYER_1_NAME306"
+              },
+              {
+                "seatNumber": 2,
+                "seatMatches": 1,
+                "nameFound": true,
+                "stackValueFound": true,
+                "betFound": false,
+                "stackDisplay": {
+                  "status": "ordinary_display",
+                  "reason": null,
+                  "displayedBaseText": "228",
+                  "displayedBaseChips": 228,
+                  "awardText": null,
+                  "awardChips": null,
+                  "normalValueCount": 1,
+                  "prizeCount": 0,
+                  "winnerClass": false,
+                  "remainingStackReason": null,
+                  "source": "PokerNow stack DOM; prize is display evidence only, never a ledger adjustment"
+                },
+                "stackContainerText": "228",
+                "seatText": "30PLAYER_2_NAME228"
+              },
+              {
+                "seatNumber": 3,
+                "seatMatches": 1,
+                "nameFound": true,
+                "stackValueFound": true,
+                "betFound": true,
+                "stackDisplay": {
+                  "status": "ordinary_display",
+                  "reason": null,
+                  "displayedBaseText": "226",
+                  "displayedBaseChips": 226,
+                  "awardText": null,
+                  "awardChips": null,
+                  "normalValueCount": 1,
+                  "prizeCount": 0,
+                  "winnerClass": false,
+                  "remainingStackReason": null,
+                  "source": "PokerNow stack DOM; prize is display evidence only, never a ledger adjustment"
+                },
+                "stackContainerText": "226",
+                "seatText": "5342PLAYER_3_NAME226"
+              },
+              {
+                "seatNumber": 4,
+                "seatMatches": 0,
+                "nameFound": false,
+                "stackValueFound": false,
+                "betFound": false,
+                "stackDisplay": {
+                  "status": "unknown",
+                  "reason": "stack container missing or ambiguous",
+                  "displayedBaseText": null,
+                  "displayedBaseChips": null,
+                  "awardText": null,
+                  "awardChips": null,
+                  "normalValueCount": 0,
+                  "prizeCount": 0,
+                  "winnerClass": false,
+                  "remainingStackReason": "stack container missing or ambiguous",
+                  "source": "PokerNow stack DOM; prize is display evidence only, never a ledger adjustment"
+                },
+                "stackContainerText": null,
+                "seatText": null
+              },
+              {
+                "seatNumber": 5,
+                "seatMatches": 1,
+                "nameFound": true,
+                "stackValueFound": true,
+                "betFound": true,
+                "stackDisplay": {
+                  "status": "ordinary_display",
+                  "reason": null,
+                  "displayedBaseText": "239",
+                  "displayedBaseChips": 239,
+                  "awardText": null,
+                  "awardChips": null,
+                  "normalValueCount": 1,
+                  "prizeCount": 0,
+                  "winnerClass": false,
+                  "remainingStackReason": null,
+                  "source": "PokerNow stack DOM; prize is display evidence only, never a ledger adjustment"
+                },
+                "stackContainerText": "239",
+                "seatText": "322PLAYER_5_NAME239"
+              },
+              {
+                "seatNumber": 6,
+                "seatMatches": 0,
+                "nameFound": false,
+                "stackValueFound": false,
+                "betFound": false,
+                "stackDisplay": {
+                  "status": "unknown",
+                  "reason": "stack container missing or ambiguous",
+                  "displayedBaseText": null,
+                  "displayedBaseChips": null,
+                  "awardText": null,
+                  "awardChips": null,
+                  "normalValueCount": 0,
+                  "prizeCount": 0,
+                  "winnerClass": false,
+                  "remainingStackReason": "stack container missing or ambiguous",
+                  "source": "PokerNow stack DOM; prize is display evidence only, never a ledger adjustment"
+                },
+                "stackContainerText": null,
+                "seatText": null
+              },
+              {
+                "seatNumber": 7,
+                "seatMatches": 0,
+                "nameFound": false,
+                "stackValueFound": false,
+                "betFound": false,
+                "stackDisplay": {
+                  "status": "unknown",
+                  "reason": "stack container missing or ambiguous",
+                  "displayedBaseText": null,
+                  "displayedBaseChips": null,
+                  "awardText": null,
+                  "awardChips": null,
+                  "normalValueCount": 0,
+                  "prizeCount": 0,
+                  "winnerClass": false,
+                  "remainingStackReason": "stack container missing or ambiguous",
+                  "source": "PokerNow stack DOM; prize is display evidence only, never a ledger adjustment"
+                },
+                "stackContainerText": null,
+                "seatText": null
+              },
+              {
+                "seatNumber": 8,
+                "seatMatches": 0,
+                "nameFound": false,
+                "stackValueFound": false,
+                "betFound": false,
+                "stackDisplay": {
+                  "status": "unknown",
+                  "reason": "stack container missing or ambiguous",
+                  "displayedBaseText": null,
+                  "displayedBaseChips": null,
+                  "awardText": null,
+                  "awardChips": null,
+                  "normalValueCount": 0,
+                  "prizeCount": 0,
+                  "winnerClass": false,
+                  "remainingStackReason": "stack container missing or ambiguous",
+                  "source": "PokerNow stack DOM; prize is display evidence only, never a ledger adjustment"
+                },
+                "stackContainerText": null,
+                "seatText": null
+              },
+              {
+                "seatNumber": 9,
+                "seatMatches": 1,
+                "nameFound": true,
+                "stackValueFound": true,
+                "betFound": true,
+                "stackDisplay": {
+                  "status": "ordinary_display",
+                  "reason": null,
+                  "displayedBaseText": "232",
+                  "displayedBaseChips": 232,
+                  "awardText": null,
+                  "awardChips": null,
+                  "normalValueCount": 1,
+                  "prizeCount": 0,
+                  "winnerClass": false,
+                  "remainingStackReason": null,
+                  "source": "PokerNow stack DOM; prize is display evidence only, never a ledger adjustment"
+                },
+                "stackContainerText": "232",
+                "seatText": "322PLAYER_9_NAME232"
+              },
+              {
+                "seatNumber": 10,
+                "seatMatches": 1,
+                "nameFound": true,
+                "stackValueFound": true,
+                "betFound": true,
+                "stackDisplay": {
+                  "status": "ordinary_display",
+                  "reason": null,
+                  "displayedBaseText": "251",
+                  "displayedBaseChips": 251,
+                  "awardText": null,
+                  "awardChips": null,
+                  "normalValueCount": 1,
+                  "prizeCount": 0,
+                  "winnerClass": false,
+                  "remainingStackReason": null,
+                  "source": "PokerNow stack DOM; prize is display evidence only, never a ledger adjustment"
+                },
+                "stackContainerText": "251",
+                "seatText": "4152PLAYER_10_NAME251"
+              }
+            ],
+            "dealerClasses": [
+              "dealer-button-ctn",
+              "dealer-position-2"
+            ],
+            "boardCardEvidence": [
+              {
+                "classList": [
+                  "card-container",
+                  "card-s",
+                  "card-s-3",
+                  "flipped",
+                  "big"
+                ],
+                "valueTexts": [
+                  "3"
+                ],
+                "suitTexts": [
+                  "s"
+                ],
+                "allSuitTexts": [
+                  "s",
+                  "s"
+                ]
+              },
+              {
+                "classList": [
+                  "card-container",
+                  "card-d",
+                  "card-s-7",
+                  "flipped",
+                  "big"
+                ],
+                "valueTexts": [
+                  "7"
+                ],
+                "suitTexts": [
+                  "d"
+                ],
+                "allSuitTexts": [
+                  "d",
+                  "d"
+                ]
+              },
+              {
+                "classList": [
+                  "card-container",
+                  "card-d",
+                  "card-s-2",
+                  "flipped",
+                  "big"
+                ],
+                "valueTexts": [
+                  "2"
+                ],
+                "suitTexts": [
+                  "d"
+                ],
+                "allSuitTexts": [
+                  "d",
+                  "d"
+                ]
+              }
+            ],
+            "boardContainerFound": true,
+            "boardCardElementCount": 3,
+            "mainPotFound": true,
+            "addOnPotFound": true,
+            "potContainerText": "12total 20"
+          }
+        },
+        "board": [
+          "3s",
+          "7d",
+          "2d"
+        ],
+        "contributions": [
+          {
+            "seat": 1,
+            "value": null
+          },
+          {
+            "seat": 2,
+            "value": null
+          },
+          {
+            "seat": 3,
+            "value": 2
+          },
+          {
+            "seat": 5,
+            "value": 2
+          },
+          {
+            "seat": 9,
+            "value": 2
+          },
+          {
+            "seat": 10,
+            "value": 2
+          }
+        ],
+        "callReadiness": "observed_enabled"
+      },
+      "observationPaired": true,
+      "reasons": [],
+      "limitations": [
+        "Contribution comparison unavailable at seat 1; no zero inferred.",
+        "Contribution comparison unavailable at seat 2; no zero inferred.",
+        "No current certified flop profile; no source decision deadline is available or created."
+      ],
+      "timingScope": "Local source receipt age only (10s diagnostic stale threshold); never activation, permission or a renewed deadline."
+    },
+    "rawSourceObservations": {
+      "status": "unverified_raw_field_observations",
+      "fields": {
+        "cPI": {
+          "value": "PLAYER_1",
+          "localReceivedAt": 1792933814275,
+          "sourceCursor": 1792933814692,
+          "localReceiveSequence": 30,
+          "connectionGeneration": 1
+        },
+        "pITT": {
+          "value": "PLAYER_1",
+          "localReceivedAt": 1792933814275,
+          "sourceCursor": 1792933814692,
+          "localReceiveSequence": 30,
+          "connectionGeneration": 1
+        },
+        "gT": {
+          "value": [
+            1,
+            1
+          ],
+          "localReceivedAt": 1792933794299,
+          "sourceCursor": 1792933794703,
+          "localReceiveSequence": 22,
+          "connectionGeneration": 1
+        },
+        "oTC": {
+          "value": {
+            "1": [
+              "3s",
+              "7d",
+              "2d"
+            ]
+          },
+          "localReceivedAt": 1792933794299,
+          "sourceCursor": 1792933794703,
+          "localReceiveSequence": 22,
+          "connectionGeneration": 1
+        },
+        "hI": {
+          "value": "HAND_248",
+          "localReceivedAt": 1792933771816,
+          "sourceCursor": 1792933772201,
+          "localReceiveSequence": 10,
+          "connectionGeneration": 1
+        },
+        "gN": {
+          "value": 248,
+          "localReceivedAt": 1792933771816,
+          "sourceCursor": 1792933772201,
+          "localReceiveSequence": 10,
+          "connectionGeneration": 1
+        },
+        "heroId": {
+          "value": "PLAYER_1",
+          "localReceivedAt": 1792933742223,
+          "sourceCursor": 1792933737652,
+          "localReceiveSequence": 1,
+          "connectionGeneration": 1
+        }
+      },
+      "contributionPatches": [
+        {
+          "value": {
+            "PLAYER_3": 1,
+            "PLAYER_5": 2
+          },
+          "localReceivedAt": 1792933771816,
+          "sourceCursor": 1792933772201,
+          "localReceiveSequence": 10,
+          "connectionGeneration": 1
+        },
+        {
+          "value": {
+            "PLAYER_9": 2
+          },
+          "localReceivedAt": 1792933781378,
+          "sourceCursor": 1792933781781,
+          "localReceiveSequence": 11,
+          "connectionGeneration": 1
+        },
+        {
+          "value": {
+            "PLAYER_10": 2
+          },
+          "localReceivedAt": 1792933782548,
+          "sourceCursor": 1792933782954,
+          "localReceiveSequence": 13,
+          "connectionGeneration": 1
+        },
+        {
+          "value": {
+            "PLAYER_1": 2
+          },
+          "localReceivedAt": 1792933784424,
+          "sourceCursor": 1792933784830,
+          "localReceiveSequence": 15,
+          "connectionGeneration": 1
+        },
+        {
+          "value": {
+            "PLAYER_2": 2
+          },
+          "localReceivedAt": 1792933785584,
+          "sourceCursor": 1792933785988,
+          "localReceiveSequence": 17,
+          "connectionGeneration": 1
+        },
+        {
+          "value": {
+            "PLAYER_3": 2
+          },
+          "localReceivedAt": 1792933789823,
+          "sourceCursor": 1792933790229,
+          "localReceiveSequence": 19,
+          "connectionGeneration": 1
+        },
+        {
+          "value": {
+            "PLAYER_3": "<D>",
+            "PLAYER_5": "<D>",
+            "PLAYER_9": "<D>",
+            "PLAYER_10": "<D>",
+            "PLAYER_1": "<D>",
+            "PLAYER_2": "<D>"
+          },
+          "localReceivedAt": 1792933794299,
+          "sourceCursor": 1792933794703,
+          "localReceiveSequence": 22,
+          "connectionGeneration": 1
+        },
+        {
+          "value": {
+            "PLAYER_3": 2
+          },
+          "localReceivedAt": 1792933796739,
+          "sourceCursor": 1792933797141,
+          "localReceiveSequence": 23,
+          "connectionGeneration": 1
+        },
+        {
+          "value": {
+            "PLAYER_5": 2
+          },
+          "localReceivedAt": 1792933798924,
+          "sourceCursor": 1792933799326,
+          "localReceiveSequence": 25,
+          "connectionGeneration": 1
+        },
+        {
+          "value": {
+            "PLAYER_9": 2
+          },
+          "localReceivedAt": 1792933812473,
+          "sourceCursor": 1792933812879,
+          "localReceiveSequence": 27,
+          "connectionGeneration": 1
+        },
+        {
+          "value": {
+            "PLAYER_10": 2
+          },
+          "localReceivedAt": 1792933813477,
+          "sourceCursor": 1792933813880,
+          "localReceiveSequence": 29,
+          "connectionGeneration": 1
+        }
+      ],
+      "contributionSamplesTruncated": false,
+      "handIdentityFieldObserved": true,
+      "scope": "Each value is a separate source field observation, not reconstructed current state. Patches/deletions are not totals or zero. Raw export retains original tokens; parsed diagnostic numbers are unverified."
+    },
+    "rawRecorderBefore": {
+      "temporaryDiagnosticsOnly": true,
+      "authoritativeOrdering": false,
+      "historyCompletenessProof": false,
+      "active": true,
+      "stopReason": null,
+      "frameCount": 30,
+      "retainedJsonCharacters": 11521,
+      "rejectedFrames": 0,
+      "retainedSourceCharacters": 12726,
+      "registeredCaptured": true,
+      "lastRetainedFrame": {
+        "localReceiveSequence": 30,
+        "localReceivedAt": 1792933814275,
+        "connectionGeneration": 1,
+        "event": "gC",
+        "sourceCursor": 1792933814692
+      },
+      "limits": {
+        "frames": 500,
+        "characters": 4194304
+      }
+    },
+    "rawRecorderAfter": {
+      "temporaryDiagnosticsOnly": true,
+      "authoritativeOrdering": false,
+      "historyCompletenessProof": false,
+      "active": true,
+      "stopReason": null,
+      "frameCount": 30,
+      "retainedJsonCharacters": 11521,
+      "rejectedFrames": 0,
+      "retainedSourceCharacters": 12726,
+      "registeredCaptured": true,
+      "lastRetainedFrame": {
+        "localReceiveSequence": 30,
+        "localReceivedAt": 1792933814275,
+        "connectionGeneration": 1,
+        "event": "gC",
+        "sourceCursor": 1792933814692
+      },
+      "limits": {
+        "frames": 500,
+        "characters": 4194304
+      }
+    },
+    "observationPaired": true,
+    "reasons": [],
+    "permission": null,
+    "legalityCertified": false,
+    "historyComplete": false,
+    "liveRecommendationsAllowed": false,
+    "correlation": "Local observational pairing only; unsupported profiles remain unverified, never CALL legality or advice."
+  }
+}

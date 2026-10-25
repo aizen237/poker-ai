@@ -386,9 +386,11 @@
   };
   var exact = (v, keys2) => Object.keys(v).length === keys2.length && keys2.every((k) => Object.hasOwn(v, k));
   var common2 = ["now", "pre", "eventsData", "mEV", "fV", "sN"];
-  function isFlopAccountingBoundary(raw) {
+  function isFlopAccountingBoundary(raw, profile = "hand243") {
+    const hand248 = profile === "hand248";
     return object5(raw) && exact(raw, [
       ...common2,
+      ...hand248 ? ["mR", "cHB"] : [],
       "gN",
       "gT",
       "hI",
@@ -415,12 +417,13 @@
       "dealerSeat",
       "gameResult",
       "rHC"
-    ]) && raw.mEV === 0 && integer3(raw.sN) && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now && raw.mAVTB === 268 && raw.sBS === 5 && same2(raw.wBACPI, [raw.bBPI]) && object5(raw.pC) && Object.values(raw.pC).every((p) => object5(p) && exact(p, ["cards", "name1", "name2", "name1RH", "name2RH", "prob1"]) && [p.name1, p.name2, p.name1RH, p.name2RH, p.prob1].every((v) => v === null) && Array.isArray(p.cards) && p.cards.every((c) => object5(c) && exact(c, ["value", "showing"])));
+    ]) && raw.mEV === 0 && integer3(raw.sN) && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now && raw.mAVTB === (hand248 ? 236 : 268) && raw.sBS === (hand248 ? 3 : 5) && (!hand248 || raw.mR === 4 && raw.cHB === 2) && same2(raw.wBACPI, [raw.bBPI]) && object5(raw.pC) && Object.values(raw.pC).every((p) => object5(p) && exact(p, ["cards", "name1", "name2", "name1RH", "name2RH", "prob1"]) && [p.name1, p.name2, p.name1RH, p.name2RH, p.prob1].every((v) => v === null) && Array.isArray(p.cards) && p.cards.every((c) => object5(c) && exact(c, ["value", "showing"])));
   }
   function flopPatchKind(raw) {
     if (!object5(raw) || !integer3(raw.now) || !integer3(raw.pre) || raw.now <= raw.pre || !integer3(raw.sN) || raw.mEV !== 0 || raw.fV !== "0.1.72" || !same2(raw.eventsData, [])) return null;
     const opening = hjPatchKind(raw);
     if (opening) return opening;
+    if (exact(raw, [...common2, "cPI", "pITT", "sNA", "pASA", "sNAA"]) && typeof raw.cPI === "string" && raw.pITT === raw.cPI && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now) return "turn";
     const action = raw.sNA === "NSAA" && raw.pITT === null && integer3(raw.sNAA);
     const contribution = object5(raw.tB) && Object.keys(raw.tB).length === 1 && Object.values(raw.tB)[0] === 2 && same2(raw.pGS, {}) && Array.isArray(raw.cRPI) && Array.isArray(raw.wBACPI);
     if (action && contribution && exact(raw, [...common2, "tB", "pGS", "sNA", "cRPI", "pITT", "sNAA", "wBACPI"])) return "contribution";
@@ -534,8 +537,9 @@
         heroId: token3(heroId) ? heroId : null,
         frame,
         ...(p[0] === "registered" || p[0] === "gC" && same3(raw.gT, [1, 0])) && (Object.hasOwn(raw, "mR") || Object.hasOwn(raw, "cHB")) ? { flopBoundary: { mR: integer4(raw.mR) ? raw.mR : null, cHB: integer4(raw.cHB) ? raw.cHB : null } } : {},
-        ...flopKind && flopKind !== "turn" && flopKind !== "fold" ? { flopPatch: raw } : {},
+        ...flopKind && flopKind !== "fold" && (flopKind !== "turn" || !Object.hasOwn(raw, "mAVTB")) ? { flopPatch: raw } : {},
         ...p[0] === "gC" && isFlopAccountingBoundary(raw) ? { flopAccountingBoundary: true } : {},
+        ...p[0] === "gC" && isFlopAccountingBoundary(raw, "hand248") ? { flop248Boundary: true } : {},
         ...p[0] === "gC" && (isObservedUtgOpenPatch(raw) || isObservedHjCallPatch(raw)) ? { bettingPatch: raw } : {},
         ...p[0] === "gC" && hjPatchKind(raw) ? { hjPatch: raw } : {}
       };

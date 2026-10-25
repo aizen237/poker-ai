@@ -9348,6 +9348,7 @@
     if (!object3(raw) || !integer3(raw.now) || !integer3(raw.pre) || raw.now <= raw.pre || !integer3(raw.sN) || raw.mEV !== 0 || raw.fV !== "0.1.72" || !same2(raw.eventsData, [])) return null;
     const opening = hjPatchKind(raw);
     if (opening) return opening;
+    if (exact(raw, [...common2, "cPI", "pITT", "sNA", "pASA", "sNAA"]) && typeof raw.cPI === "string" && raw.pITT === raw.cPI && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now) return "turn";
     const action2 = raw.sNA === "NSAA" && raw.pITT === null && integer3(raw.sNAA);
     const contribution3 = object3(raw.tB) && Object.keys(raw.tB).length === 1 && Object.values(raw.tB)[0] === 2 && same2(raw.pGS, {}) && Array.isArray(raw.cRPI) && Array.isArray(raw.wBACPI);
     if (action2 && contribution3 && exact(raw, [...common2, "tB", "pGS", "sNA", "cRPI", "pITT", "sNAA", "wBACPI"])) return "contribution";
@@ -9378,9 +9379,13 @@
   function matchesFlopCallContract(w) {
     return !!w.openingSizeProfile && w.players.length === 6 && w.players.find((p) => p.playerId === w.heroId)?.position === "HJ" && same2(w.heroCards, ["9d", "Qc"]) && w.players.every((p) => p.sourceStack === HAND243_STACKS[p.position]);
   }
+  var HAND248_STACKS = { UTG: 236, HJ: 255, CO: 308, BTN: 230, SB: 230, BB: 243 };
+  function matchesFlop248Contract(w) {
+    return !!w.openingSizeProfile && w.players.length === 6 && w.players.find((p) => p.playerId === w.heroId)?.position === "CO" && same2(w.heroCards, ["2s", "7s"]) && w.players.every((p) => p.sourceStack === HAND248_STACKS[p.position]);
+  }
   function contributionAccounting(pending, next) {
     const { witness: w, transition: t, preflopObservations: pre, observations: flop } = pending;
-    if (pending.profile !== "hand243" || !t || !pre) return null;
+    if (!pending.profile || !t || !pre) return null;
     const street = (observations, preflop2) => {
       const contributions = w.players.map((p) => {
         const forcedChips = preflop2 ? p.contribution : 0;
@@ -9401,7 +9406,7 @@
         contributions,
         streetContributionSumChips: contributions.reduce((sum, p) => sum + p.streetTotalChips, 0),
         contestablePotChips: null,
-        provenance: "Hand243 closed source prefix: forced posts plus distinct observed increases. Remaining capacity is arithmetic, not an observed stack decrement or CALL permission."
+        provenance: `Hand${pending.profile === "hand248" ? 248 : 243} closed source prefix: forced posts plus distinct observed increases. Remaining capacity is arithmetic, not an observed stack decrement or CALL permission.`
       };
     };
     const preflop = street(pre, true), current = street(flop, false);
@@ -9415,7 +9420,7 @@
       observedSourceStackChips: next.players[p.playerId].stack
     }));
     return {
-      scope: "hand243_contribution_prefix",
+      scope: pending.profile === "hand248" ? "hand248_contribution_prefix" : "hand243_contribution_prefix",
       coverage: "validated_prefix",
       units: "chips",
       preflop,
@@ -9436,7 +9441,9 @@
   function advanceFlopWindow(pending, data, previous, next, sequence, at) {
     const w = pending.witness, raw = data.flopPatch ?? data.hjPatch, kind2 = flopPatchKind(raw), step = pending.step;
     const hand243 = pending.profile === "hand243";
+    const hand248 = pending.profile === "hand248", sixWay = hand243 || hand248;
     if (hand243 && !matchesFlopCallContract(w)) return null;
+    if (hand248 && !matchesFlop248Contract(w)) return null;
     if (!raw || !kind2 || data.event !== "gC" || data.heroId !== w.heroId || sequence !== pending.anchor.sequence + step + 1) return null;
     const projected = ["now", "pre", "eventsData", "fV", "tB", "pGS", "cRPI", "pITT", "cPI", "gT", "pC", "oTC", "players"];
     const expected = Object.fromEntries(projected.filter((k) => Object.hasOwn(raw, k)).map((k) => [k, k === "pC" ? {} : raw[k]]));
@@ -9460,7 +9467,8 @@
       bb,
       bb,
       utg,
-      ...hand243 ? [utg, hj, hj, co] : []
+      ...sixWay ? [utg, hj, hj, co] : [],
+      ...hand248 ? [co, btn] : []
     ];
     const kinds = [
       "contribution",
@@ -9479,33 +9487,35 @@
       "turn",
       "contribution",
       "turn",
-      ...hand243 ? ["contribution", "turn", "contribution", "turn"] : []
+      ...sixWay ? ["contribution", "turn", "contribution", "turn"] : [],
+      ...hand248 ? ["contribution", "turn"] : []
     ];
-    if (hand243) kinds[6] = "contribution";
+    if (sixWay) kinds[6] = "contribution";
     const actor = actors[step];
     if (!actor || kind2 !== kinds[step]) return null;
     const totals = (through) => Object.fromEntries(w.players.map((p) => {
       if (through >= 11) return [
         p.playerId,
-        p.position === "SB" && through >= 12 || p.position === "BB" && through >= 14 || hand243 && (p.position === "UTG" && through >= 16 || p.position === "HJ" && through >= 18) ? 2 : 0
+        p.position === "SB" && through >= 12 || p.position === "BB" && through >= 14 || sixWay && (p.position === "UTG" && through >= 16 || p.position === "HJ" && through >= 18) || hand248 && p.position === "CO" && through >= 20 ? 2 : 0
       ];
-      const contributed = p.position === "UTG" && through >= 0 || p.position === "HJ" && through >= 2 || p.position === "CO" && through >= 4 || p.position === "SB" && through >= 8 || hand243 && p.position === "BTN" && through >= 6;
+      const contributed = p.position === "UTG" && through >= 0 || p.position === "HJ" && through >= 2 || p.position === "CO" && through >= 4 || p.position === "SB" && through >= 8 || sixWay && p.position === "BTN" && through >= 6;
       return [p.playerId, contributed ? 2 : p.contribution];
     }));
-    const stable = (state, through) => state.id === w.tableId && state.hI === w.handId && state.gN === w.handNumber && state.dealerID === btn.playerId && state.dealerSeat === btn.seat && state.sBPI === sb.playerId && state.bBPI === bb.playerId && same2(state.seats, [...w.players].sort((a, b) => a.seat - b.seat).map((p) => [p.seat, p.playerId])) && state.iHPI.length === 6 && w.players.every((p) => state.iHPI.includes(p.playerId)) && Object.keys(state.pC).length === 6 && same2(state.gT, through >= 11 ? [1, 1] : [1, 0]) && same2(state.oTC, through >= 11 ? { "1": pending.transition?.board ?? raw.oTC?.["1"] } : { "1": [] }) && Object.keys(state.players).length === 6 && Object.keys(state.pGS).length === 6 && w.players.every((p) => state.pGS[p.playerId] === (!hand243 && p.position === "BTN" && through >= 6 ? "fold" : "inGame") && state.players[p.playerId].stack === p.sourceStack - (through >= 11 && (hand243 || p.position !== "BTN") ? 2 : 0) && !Object.hasOwn(state.players[p.playerId], "disconnectedSince") && same2(state.pC[p.playerId].cards, (p.playerId === w.heroId ? w.heroCards : [null, null]).map((value) => ({ value, showing: false })))) && Object.keys(state.tB).every((id) => w.players.some((p) => p.playerId === id)) && w.players.every((p) => (state.tB[p.playerId] ?? 0) === totals(through)[p.playerId]);
+    const stable = (state, through) => state.id === w.tableId && state.hI === w.handId && state.gN === w.handNumber && state.dealerID === btn.playerId && state.dealerSeat === btn.seat && state.sBPI === sb.playerId && state.bBPI === bb.playerId && same2(state.seats, [...w.players].sort((a, b) => a.seat - b.seat).map((p) => [p.seat, p.playerId])) && state.iHPI.length === 6 && w.players.every((p) => state.iHPI.includes(p.playerId)) && Object.keys(state.pC).length === 6 && same2(state.gT, through >= 11 ? [1, 1] : [1, 0]) && same2(state.oTC, through >= 11 ? { "1": pending.transition?.board ?? raw.oTC?.["1"] } : { "1": [] }) && Object.keys(state.players).length === 6 && Object.keys(state.pGS).length === 6 && w.players.every((p) => state.pGS[p.playerId] === (!sixWay && p.position === "BTN" && through >= 6 ? "fold" : "inGame") && state.players[p.playerId].stack === p.sourceStack - (through >= 11 && (sixWay || p.position !== "BTN") ? 2 : 0) && !Object.hasOwn(state.players[p.playerId], "disconnectedSince") && same2(state.pC[p.playerId].cards, (p.playerId === w.heroId ? w.heroCards : [null, null]).map((value) => ({ value, showing: false })))) && Object.keys(state.tB).every((id) => w.players.some((p) => p.playerId === id)) && w.players.every((p) => (state.tB[p.playerId] ?? 0) === totals(through)[p.playerId]);
     if (!stable(previous, step - 1) || !stable(next, step)) return null;
     if (kind2 === "turn" || kind2 === "deal") {
-      if (previous.pITT !== null || next.cPI !== actor.playerId || next.pITT !== actor.playerId || raw.mAVTB !== actor.sourceStack - (step >= 11 ? 2 : 0)) return null;
+      const recordedCapacityOmission = hand248 && step === 7 && !Object.hasOwn(raw, "mAVTB");
+      if (previous.pITT !== null || next.cPI !== actor.playerId || next.pITT !== actor.playerId || !recordedCapacityOmission && raw.mAVTB !== actor.sourceStack - (step >= 11 ? 2 : 0)) return null;
     } else if (previous.cPI !== actor.playerId || previous.pITT !== actor.playerId || next.cPI !== actor.playerId || next.pITT !== null) return null;
     if (kind2 === "contribution" || kind2 === "bet") {
-      const responders = step < 11 ? [utg, hj, co, ...hand243 ? [btn] : [], sb].filter((p) => totals(step)[p.playerId] === 2) : [sb, bb, ...hand243 ? [utg, hj] : []].filter((p) => totals(step)[p.playerId] === 2);
+      const responders = step < 11 ? [utg, hj, co, ...sixWay ? [btn] : [], sb].filter((p) => totals(step)[p.playerId] === 2) : [sb, bb, ...sixWay ? [utg, hj] : [], ...hand248 ? [co] : []].filter((p) => totals(step)[p.playerId] === 2);
       if (!same2(raw.tB, { [actor.playerId]: 2 }) || !same2(raw.cRPI, responders.map((p) => p.playerId)) || !same2(raw.wBACPI, step < 11 ? [bb.playerId] : [])) return null;
     }
     if (kind2 === "fold" && (!same2(raw.pGS, { [btn.playerId]: "fold" }) || !same2(raw.wBACPI, [bb.playerId]))) return null;
     let transition = pending.transition;
     if (kind2 === "deal") {
       const board = raw.oTC["1"];
-      if (hand243 && !same2(board, ["6h", "Qh", "3s"]) || (/* @__PURE__ */ new Set([...board, ...w.heroCards])).size !== 5 || raw.pot !== (hand243 ? 12 : 10) || !same2(raw.tB, Object.fromEntries(w.players.filter((p) => hand243 || p.position !== "BTN").map((p) => [p.playerId, "<D>"]))) || Object.keys(next.tB).length !== 0 || !same2(raw.players, Object.fromEntries(w.players.filter((p) => hand243 || p.position !== "BTN").map((p) => [p.playerId, { stack: p.sourceStack - 2 }]))) || !same2(Object.keys(raw.pC).sort(), w.players.map((p) => p.playerId).sort()) || w.players.some((p) => p.playerId !== w.heroId && !same2(raw.pC[p.playerId], { name1: null, name2: null, name1RH: null }))) return null;
+      if (hand243 && !same2(board, ["6h", "Qh", "3s"]) || hand248 && !same2(board, ["3s", "7d", "2d"]) || (/* @__PURE__ */ new Set([...board, ...w.heroCards])).size !== 5 || raw.pot !== (sixWay ? 12 : 10) || !same2(raw.tB, Object.fromEntries(w.players.filter((p) => sixWay || p.position !== "BTN").map((p) => [p.playerId, "<D>"]))) || Object.keys(next.tB).length !== 0 || !same2(raw.players, Object.fromEntries(w.players.filter((p) => sixWay || p.position !== "BTN").map((p) => [p.playerId, { stack: p.sourceStack - 2 }]))) || !same2(Object.keys(raw.pC).sort(), w.players.map((p) => p.playerId).sort()) || w.players.some((p) => p.playerId !== w.heroId && !same2(raw.pC[p.playerId], { name1: null, name2: null, name1RH: null }))) return null;
       transition = {
         sequence,
         cursor: next.now,
@@ -9539,11 +9549,12 @@
     }
     const accounting = contributionAccounting(advanced, next);
     const activation = { sequence, cursor: next.now, previousCursor: previous.now, receivedAt: at, playerId: actor.playerId };
-    if (hand243 && step === 17) advanced.heroActivation = activation;
-    if (hand243 && step >= 18) {
-      if (!pending.heroActivation || !transition || step > 19) return null;
-      if (step === 18) {
-        if (actor.playerId !== w.heroId || previous.tB[hj.playerId] !== void 0 || Math.max(...w.players.map((p) => previous.tB[p.playerId] ?? 0)) !== 2 || Math.max(...w.players.map((p) => next.tB[p.playerId] ?? 0)) !== 2 || previous.players[hj.playerId].stack !== 254 || raw.pre !== pending.heroActivation.cursor) return null;
+    const heroStep = hand248 ? 19 : hand243 ? 17 : 15;
+    if (sixWay && step === heroStep) advanced.heroActivation = activation;
+    if (sixWay && step > heroStep) {
+      if (!pending.heroActivation || !transition || step > heroStep + 2) return null;
+      if (step === heroStep + 1) {
+        if (actor.playerId !== w.heroId || previous.tB[actor.playerId] !== void 0 || Math.max(...w.players.map((p) => previous.tB[p.playerId] ?? 0)) !== 2 || Math.max(...w.players.map((p) => next.tB[p.playerId] ?? 0)) !== 2 || previous.players[actor.playerId].stack !== (hand248 ? 306 : 254) || raw.pre !== pending.heroActivation.cursor) return null;
         advanced.acceptance = {
           sequence,
           cursor: next.now,
@@ -9551,17 +9562,17 @@
           receivedAt: at,
           street: "flop",
           action: "call",
-          actor: { playerId: hj.playerId, seat: hj.seat, position: "HJ" },
+          actor: { playerId: actor.playerId, seat: actor.seat, position: hand248 ? "CO" : "HJ" },
           priorContributionChips: 0,
           newContributionChips: 2,
           investmentChips: 2,
           previousHighestContributionChips: 2,
           observedRaiseIncrementChips: 0,
-          evidence: { source: "pokernow_gC", contract: "hand243_hj_flop_call2_v1", raw: structuredClone(raw) }
+          evidence: { source: "pokernow_gC", contract: hand248 ? "hand248_co_flop_call2_v1" : "hand243_hj_flop_call2_v1", raw: structuredClone(raw) }
         };
       }
-      if (!advanced.acceptance || step === 19 && raw.pre !== advanced.acceptance.cursor) return null;
-      return { pending: step === 19 ? null : advanced, historical: {
+      if (!advanced.acceptance || step === heroStep + 2 && raw.pre !== advanced.acceptance.cursor) return null;
+      return { pending: step === heroStep + 2 ? null : advanced, historical: {
         version: 1,
         scope: "historical_flop_call2",
         historyComplete: false,
@@ -9572,16 +9583,15 @@
         heroActivation: structuredClone(pending.heroActivation),
         originalHeroExpiresAt: pending.heroActivation.receivedAt + 1e4,
         acceptance: structuredClone(advanced.acceptance),
-        nextActivation: step === 19 ? activation : null,
+        nextActivation: step === heroStep + 2 ? activation : null,
         observations,
         contributions: totals(step),
         facts: { amountToCallChips: null, contestablePotChips: null, legalActions: null },
         ...accounting ? { accounting } : {}
       } };
     }
-    const heroStep = hand243 ? 17 : 15;
     if (step !== 11 && step !== heroStep) return { pending: advanced };
-    return { pending: !hand243 && step === heroStep ? null : advanced, proof: {
+    return { pending: !sixWay && step === heroStep ? null : advanced, proof: {
       version: 1,
       scope: step === 11 ? "flop_transition" : "flop_hero_activation",
       historyComplete: false,
@@ -9592,7 +9602,7 @@
         cursor: next.now,
         previousCursor: previous.now,
         receivedAt: at,
-        provenance: `Hand${hand243 ? 243 : 239} closed source observation prefix; original positions frozen at hand start. No legality, contestable-pot, complete history or live recommendation authority.`
+        provenance: `Hand${hand248 ? 248 : hand243 ? 243 : 239} closed source observation prefix; original positions frozen at hand start. No legality, contestable-pot, complete history or live recommendation authority.`
       },
       anchor: structuredClone(pending.anchor),
       transition: structuredClone(transition),
@@ -10810,6 +10820,7 @@
           const frame = advanceUtgState(previous.data.frame, data.frame, tableId, data.heroId);
           const flopAnchor = firstUtg(previous.data, data, tableId, generation, observedAt);
           const historicalAnchor = firstUtg(previous.data, data, tableId, generation, observedAt, "HJ");
+          const coAnchor = firstUtg(previous.data, data, tableId, generation, observedAt, "CO");
           const historicalBoundary = previous.data.event === "registered" && equivalent(previous.data.flopBoundary, { mR: 4, cHB: 2 }) && !Object.hasOwn(data, "flopBoundary");
           const flopAdvanced = flopPending ? advanceFlopWindow(flopPending, data, previous.data.frame, frame, sequence, observedAt) : null;
           flopPending = flopAnchor?.openingSizeProfile && equivalent(data.flopBoundary, { mR: 4, cHB: 2 }) ? {
@@ -10824,6 +10835,13 @@
             observations: [],
             ...data.flopAccountingBoundary === true ? { preflopObservations: [] } : {},
             anchor: { sequence, cursor: historicalAnchor.cursor, receivedAt: observedAt }
+          } : coAnchor && matchesFlop248Contract(coAnchor) && data.flop248Boundary === true && equivalent(data.flopBoundary, { mR: 4, cHB: 2 }) ? {
+            witness: coAnchor,
+            profile: "hand248",
+            step: 0,
+            observations: [],
+            preflopObservations: [],
+            anchor: { sequence, cursor: coAnchor.cursor, receivedAt: observedAt }
           } : flopAdvanced?.pending ?? null;
           flopProof = flopAdvanced?.proof ? {
             ...flopAdvanced.proof,
@@ -10904,7 +10922,6 @@
           } : null;
           if (hjProof) hjPending = null;
           hjReason = hjProof ? "Explicit UTG fold and immediately linked HJ first turn proven; live cross-checks still required." : anchor ? "Frozen six-player HJ hand anchor; waiting for the next explicit UTG fold." : advanced ? "Explicit UTG fold accepted; waiting for the immediately linked HJ activation." : "No supported consecutive boundary -> UTG fold -> HJ turn; unsupported updates invalidate this window.";
-          const coAnchor = firstUtg(previous.data, data, tableId, generation, observedAt, "CO");
           const coAdvanced = coPending ? advanceCoWindow(coPending, data, sequence, observedAt) : null;
           coPending = coAnchor ? { witness: coAnchor, folds: [], anchor: {
             sequence,

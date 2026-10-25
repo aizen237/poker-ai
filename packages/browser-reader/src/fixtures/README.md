@@ -1,5 +1,24 @@
 # PokerNow live fixtures
 
+## Phase 6H hand248 source and paired checkpoint
+
+`pokernow-flop-248.json` retains all 32 source envelopes from one real Phase6G
+export: mid-hand247 registration, fresh hand248 at frame10, flop/reset at22,
+CO hero activation at30, historical matching investment at31 and BTN activation
+at32. `pokernow-flop-248-checkpoint.json` retains its full real checkpoint,
+requested 1,625ms after raw frame30. Both fixtures use identical bijective
+table/hand/player ID and name substitutions, including embedded strings.
+Original values, omissions, nulls, deletions, cursors and clocks are preserved;
+reverse substitution reproduces the parsed original exactly.
+
+The saved `unsupported_or_uncertified` profile, null source certificate,
+epoch30 flags, unavailable contribution comparisons and separate raw/overlay
+receipt times are historical facts, not rewritten as new certificates. The
+internal epoch fingerprint was not exported and is not reconstructed as real
+evidence. Replay fingerprints/bridge scheduling/control refreshes and all
+negative mutations are explicitly simulated. See [POSTFLOP_PHASE6H.md](../../../../POSTFLOP_PHASE6H.md)
+for the exact newly certified scope, original deadlines and remaining blockers.
+
 ## Phase 6B recorded flop transition and hero activation
 
 `pokernow-flop-239.json` preserves all 20 envelopes of one continuous recording:

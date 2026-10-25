@@ -2,7 +2,7 @@ import { initializeUtgState, advanceUtgState } from "./firstUtgState.js";
 import { advanceHjWindow, hjPatchKind, type HjPending, type HjProof } from "./hjWindow.js";
 import { advanceCoWindow, advanceBtnWindow, advanceSbWindow, type CoPending, type CoProof, type BtnProof, type SbProof } from "./coWindow.js";
 import { isObservedUtgOpenPatch, isObservedHjCallPatch, advanceFacingOpenWindow, type FacingOpenPending, type FacingOpenProof, type CoFacingOpenProof } from "./bettingWindow.js";
-import { flopPatchKind, advanceFlopWindow, matchesFlopCallContract, isFlopAccountingBoundary, type FlopPending, type FlopObservationProof, type FlopAcceptanceProof } from "./flopWindow.js";
+import { flopPatchKind, advanceFlopWindow, matchesFlopCallContract, matchesFlop248Contract, isFlopAccountingBoundary, type FlopPending, type FlopObservationProof, type FlopAcceptanceProof } from "./flopWindow.js";
 
 /** Scoped first-UTG witness from consecutive bounded source state.
  * No general poker-state emulator or full action-history claim. */
@@ -31,10 +31,12 @@ export interface UtgProjection { event: "registered" | "gC" | "rup"; heroId: str
   hjPatch?: Record<string, any>;
   /** Closed accepted UTG open / HJ call only; unknown raw mutations never disappear into a proof. */
   bettingPatch?: Record<string, any>;
-  /** Closed hand239/243 observations only; never action permission. */
+  /** Closed hand239/243/248 observations only; never action permission. */
   flopPatch?: Record<string, any>;
   /** Closed raw hand243 boundary, additional gate for contribution accounting only. */
   flopAccountingBoundary?: true;
+  /** Closed hand248 raw boundary; required for all certificates in this profile. */
+  flop248Boundary?: true;
   /** Raw hand-start discriminators, not decoded betting bounds. Present but
    * missing/malformed values become null so they cannot masquerade as absent. */
   flopBoundary?: { mR: number | null; cHB: number | null } }
@@ -83,8 +85,9 @@ export function projectFirstUtgSource(data: unknown, knownHero: string | null): 
       ...((p[0] === "registered" || p[0] === "gC" && same(raw.gT, [1, 0])) &&
         (Object.hasOwn(raw, "mR") || Object.hasOwn(raw, "cHB"))
         ? { flopBoundary: { mR: integer(raw.mR) ? raw.mR : null, cHB: integer(raw.cHB) ? raw.cHB : null } } : {}),
-      ...(flopKind && flopKind !== "turn" && flopKind !== "fold" ? { flopPatch: raw } : {}),
+      ...(flopKind && flopKind !== "fold" && (flopKind !== "turn" || !Object.hasOwn(raw, "mAVTB")) ? { flopPatch: raw } : {}),
       ...(p[0] === "gC" && isFlopAccountingBoundary(raw) ? { flopAccountingBoundary: true as const } : {}),
+      ...(p[0] === "gC" && isFlopAccountingBoundary(raw, "hand248") ? { flop248Boundary: true as const } : {}),
       ...(p[0] === "gC" && (isObservedUtgOpenPatch(raw) || isObservedHjCallPatch(raw)) ? { bettingPatch: raw } : {}),
       ...(p[0] === "gC" && hjPatchKind(raw) ? { hjPatch: raw } : {}) };
     return JSON.stringify(result).length <= 40_000 ? result : null;
@@ -281,6 +284,7 @@ export function createFirstUtgSource(tableId: string, now: () => number) {
         const frame = advanceUtgState(previous.data.frame, data.frame, tableId, data.heroId!);
         const flopAnchor = firstUtg(previous.data, data, tableId, generation, observedAt);
         const historicalAnchor = firstUtg(previous.data, data, tableId, generation, observedAt, "HJ");
+        const coAnchor = firstUtg(previous.data, data, tableId, generation, observedAt, "CO");
         // Hand243 starts immediately after registration and carries mR/cHB.
         // No arbitrary refresh or intervening patch can supply this fallback.
         const historicalBoundary = previous.data.event === "registered" &&
@@ -293,7 +297,11 @@ export function createFirstUtgSource(tableId: string, now: () => number) {
             ? { witness: historicalAnchor, profile: "hand243", step: 0, observations: [],
               ...(data.flopAccountingBoundary === true ? { preflopObservations: [] } : {}),
               anchor: { sequence, cursor: historicalAnchor.cursor, receivedAt: observedAt } }
-            : flopAdvanced?.pending ?? null;
+            : coAnchor && matchesFlop248Contract(coAnchor) && data.flop248Boundary === true &&
+                equivalent(data.flopBoundary, { mR: 4, cHB: 2 })
+              ? { witness: coAnchor, profile: "hand248", step: 0, observations: [], preflopObservations: [],
+                anchor: { sequence, cursor: coAnchor.cursor, receivedAt: observedAt } }
+              : flopAdvanced?.pending ?? null;
         flopProof = flopAdvanced?.proof ? { ...flopAdvanced.proof,
           continuity: { status: "validated_prefix", baselineSequence: previous.baselineSequence,
             throughSequence: sequence, generation, tableId, handId: frame.hI, cursor: frame.now } } : null;
@@ -330,7 +338,6 @@ export function createFirstUtgSource(tableId: string, now: () => number) {
           : anchor ? "Frozen six-player HJ hand anchor; waiting for the next explicit UTG fold."
           : advanced ? "Explicit UTG fold accepted; waiting for the immediately linked HJ activation."
           : "No supported consecutive boundary -> UTG fold -> HJ turn; unsupported updates invalidate this window.";
-        const coAnchor = firstUtg(previous.data, data, tableId, generation, observedAt, "CO");
         const coAdvanced = coPending ? advanceCoWindow(coPending, data, sequence, observedAt) : null;
         coPending = coAnchor ? { witness: coAnchor, folds: [], anchor: {
           sequence, cursor: coAnchor.cursor, receivedAt: observedAt,
