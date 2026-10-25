@@ -2,12 +2,13 @@ import { isControlVisible, RAISE_SELECTORS, readRaiseControl } from "./raiseCont
 import { RAW_CAPTURE_KEY, type RawSocketCapture } from "./rawSocketCapture.js";
 import type { LiveTimelineDiagnostic } from "./liveTimeline.js";
 import type { PostflopReadinessCapture } from "./postflopReadinessCapture.js";
+import type { PostflopObservationCapture } from "./postflopObservationCapture.js";
 import { tableIdFromPath } from "./pokerNowTransport.js";
 
 // Diagnostics only. This channel is never consumed by the source reducer/policy.
 export const RAISE_CAPTURE_KEY = "poker-ai:raise-evidence-capture";
 const CHANNEL = "poker-ai:raise-evidence-diagnostics:v1";
-export const CHECKPOINT_LABELS = ["panel_opened", "min_raise_selected", "five_chips_entered", "postflop_call"] as const;
+export const CHECKPOINT_LABELS = ["panel_opened", "min_raise_selected", "five_chips_entered", "postflop_call", "postflop_observation"] as const;
 const LIMITS = { checkpoints: 8, bytes: 128 * 1024 };
 const bytes = (text: string) => new TextEncoder().encode(text).byteLength;
 const enabled = (target: Window) => {
@@ -63,7 +64,7 @@ export type RaiseSourceObservation = ReturnType<typeof raiseSourceObservation>;
 
 /** Install in ISOLATED, opt-in only; responses cannot update runtime state. */
 export function installRaiseEvidenceResponder(target: Window, snapshot: () => LiveTimelineDiagnostic,
-  postflopRead?: () => PostflopReadinessCapture) {
+  postflopRead?: () => PostflopReadinessCapture, observationRead?: () => PostflopObservationCapture) {
   if (!enabled(target)) return;
   let remainingRequests = 8;
   target.addEventListener("message", event => {
@@ -73,20 +74,26 @@ export function installRaiseEvidenceResponder(target: Window, snapshot: () => Li
     remainingRequests--;
     let source: RaiseSourceObservation | null = null, error: string | null = null;
     let postflop: PostflopReadinessCapture | null = null;
+    let observation: PostflopObservationCapture | null = null;
     try {
-      if (event.data.label === "postflop_call") {
+      if (event.data.label === "postflop_observation") {
+        observation = observationRead?.() ?? null;
+        if (!observation) error = "Postflop observation reader unavailable; no cached observation substituted.";
+      } else if (event.data.label === "postflop_call") {
         postflop = postflopRead?.() ?? null;
         if (!postflop) error = "Postflop paired reader unavailable; no cached observation substituted.";
       } else source = raiseSourceObservation(snapshot(), Date.now());
-      if (bytes(JSON.stringify({ source, postflop })) > 32 * 1024) {
-        source = null; postflop = null; error = "Source observation exceeds 32KiB; rejected without truncation.";
+      if (bytes(JSON.stringify(event.data.label === "postflop_observation" ? { observation } : { source, postflop })) > 32 * 1024) {
+        source = null; postflop = null; observation = null; error = "Source observation exceeds 32KiB; rejected without truncation.";
       }
     } catch { error = "Source observation unavailable."; }
-    target.postMessage({ channel: CHANNEL, type: "checkpoint_source_result", requestId: event.data.requestId, source, postflop, error }, target.location.origin);
+    target.postMessage({ channel: CHANNEL, type: "checkpoint_source_result", requestId: event.data.requestId, source, postflop,
+      ...(event.data.label === "postflop_observation" ? { observation } : {}), error }, target.location.origin);
   });
 }
 
-export interface SourceReply { source: RaiseSourceObservation | null; error: string | null; postflop?: PostflopReadinessCapture | null }
+export interface SourceReply { source: RaiseSourceObservation | null; error: string | null;
+  postflop?: PostflopReadinessCapture | null; observation?: PostflopObservationCapture | null }
 type Dependencies = {
   raw: RawSocketCapture;
   dom: () => ReturnType<typeof readRaiseCheckpointDOM>;
@@ -133,10 +140,43 @@ export class RaiseEvidenceCollector {
     this.busy = true;
     try {
       const at = this.d.now(), performanceTime = this.d.monotonic(), tableUrl = this.d.tableUrl();
-      const rawBefore = this.d.raw.status(), dom = label === "postflop_call" ? null : this.d.dom();
+      const rawBefore = this.d.raw.status(), dom = label.startsWith("postflop_") ? null : this.d.dom();
       const reply = await this.d.source(label);
       if (!this.active) return this.refuse("capture_stopped_while_checkpoint_pending");
       const completedAt = this.d.now(), rawAfter = this.d.raw.status(), source = reply.source;
+      if (label === "postflop_observation") {
+        const pair = reply.observation ?? null, head = pair?.before.head, last = rawAfter.lastRetainedFrame;
+        const reasons = [...(pair?.reasons ?? ["No isolated-world observation."]), ...(reply.error ? [reply.error] : [])];
+        if (!pair?.observationPaired || pair.mode !== "postflop_observation") reasons.push("Inner observation pairing unavailable.");
+        if (!pair || ![at, completedAt, pair.startedAt, pair.completedAt].every(Number.isSafeInteger) ||
+            at > pair.startedAt || pair.startedAt > pair.completedAt || pair.completedAt > completedAt ||
+            !head || head.receivedAt > at || completedAt - head.receivedAt >= 10_000 || completedAt - at >= 750)
+          reasons.push("Stale or unbracketed source/read/reply timing.");
+        const proof = pair?.before.existingFlopProof;
+        if (proof && (at < proof.activation.receivedAt || completedAt >= proof.expiresAt))
+          reasons.push("Reply outside original source certificate deadline.");
+        if (!rawBefore.active || !rawAfter.active || !rawAfter.registeredCaptured || rawAfter.rejectedFrames ||
+            JSON.stringify(rawBefore) !== JSON.stringify(rawAfter) || !last || !head ||
+            last.sourceCursor !== head.cursor || last.connectionGeneration !== head.generation || last.localReceivedAt > at)
+          reasons.push("Raw recorder missing, changed, rejected frames, or mismatched source cursor/generation.");
+        if (tableUrl !== this.d.tableUrl() || pair?.tableUrl !== tableUrl ||
+            tableIdFromPath(new URL(tableUrl).pathname) !== pair?.before.identity?.tableId) reasons.push("Table URL mismatch.");
+        const rawSourceObservations = this.d.raw.postflopObservations();
+        const fields = rawSourceObservations.fields;
+        if (!fields.heroId || fields.cPI?.value !== fields.heroId.value || fields.pITT?.value !== fields.heroId.value ||
+            JSON.stringify(fields.gT?.value) !== "[1,1]" || fields.hI?.value !== pair?.before.identity?.handId)
+          reasons.push("Raw source hero/actor/hand/flop observations missing or contradictory.");
+        if (JSON.stringify((fields.oTC?.value as Record<string, unknown> | undefined)?.["1"]) !==
+            JSON.stringify(pair?.unverifiedObservations.board)) reasons.push("Raw source/UI board observations missing or contradictory.");
+        const observationPaired = reasons.length === 0;
+        const saved = this.retain({ label, capturedAt: at, completedAt, performanceTime, tableUrl, observation: pair,
+          rawSourceObservations, rawRecorderBefore: rawBefore, rawRecorderAfter: rawAfter, observationPaired, reasons,
+          permission: null, legalityCertified: false, historyComplete: false, liveRecommendationsAllowed: false,
+          correlation: "Local observational pairing only; unsupported profiles remain unverified, never CALL legality or advice." });
+        if (saved.accepted && !observationPaired) this.refused++;
+        return saved.accepted ? { ...saved, accepted: observationPaired, retained: true, observationPaired,
+          profile: pair?.profile ?? "unsupported_or_uncertified", reasons, limitations: pair?.limitations ?? [] } : saved;
+      }
       if (label === "postflop_call") {
         const pair = reply.postflop ?? null, b = pair?.binding, last = rawAfter.lastRetainedFrame;
         const reasons = [...(pair?.reasons ?? ["No paired isolated-world observation."]), ...(reply.error ? [reply.error] : [])];
@@ -230,7 +270,8 @@ export function installRaiseEvidenceCollector(target: Window, raw: RawSocketCapt
             event.data.type !== "checkpoint_source_result" || event.data.requestId !== requestId) return;
         try {
           if (bytes(JSON.stringify(event.data)) > 34 * 1024) { finish({ source: null, error: "Source reply exceeds diagnostic limit." }); return; }
-          finish({ source: event.data.source ?? null, postflop: event.data.postflop ?? null, error: event.data.error ?? null });
+          finish({ source: event.data.source ?? null, postflop: event.data.postflop ?? null,
+            observation: event.data.observation ?? null, error: event.data.error ?? null });
         } catch { finish({ source: null, error: "Unreadable diagnostic source reply." }); }
       };
       const timer = target.setTimeout(() => finish({ source: null, error: "Source diagnostic response timed out; no cached proof substituted." }), 750);

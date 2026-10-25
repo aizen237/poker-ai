@@ -11340,7 +11340,7 @@
       historyComplete: false
     };
   }
-  function installRaiseEvidenceResponder(target, snapshot, postflopRead) {
+  function installRaiseEvidenceResponder(target, snapshot, postflopRead, observationRead) {
     if (!enabled(target)) return;
     let remainingRequests = 8;
     target.addEventListener("message", (event) => {
@@ -11348,20 +11348,33 @@
       remainingRequests--;
       let source = null, error = null;
       let postflop = null;
+      let observation = null;
       try {
-        if (event.data.label === "postflop_call") {
+        if (event.data.label === "postflop_observation") {
+          observation = observationRead?.() ?? null;
+          if (!observation) error = "Postflop observation reader unavailable; no cached observation substituted.";
+        } else if (event.data.label === "postflop_call") {
           postflop = postflopRead?.() ?? null;
           if (!postflop) error = "Postflop paired reader unavailable; no cached observation substituted.";
         } else source = raiseSourceObservation(snapshot(), Date.now());
-        if (bytes(JSON.stringify({ source, postflop })) > 32 * 1024) {
+        if (bytes(JSON.stringify(event.data.label === "postflop_observation" ? { observation } : { source, postflop })) > 32 * 1024) {
           source = null;
           postflop = null;
+          observation = null;
           error = "Source observation exceeds 32KiB; rejected without truncation.";
         }
       } catch {
         error = "Source observation unavailable.";
       }
-      target.postMessage({ channel: CHANNEL, type: "checkpoint_source_result", requestId: event.data.requestId, source, postflop, error }, target.location.origin);
+      target.postMessage({
+        channel: CHANNEL,
+        type: "checkpoint_source_result",
+        requestId: event.data.requestId,
+        source,
+        postflop,
+        ...event.data.label === "postflop_observation" ? { observation } : {},
+        error
+      }, target.location.origin);
     });
   }
 
@@ -11412,6 +11425,128 @@
       read: structuredClone(read),
       evidence,
       reasons
+    };
+  }
+
+  // src/postflopObservationCapture.ts
+  var same4 = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  function capturePostflopObservation(d) {
+    const copySource = (s) => {
+      const source = s.sourceStatus, evidence = source.firstUtgEvidence;
+      const carried = evidence.carriedState, frame2 = carried?.projection.frame;
+      const head2 = source.sourceMetadata.socket.at(-1);
+      return structuredClone({
+        connected: source.connected,
+        identity: source.identity,
+        currentHand: { handId: s.current.handId, handNumber: s.current.handNumber },
+        head: head2 ? {
+          sequence: head2.localSequence,
+          generation: head2.localConnectionGeneration,
+          receivedAt: head2.receivedAt,
+          cursor: head2.metadata.frame.fields.find((f) => f.path === "now")?.value ?? null
+        } : null,
+        continuity: source.sourceMetadata.socketContinuity,
+        coverageIssues: s.current.coverage.issues,
+        carried: carried ? {
+          generation: carried.generation,
+          sequence: carried.sequence,
+          heroId: carried.projection.heroId,
+          // Missing fields stay missing; deleted contributions are never filled with zero.
+          fields: Object.fromEntries(["id", "hI", "gN", "now", "pre", "cPI", "pITT", "gT", "oTC", "tB", "seats", "players", "pGS"].filter((k) => Object.hasOwn(frame2, k)).map((k) => [k, frame2[k]]))
+        } : null,
+        reducerReason: evidence.reason,
+        // Copy the existing narrow certificate, including its ORIGINAL deadline.
+        existingFlopProof: source.flopObservationProof ? {
+          scope: source.flopObservationProof.scope,
+          activation: source.flopObservationProof.activation,
+          expiresAt: source.flopObservationProof.expiresAt,
+          continuity: source.flopObservationProof.continuity,
+          board: source.flopObservationProof.transition.board,
+          contributions: source.flopObservationProof.contributions,
+          accountingScope: source.flopObservationProof.accounting?.scope ?? null
+        } : null,
+        priorCertificate: evidence.freshness.certificate
+      });
+    };
+    const startedAt = d.now(), tableUrl = d.tableUrl(), epochBefore = { ...d.epoch() };
+    const first = d.snapshot(), before = copySource(first);
+    const read = structuredClone(d.read()), assessment = assessLiveState(read.raw, read.context);
+    const last = d.snapshot(), after = copySource(last), epochAfter = { ...d.epoch() }, completedAt = d.now();
+    const reasons = [], limitations = [];
+    const head = before.head, frame = before.carried?.fields;
+    const state = assessment.state, seats = state?.seats.filter((s) => s.isOccupied) ?? [];
+    const hero = seats.find((s) => s.isYou), call = read.callControl;
+    const cards = state?.board.map((c) => `${"23456789TJQKA"[c.rank - 2]}${c.suit}`) ?? null;
+    if (!same4(before, after) || tableUrl !== d.tableUrl()) reasons.push("Source or table changed across the read.");
+    if (!before.connected || !head || before.identity?.chainGap || before.continuity.chainGap || before.continuity.status !== "observed_continuous" || before.coverageIssues.some((i) => i.code === "metadata_gap" || i.code === "identity_conflict"))
+      reasons.push("Source disconnected, missing, or has an unresolved continuity gap.");
+    if (head && head.generation !== 1) limitations.push("Reconnect generation: no continuity with the previous connection is claimed.");
+    if (![startedAt, completedAt, call?.observedAt, head?.receivedAt].every(Number.isSafeInteger) || completedAt < startedAt || call.observedAt < startedAt || call.observedAt > completedAt || head.receivedAt > startedAt || completedAt - head.receivedAt >= 1e4)
+      reasons.push("Stale, future, missing or unbracketed local observation time.");
+    const polled = (s) => JSON.stringify([
+      decisionFingerprint(tableUrl, read.raw, read.context, read.raiseControl),
+      liveProofRevision(s)
+    ]);
+    const epochStatus = !epochBefore.decisionEpoch || epochBefore.stateJson === null ? "unavailable" : same4(epochBefore, epochAfter) && epochBefore.stateJson === polled(first) && epochAfter.stateJson === polled(last) ? "observed_matching" : "mismatched";
+    if (epochStatus !== "observed_matching") reasons.push("Existing decision epoch unavailable or mismatched; capture does not create one.");
+    if (!state || state.street !== "flop" || seats.filter((s) => s.isYou).length !== 1 || seats.filter((s) => s.isCurrentToAct).length !== 1 || !hero?.isCurrentToAct || read.context.readErrors.length)
+      reasons.push("UI does not provide one readable hero flop decision.");
+    if (!frame) limitations.push("No carried source state for this profile; raw field samples are partial, unverified observations.");
+    else {
+      if (!head || before.carried.sequence !== head.sequence || before.carried.generation !== head.generation || frame.now !== head.cursor)
+        reasons.push("Carried source is stale or differs from the latest source head.");
+      if (frame.hI !== before.identity?.handId || frame.gN !== before.identity?.handNumber || frame.id !== before.identity?.tableId || before.carried.heroId !== before.identity?.heroPlayerId || frame.cPI !== before.carried.heroId || frame.pITT !== before.carried.heroId || !same4(frame.gT, [1, 1]))
+        reasons.push("Source hand, hero actor or flop street is missing or contradictory.");
+      if (!same4(frame.oTC?.["1"], cards)) reasons.push("Source and UI board observations differ or are missing.");
+      const sourceSeats = frame.seats;
+      if (!sourceSeats?.some(([seat, id]) => seat === hero?.seatNumber && id === before.carried.heroId))
+        reasons.push("Source and UI hero seats differ.");
+      for (const [seat, id] of sourceSeats ?? []) {
+        const dom = seats.find((s) => s.seatNumber === seat), contribution3 = frame.tB?.[id];
+        if (typeof contribution3 === "number" && dom?.currentBet != null && contribution3 !== dom.currentBet)
+          reasons.push(`Source/UI contribution contradiction at seat ${seat}.`);
+        if (contribution3 === void 0 || dom?.currentBet == null)
+          limitations.push(`Contribution comparison unavailable at seat ${seat}; no zero inferred.`);
+      }
+    }
+    if (!call || call.visibleCount !== 1 || call.amountChips === null || call.enabled !== true || call.issues.length)
+      limitations.push("CALL readiness unavailable or contradictory; inspect the exact control observation.");
+    if (call?.contradictions.length) reasons.push(...call.contradictions);
+    const proof = before.existingFlopProof;
+    if (proof && (startedAt < proof.activation.receivedAt || completedAt >= proof.expiresAt))
+      reasons.push("Existing source certificate is outside its original deadline.");
+    const profile = proof ? "existing_narrow_source_certificate" : "unsupported_or_uncertified";
+    if (!proof) limitations.push("No current certified flop profile; no source decision deadline is available or created.");
+    return {
+      version: 1,
+      mode: "postflop_observation",
+      developmentOnly: true,
+      authoritative: false,
+      permission: null,
+      legalityCertified: false,
+      historyComplete: false,
+      liveRecommendationsAllowed: false,
+      startedAt,
+      completedAt,
+      tableUrl,
+      epochBefore,
+      epochAfter,
+      epochStatus,
+      before,
+      after,
+      profile,
+      sourceVerifiedFacts: proof ? { origin: "Existing narrow source certificate only; never broadened by this capture", proof } : null,
+      unverifiedObservations: {
+        source: before.carried,
+        ui: read,
+        board: cards,
+        contributions: seats.map((s) => ({ seat: s.seatNumber, value: s.currentBet })),
+        callReadiness: call?.visibleCount === 1 && call.amountChips !== null && call.enabled === true && !call.issues.length ? "observed_enabled" : "unavailable"
+      },
+      observationPaired: reasons.length === 0,
+      reasons,
+      limitations,
+      timingScope: "Local source receipt age only (10s diagnostic stale threshold); never activation, permission or a renewed deadline."
     };
   }
 
@@ -11710,6 +11845,12 @@
   var handTimeline = startLiveTimeline();
   try {
     installRaiseEvidenceResponder(window, () => handTimeline.snapshot(), () => capturePostflopReadiness({
+      snapshot: () => handTimeline.snapshot(),
+      read: readLiveTable,
+      epoch: () => ({ decisionEpoch: String(requestSequence), stateJson: lastStateJson }),
+      tableUrl: () => location.origin + location.pathname,
+      now: () => Date.now()
+    }), () => capturePostflopObservation({
       snapshot: () => handTimeline.snapshot(),
       read: readLiveTable,
       epoch: () => ({ decisionEpoch: String(requestSequence), stateJson: lastStateJson }),

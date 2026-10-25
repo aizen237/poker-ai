@@ -167,3 +167,37 @@ describe("temporary raw socket capture (synthetic transport tests, not live sema
     expect(Socket.instances.every(s => s.send.mock.calls.length === 0)).toBe(true);
   });
 });
+
+describe("unverified raw postflop field samples", () => {
+  it("keeps field receipts and deletion tokens independent, without changing the raw buffer", () => {
+    const raw = new RawSocketCapture(true);
+    raw.observe(packet("registered", { currentPlayer: { id: "hero" }, gameState: { hI: "old", now: 1, oTC: { "1": ["Ks"] } } }), 1, 100);
+    raw.observe(packet("gC", { hI: "new", now: 2, pre: 1, tB: { hero: 2 }, gT: [1, 0], oTC: { "1": [] } }), 1, 110);
+    raw.observe(packet("gC", { now: 3, pre: 2, tB: { hero: "<D>" }, oTC: { "1": ["As", "2h", "3d"] }, gT: [1, 1] }), 1, 120);
+    raw.observe(packet("gC", { now: 4, pre: 3, cPI: "hero", pITT: "hero" }), 1, 130);
+    const before = raw.status(), result = raw.postflopObservations();
+    expect(result.fields.oTC).toMatchObject({ localReceivedAt: 120, sourceCursor: 3, localReceiveSequence: 3 });
+    expect(result.fields.cPI).toMatchObject({ value: "hero", localReceivedAt: 130 });
+    expect(result.fields.heroId.value).toBe("hero");
+    expect(result.contributionPatches.map(p => p.value)).toEqual([{ hero: 2 }, { hero: "<D>" }]);
+    expect(raw.status()).toEqual(before); expect(result.status).toBe("unverified_raw_field_observations");
+    result.fields.cPI.value = "changed";
+    expect(raw.postflopObservations().fields.cPI.value).toBe("hero");
+  });
+  it("never borrows board/contributions from an earlier hand or connection", () => {
+    const raw = new RawSocketCapture(true);
+    raw.observe(packet("registered", { currentPlayer: { id: "hero" }, gameState: { hI: "old", now: 1, oTC: { "1": ["As"] }, tB: { hero: 2 } } }), 1, 100);
+    raw.observe(packet("gC", { hI: "new", now: 2, pre: 1 }), 1, 110);
+    expect(raw.postflopObservations().fields.oTC).toBeUndefined();
+    expect(raw.postflopObservations().contributionPatches).toEqual([]);
+    raw.observe(packet("gC", { now: 3, pre: 2 }), 2, 120);
+    expect(raw.postflopObservations().fields).toEqual({});
+  });
+  it("labels bounded contribution sample loss explicitly", () => {
+    const raw = new RawSocketCapture(true);
+    for (let i = 0; i < 30; i++) raw.observe(packet("gC", { now: i, tB: { hero: i } }), 1, 100 + i);
+    const result = raw.postflopObservations();
+    expect(result.contributionPatches).toHaveLength(24); expect(result.contributionSamplesTruncated).toBe(true);
+    expect(result.handIdentityFieldObserved).toBe(false); expect(raw.status().frameCount).toBe(30);
+  });
+});

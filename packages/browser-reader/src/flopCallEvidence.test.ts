@@ -12,6 +12,7 @@ import { buildLiveDecisionProofs } from "../../../apps/pokernow-extension/src/de
 import { liveProofRevision } from "../../../apps/pokernow-extension/src/decisionProofs.js";
 import { decisionFingerprint } from "../../../apps/pokernow-extension/src/requestIdentity.js";
 import { capturePostflopReadiness } from "../../../apps/pokernow-extension/src/postflopReadinessCapture.js";
+import { capturePostflopObservation } from "../../../apps/pokernow-extension/src/postflopObservationCapture.js";
 import { RawSocketCapture } from "../../../apps/pokernow-extension/src/rawSocketCapture.js";
 import { RaiseEvidenceCollector } from "../../../apps/pokernow-extension/src/raiseEvidenceCapture.js";
 
@@ -345,5 +346,127 @@ describe("development-only paired postflop readiness capture", () => {
       decisionFingerprint(url, f.read.raw, f.read.context, f.read.raiseControl), liveProofRevision(f.runtime.snapshot()),
     ]);
     expect(await f.collector.checkpoint("postflop_call")).toMatchObject({ accepted: false, retained: true, reasons: ["Table URL mismatch."] });
+  });
+});
+
+describe("general postflop observation capture (synthetic UI/source variants)", () => {
+  function fixture(certified = false) {
+    const fs = frames().slice(0, 20);
+    if (!certified) for (const entry of fs) {
+      const frame = entry.payload.gameState ?? entry.payload;
+      if (frame.pC?.PLAYER_1?.cards) frame.pC.PLAYER_1.cards = [{ value: "As", showing: false }, { value: "Kd", showing: false }];
+      if (frame.oTC?.["1"]?.length === 3) frame.oTC["1"] = ["Ah", "7c", "2s"];
+      if (frame.players) for (const player of Object.values(frame.players) as any[]) if (typeof player.stack === "number") player.stack += 50;
+    }
+    const f = replay(fs), url = "https://www.pokernow.com/games/TABLE_TEST";
+    if (!certified) {
+      f.read.raw.boardCards = ["Ah", "7c", "2s"].map(c => ({ valueText: c[0], suitText: c[1] }));
+      for (const s of f.read.raw.seats) if (s.isOccupied) s.stackText = s.stackContainerText = String(Number(s.stackText) + 50);
+      f.read.raw.seats[0].holeCardClassLists = ["As", "Kd"].map(c => ["card-container", `card-${c[1]}`, `card-s-${c[0]}`, "flipped"]);
+    }
+    const epoch = { decisionEpoch: "7", stateJson: JSON.stringify([
+      decisionFingerprint(url, f.read.raw, f.read.context, f.read.raiseControl), liveProofRevision(f.runtime.snapshot()),
+    ]) };
+    const d = { snapshot: vi.fn(() => f.runtime.snapshot()), read: vi.fn(() => { f.control(); return f.read; }),
+      epoch: vi.fn(() => ({ ...epoch })), tableUrl: vi.fn(() => url), now: () => Date.now() };
+    const raw = new RawSocketCapture(true);
+    for (const entry of fs) raw.observe("42" + JSON.stringify([entry.event, entry.payload]), 1, entry.localReceivedAt);
+    const source = vi.fn(async (): Promise<any> => ({ source: null, error: null, observation: capturePostflopObservation(d) }));
+    const dom = vi.fn(), disarm = vi.fn();
+    const collector = new RaiseEvidenceCollector(true, { raw, dom, source, tableUrl: d.tableUrl, now: d.now, monotonic: () => 0, disarm });
+    return { ...f, fs, d, epoch, raw, source, collector, dom, disarm, capture: () => capturePostflopObservation(d),
+      export: () => JSON.parse(collector.exportJSON()) };
+  }
+  it("pairs different cards, board and stacks without certifying the profile or modifying authority", async () => {
+    const f = fixture(), before = f.runtime.snapshot();
+    expect(await f.collector.checkpoint("postflop_observation")).toMatchObject({ accepted: true, retained: true,
+      observationPaired: true, profile: "unsupported_or_uncertified" });
+    const cp = f.export().checkpoints[0];
+    expect(cp.observation).toMatchObject({ sourceVerifiedFacts: null, permission: null, liveRecommendationsAllowed: false,
+      unverifiedObservations: { board: ["Ah", "7c", "2s"], callReadiness: "observed_enabled", ui: { callControl: { amountChips: 2 } } },
+      epochBefore: { decisionEpoch: "7" } });
+    expect(cp.rawSourceObservations.fields.oTC.value).toEqual({ "1": ["Ah", "7c", "2s"] });
+    expect(cp.rawSourceObservations.contributionPatches.length).toBeGreaterThan(0);
+    expect(f.runtime.snapshot()).toEqual(before); expect(f.epoch.decisionEpoch).toBe("7");
+    expect(f.evidence()).toBeNull(); expect(capturePostflopReadiness(f.d).readinessMatched).toBe(false);
+    expect(f.dom).not.toHaveBeenCalled(); expect(f.disarm).toHaveBeenCalledOnce();
+  });
+  it.each(["board", "actor", "street", "hand", "hero", "contribution", "gap", "disconnect", "stale-carried", "epoch", "no-epoch", "source-change", "clock", "stale-ui", "future-ui", "stale-source"])(
+    "retains and rejects %s", async variant => {
+      const f = fixture(), s = f.runtime.snapshot(), frame = s.sourceStatus.firstUtgEvidence.carriedState!.projection.frame;
+      if (variant === "board") frame.oTC["1"] = ["Ac", "7c", "2s"];
+      if (variant === "actor") frame.pITT = "PLAYER_2";
+      if (variant === "street") frame.gT = [1, 2];
+      if (variant === "hand") frame.hI = "OTHER";
+      if (variant === "hero") s.sourceStatus.identity!.heroPlayerId = "PLAYER_2";
+      if (variant === "contribution") frame.tB.PLAYER_9 = 100;
+      if (variant === "gap") s.sourceStatus.sourceMetadata.socketContinuity.chainGap = true;
+      if (variant === "disconnect") s.sourceStatus.connected = false;
+      if (variant === "stale-carried") s.sourceStatus.firstUtgEvidence.carriedState!.sequence--;
+      f.d.snapshot.mockReturnValue(s);
+      if (variant === "epoch") f.epoch.stateJson = "old poll";
+      if (variant === "no-epoch") f.epoch.stateJson = null as any;
+      if (variant === "source-change") f.d.snapshot.mockReturnValueOnce(f.runtime.snapshot()).mockReturnValue({ ...s, sourceStatus: { ...s.sourceStatus, connected: false } });
+      if (variant === "stale-source") f.at(activation + 10000);
+      f.d.read.mockImplementation(() => {
+        f.control();
+        if (variant === "clock") f.at(activation - 1);
+        if (variant === "stale-ui") f.read.callControl.observedAt--;
+        if (variant === "future-ui") f.read.callControl.observedAt++;
+        return f.read;
+      });
+      expect(await f.collector.checkpoint("postflop_observation")).toMatchObject({ accepted: false, retained: true, observationPaired: false });
+      expect(f.export().checkpoints[0].reasons.length).toBeGreaterThan(0);
+    });
+  it.each(["disabled", "missing", "duplicate", "aria", "unsupported"])("labels CALL %s without inventing legality", variant => {
+    const f = fixture();
+    const markup = { disabled: '<button type="button" disabled>Call 2</button>', missing: '',
+      duplicate: '<button type="button">Call 2</button><button type="button">Call 2</button>',
+      aria: '<button type="button" aria-label="Call 3">Call 2</button>', unsupported: '<input type="button" value="Call 2">' };
+    f.d.read.mockImplementation(() => { f.control(markup[variant as keyof typeof markup]); return f.read; });
+    expect(f.capture()).toMatchObject({ permission: null, legalityCertified: false,
+      unverifiedObservations: { callReadiness: "unavailable" } });
+  });
+  it("retains unsupported partial source projections without promoting them to facts", async () => {
+    const f = fixture(), s = f.runtime.snapshot(); s.sourceStatus.firstUtgEvidence.carriedState = null;
+    f.d.snapshot.mockReturnValue(s);
+    const result = await f.collector.checkpoint("postflop_observation");
+    expect(result).toMatchObject({ retained: true });
+    const cp = f.export().checkpoints[0];
+    expect(cp.observation.sourceVerifiedFacts).toBeNull(); expect(cp.observation.unverifiedObservations.source).toBeNull();
+    expect(cp.observation.limitations.join(" ")).toContain("partial, unverified");
+    expect(cp.rawSourceObservations.fields.cPI.value).toBe("PLAYER_1");
+  });
+  it.each(["raw-update", "raw-stopped", "rejected-frame", "wrong-cursor", "wrong-generation", "no-registration", "late-reply", "missing-reply", "url"])(
+    "rejects outer %s", async variant => {
+      const f = fixture(), pair = f.capture();
+      if (variant === "raw-stopped") f.raw.stop();
+      if (variant === "rejected-frame") f.raw.observe('42["gC",', 1, activation);
+      if (variant === "wrong-cursor") f.raw.observe('42["gC",{"now":1}]', 1, activation);
+      if (variant === "wrong-generation") f.raw.observe('42["gC",{"now":1792832960494}]', 2, activation);
+      if (variant === "no-registration") vi.spyOn(f.raw, "status").mockReturnValue({ ...f.raw.status(), registeredCaptured: false });
+      f.source.mockImplementation(async () => {
+        if (variant === "raw-update") f.raw.observe('42["gC",{"now":1}]', 1, activation);
+        if (variant === "late-reply") f.at(activation + 750);
+        if (variant === "url") f.d.tableUrl.mockReturnValue("https://www.pokernow.com/games/OTHER");
+        return { source: null, error: null, observation: variant === "missing-reply" ? null : pair };
+      });
+      expect(await f.collector.checkpoint("postflop_observation")).toMatchObject({ accepted: false, retained: true });
+    });
+  it("copies original certified deadlines and cannot renew them at reply or later capture", async () => {
+    const f = fixture(true); f.at(expiry - 1);
+    const pair = f.capture();
+    expect(pair.sourceVerifiedFacts?.proof.expiresAt).toBe(expiry);
+    f.source.mockImplementation(async () => { f.at(expiry); return { source: null, error: null, observation: pair }; });
+    expect(await f.collector.checkpoint("postflop_observation")).toMatchObject({ accepted: false, retained: true });
+    f.source.mockImplementation(async () => ({ source: null, error: null, observation: f.capture() }));
+    expect(await f.collector.checkpoint("postflop_observation")).toMatchObject({ accepted: false, retained: true });
+    expect(f.capture().sourceVerifiedFacts).toBeNull(); expect(f.runtime.snapshot().sourceStatus.flopObservationProof).toBeNull();
+  });
+  it("labels reconnects without claiming continuity with an earlier generation", () => {
+    const f = fixture(), s = f.runtime.snapshot();
+    s.sourceStatus.sourceMetadata.socket.at(-1)!.localConnectionGeneration = 2;
+    f.d.snapshot.mockReturnValue(s);
+    expect(f.capture().limitations.join(" ")).toContain("Reconnect generation");
   });
 });

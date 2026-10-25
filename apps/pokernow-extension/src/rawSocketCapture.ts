@@ -122,6 +122,36 @@ export class RawSocketCapture {
       limits: { ...this.limits } };
   }
 
+  /** Existing raw buffer, read only. Each field keeps its own receipt/cursor.
+   * No patch reducer, zero filling, source semantics or decision authority. */
+  postflopObservations() {
+    const generation = this.frames.at(-1)?.connectionGeneration;
+    const fields: Record<string, { value: unknown; localReceivedAt: number; sourceCursor: unknown;
+      localReceiveSequence: number; connectionGeneration: number }> = {};
+    const contributionPatches: Array<{ value: unknown; localReceivedAt: number; sourceCursor: unknown;
+      localReceiveSequence: number; connectionGeneration: number }> = [];
+    let truncated = false, boundaryObserved = false;
+    for (const entry of [...this.frames].reverse()) {
+      if (entry.connectionGeneration !== generation) break;
+      const payload = JSON.parse(entry.payloadJSON), frame = entry.event === "registered" ? payload?.gameState : payload;
+      if (!frame || typeof frame !== "object") continue;
+      const sample = (value: unknown) => ({ value, localReceivedAt: entry.localReceivedAt, sourceCursor: frame.now ?? null,
+        localReceiveSequence: entry.localReceiveSequence, connectionGeneration: entry.connectionGeneration });
+      if (entry.event === "registered" && !fields.heroId && payload.currentPlayer?.id) fields.heroId = sample(payload.currentPlayer.id);
+      if (!boundaryObserved) {
+        for (const key of ["id", "hI", "gN", "cPI", "pITT", "gT", "oTC"])
+          if (!Object.hasOwn(fields, key) && Object.hasOwn(frame, key)) fields[key] = sample(frame[key]);
+        if (Object.hasOwn(frame, "tB")) {
+          if (contributionPatches.length < 24) contributionPatches.push(sample(frame.tB)); else truncated = true;
+        }
+        if (Object.hasOwn(frame, "hI")) boundaryObserved = true;
+      }
+    }
+    return { status: "unverified_raw_field_observations", fields, contributionPatches: contributionPatches.reverse(),
+      contributionSamplesTruncated: truncated, handIdentityFieldObserved: boundaryObserved,
+      scope: "Each value is a separate source field observation, not reconstructed current state. Patches/deletions are not totals or zero. Raw export retains original tokens; parsed diagnostic numbers are unverified." };
+  }
+
   exportJSON(): string {
     this.stop();
     const frames = this.frames.map(({ payloadJSON, ...metadata }) =>

@@ -26,6 +26,7 @@ import { RecommendationSchema, lockedEngineRecommendation, validateReasoningCons
 import { startLiveTimeline } from "./liveTimeline.js";
 import { installRaiseEvidenceResponder } from "./raiseEvidenceCapture.js";
 import { capturePostflopReadiness } from "./postflopReadinessCapture.js";
+import { capturePostflopObservation } from "./postflopObservationCapture.js";
 import { buildLiveDecisionProofs, liveProofRevision, activationLabel } from "./decisionProofs.js";
 console.log("[Poker AI Reader] Content script loaded on:", window.location.href);
 
@@ -425,6 +426,10 @@ let currentDiagnosticPacket: DecisionPacket | null = null;
 const handTimeline = startLiveTimeline();
 try {
   installRaiseEvidenceResponder(window, () => handTimeline.snapshot(), () => capturePostflopReadiness({
+    snapshot: () => handTimeline.snapshot(), read: readLiveTable,
+    epoch: () => ({ decisionEpoch: String(requestSequence), stateJson: lastStateJson }),
+    tableUrl: () => location.origin + location.pathname, now: () => Date.now(),
+  }), () => capturePostflopObservation({
     snapshot: () => handTimeline.snapshot(), read: readLiveTable,
     epoch: () => ({ decisionEpoch: String(requestSequence), stateJson: lastStateJson }),
     tableUrl: () => location.origin + location.pathname, now: () => Date.now(),

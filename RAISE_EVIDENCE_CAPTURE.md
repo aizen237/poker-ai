@@ -8,6 +8,10 @@ The same collector now has a separate read-only `postflop_call` checkpoint.
 See [Phase 6F](POSTFLOP_PHASE6F.md) for its source/epoch pairing and manual
 procedure; the historical Raise-panel operations below are not needed for it.
 
+For ordinary hero flop hands, use the separate `postflop_observation` label.
+See [Phase 6G](POSTFLOP_PHASE6G.md) for exact capture/export instructions and
+the distinction between unverified observations and existing narrow certificates.
+
 This development-only collector is disabled by default. It does not recommend
 or perform any poker action. Manual labels are your description of an operation,
 not proof that PokerNow accepted an amount. Nothing is uploaded or logged

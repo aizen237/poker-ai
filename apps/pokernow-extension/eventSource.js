@@ -258,6 +258,44 @@
         limits: { ...this.limits }
       };
     }
+    /** Existing raw buffer, read only. Each field keeps its own receipt/cursor.
+     * No patch reducer, zero filling, source semantics or decision authority. */
+    postflopObservations() {
+      const generation = this.frames.at(-1)?.connectionGeneration;
+      const fields = {};
+      const contributionPatches = [];
+      let truncated = false, boundaryObserved = false;
+      for (const entry of [...this.frames].reverse()) {
+        if (entry.connectionGeneration !== generation) break;
+        const payload = JSON.parse(entry.payloadJSON), frame = entry.event === "registered" ? payload?.gameState : payload;
+        if (!frame || typeof frame !== "object") continue;
+        const sample = (value) => ({
+          value,
+          localReceivedAt: entry.localReceivedAt,
+          sourceCursor: frame.now ?? null,
+          localReceiveSequence: entry.localReceiveSequence,
+          connectionGeneration: entry.connectionGeneration
+        });
+        if (entry.event === "registered" && !fields.heroId && payload.currentPlayer?.id) fields.heroId = sample(payload.currentPlayer.id);
+        if (!boundaryObserved) {
+          for (const key of ["id", "hI", "gN", "cPI", "pITT", "gT", "oTC"])
+            if (!Object.hasOwn(fields, key) && Object.hasOwn(frame, key)) fields[key] = sample(frame[key]);
+          if (Object.hasOwn(frame, "tB")) {
+            if (contributionPatches.length < 24) contributionPatches.push(sample(frame.tB));
+            else truncated = true;
+          }
+          if (Object.hasOwn(frame, "hI")) boundaryObserved = true;
+        }
+      }
+      return {
+        status: "unverified_raw_field_observations",
+        fields,
+        contributionPatches: contributionPatches.reverse(),
+        contributionSamplesTruncated: truncated,
+        handIdentityFieldObserved: boundaryObserved,
+        scope: "Each value is a separate source field observation, not reconstructed current state. Patches/deletions are not totals or zero. Raw export retains original tokens; parsed diagnostic numbers are unverified."
+      };
+    }
     exportJSON() {
       this.stop();
       const frames = this.frames.map(({ payloadJSON, ...metadata }) => `${JSON.stringify(metadata).slice(0, -1)},"payload":${payloadJSON}}`);
@@ -584,7 +622,7 @@
   // src/raiseEvidenceCapture.ts
   var RAISE_CAPTURE_KEY = "poker-ai:raise-evidence-capture";
   var CHANNEL = "poker-ai:raise-evidence-diagnostics:v1";
-  var CHECKPOINT_LABELS = ["panel_opened", "min_raise_selected", "five_chips_entered", "postflop_call"];
+  var CHECKPOINT_LABELS = ["panel_opened", "min_raise_selected", "five_chips_entered", "postflop_call", "postflop_observation"];
   var LIMITS = { checkpoints: 8, bytes: 128 * 1024 };
   var bytes = (text) => new TextEncoder().encode(text).byteLength;
   var enabled = (target) => {
@@ -723,10 +761,57 @@
       this.busy = true;
       try {
         const at = this.d.now(), performanceTime = this.d.monotonic(), tableUrl = this.d.tableUrl();
-        const rawBefore = this.d.raw.status(), dom = label === "postflop_call" ? null : this.d.dom();
+        const rawBefore = this.d.raw.status(), dom = label.startsWith("postflop_") ? null : this.d.dom();
         const reply = await this.d.source(label);
         if (!this.active) return this.refuse("capture_stopped_while_checkpoint_pending");
         const completedAt = this.d.now(), rawAfter = this.d.raw.status(), source = reply.source;
+        if (label === "postflop_observation") {
+          const pair = reply.observation ?? null, head = pair?.before.head, last = rawAfter.lastRetainedFrame;
+          const reasons = [...pair?.reasons ?? ["No isolated-world observation."], ...reply.error ? [reply.error] : []];
+          if (!pair?.observationPaired || pair.mode !== "postflop_observation") reasons.push("Inner observation pairing unavailable.");
+          if (!pair || ![at, completedAt, pair.startedAt, pair.completedAt].every(Number.isSafeInteger) || at > pair.startedAt || pair.startedAt > pair.completedAt || pair.completedAt > completedAt || !head || head.receivedAt > at || completedAt - head.receivedAt >= 1e4 || completedAt - at >= 750)
+            reasons.push("Stale or unbracketed source/read/reply timing.");
+          const proof = pair?.before.existingFlopProof;
+          if (proof && (at < proof.activation.receivedAt || completedAt >= proof.expiresAt))
+            reasons.push("Reply outside original source certificate deadline.");
+          if (!rawBefore.active || !rawAfter.active || !rawAfter.registeredCaptured || rawAfter.rejectedFrames || JSON.stringify(rawBefore) !== JSON.stringify(rawAfter) || !last || !head || last.sourceCursor !== head.cursor || last.connectionGeneration !== head.generation || last.localReceivedAt > at)
+            reasons.push("Raw recorder missing, changed, rejected frames, or mismatched source cursor/generation.");
+          if (tableUrl !== this.d.tableUrl() || pair?.tableUrl !== tableUrl || tableIdFromPath(new URL(tableUrl).pathname) !== pair?.before.identity?.tableId) reasons.push("Table URL mismatch.");
+          const rawSourceObservations = this.d.raw.postflopObservations();
+          const fields2 = rawSourceObservations.fields;
+          if (!fields2.heroId || fields2.cPI?.value !== fields2.heroId.value || fields2.pITT?.value !== fields2.heroId.value || JSON.stringify(fields2.gT?.value) !== "[1,1]" || fields2.hI?.value !== pair?.before.identity?.handId)
+            reasons.push("Raw source hero/actor/hand/flop observations missing or contradictory.");
+          if (JSON.stringify(fields2.oTC?.value?.["1"]) !== JSON.stringify(pair?.unverifiedObservations.board)) reasons.push("Raw source/UI board observations missing or contradictory.");
+          const observationPaired = reasons.length === 0;
+          const saved2 = this.retain({
+            label,
+            capturedAt: at,
+            completedAt,
+            performanceTime,
+            tableUrl,
+            observation: pair,
+            rawSourceObservations,
+            rawRecorderBefore: rawBefore,
+            rawRecorderAfter: rawAfter,
+            observationPaired,
+            reasons,
+            permission: null,
+            legalityCertified: false,
+            historyComplete: false,
+            liveRecommendationsAllowed: false,
+            correlation: "Local observational pairing only; unsupported profiles remain unverified, never CALL legality or advice."
+          });
+          if (saved2.accepted && !observationPaired) this.refused++;
+          return saved2.accepted ? {
+            ...saved2,
+            accepted: observationPaired,
+            retained: true,
+            observationPaired,
+            profile: pair?.profile ?? "unsupported_or_uncertified",
+            reasons,
+            limitations: pair?.limitations ?? []
+          } : saved2;
+        }
         if (label === "postflop_call") {
           const pair = reply.postflop ?? null, b = pair?.binding, last = rawAfter.lastRetainedFrame;
           const reasons = [...pair?.reasons ?? ["No paired isolated-world observation."], ...reply.error ? [reply.error] : []];
@@ -852,7 +937,12 @@
               finish({ source: null, error: "Source reply exceeds diagnostic limit." });
               return;
             }
-            finish({ source: event.data.source ?? null, postflop: event.data.postflop ?? null, error: event.data.error ?? null });
+            finish({
+              source: event.data.source ?? null,
+              postflop: event.data.postflop ?? null,
+              observation: event.data.observation ?? null,
+              error: event.data.error ?? null
+            });
           } catch {
             finish({ source: null, error: "Unreadable diagnostic source reply." });
           }
