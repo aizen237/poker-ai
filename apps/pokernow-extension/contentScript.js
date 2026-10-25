@@ -11517,6 +11517,11 @@
       reasons.push("Existing source certificate is outside its original deadline.");
     const profile = proof ? "existing_narrow_source_certificate" : "unsupported_or_uncertified";
     if (!proof) limitations.push("No current certified flop profile; no source decision deadline is available or created.");
+    const epochObservation = (epoch, snapshot) => ({
+      decisionEpoch: epoch.decisionEpoch,
+      stateAvailable: epoch.stateJson !== null,
+      matchesRead: epoch.stateJson !== null && epoch.stateJson === polled(snapshot)
+    });
     return {
       version: 1,
       mode: "postflop_observation",
@@ -11529,8 +11534,8 @@
       startedAt,
       completedAt,
       tableUrl,
-      epochBefore,
-      epochAfter,
+      epochBefore: epochObservation(epochBefore, first),
+      epochAfter: epochObservation(epochAfter, last),
       epochStatus,
       before,
       after,

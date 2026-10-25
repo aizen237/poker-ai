@@ -391,6 +391,20 @@ describe("general postflop observation capture (synthetic UI/source variants)", 
     expect(f.evidence()).toBeNull(); expect(capturePostflopReadiness(f.d).readinessMatched).toBe(false);
     expect(f.dom).not.toHaveBeenCalled(); expect(f.disarm).toHaveBeenCalledOnce();
   });
+  it.each(["id", "fingerprint", "unavailable"])("preserves exact epoch rejection across a read: %s", variant => {
+    const f = fixture();
+    const before = { ...f.epoch };
+    const after = { ...before,
+      ...(variant === "id" ? { decisionEpoch: "8" } : { stateJson: variant === "unavailable" ? null : `${before.stateJson} ` }) };
+    f.d.epoch.mockReturnValueOnce(before).mockReturnValueOnce(after as typeof before);
+    const observation = f.capture();
+    expect(observation).toMatchObject({ observationPaired: false, epochStatus: "mismatched",
+      epochBefore: { decisionEpoch: "7", stateAvailable: true, matchesRead: true },
+      epochAfter: { decisionEpoch: variant === "id" ? "8" : "7",
+        stateAvailable: variant !== "unavailable", matchesRead: variant === "id" } });
+    expect(observation.reasons).toContain("Existing decision epoch unavailable or mismatched; capture does not create one.");
+    expect(f.epoch).toEqual(before);
+  });
   it.each(["board", "actor", "street", "hand", "hero", "contribution", "gap", "disconnect", "stale-carried", "epoch", "no-epoch", "source-change", "clock", "stale-ui", "future-ui", "stale-source"])(
     "retains and rejects %s", async variant => {
       const f = fixture(), s = f.runtime.snapshot(), frame = s.sourceStatus.firstUtgEvidence.carriedState!.projection.frame;

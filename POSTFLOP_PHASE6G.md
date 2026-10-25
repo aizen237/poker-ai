@@ -145,3 +145,57 @@ contemporaneous UI checkpoint. Review outer pairing, gaps, profile limitations
 and original timing before proposing a broader source contract. This task
 obtained no live paired evidence. General source semantics, CALL legality and
 postflop strategy still require independent proof; observations cannot supply it.
+
+## Payload-size repair after d66368f
+
+The reported hand246 capture had 29 frames, no rejected frames and a checkpoint
+3,703ms after hero activation, but the isolated responder rejected its observation
+at the existing 32KiB bound. The raw capture file was not available in this
+workspace for this repair. Its discarded observation cannot be measured from
+`observation:null`; the byte measurements below are an explicitly synthetic
+reproduction, not measurements of that original hand's lost UI response.
+
+The precise bounded object is `JSON.stringify({ observation })` in
+`installRaiseEvidenceResponder`, measured in UTF-8 bytes, not the embedded raw
+export or the entire checkpoint. `capturePostflopObservation` exported
+`epochBefore.stateJson` and `epochAfter.stateJson`. Each is a nested JSON string
+containing the complete decision fingerprint (raw UI, context, raise control)
+and source proof revision. Escaping those strings repeats evidence already
+carried in the observation. Both epoch objects were 7,608 bytes in the regression;
+the complete bounded object was 33,161 bytes (393 bytes over the limit).
+
+The repair retains both original `decisionEpoch` IDs and exports `stateAvailable`
+and `matchesRead` on each epoch bracket instead of its internal `stateJson`.
+The existing exact full-string comparisons still run locally, including the
+before/after comparison; no hash, truncation, normalized comparison or substitute
+epoch is used. `epochStatus` and rejection reasons keep their existing meaning.
+The complete UI read (12,545 bytes in the reproduction), both source brackets,
+carried values, proof facts, identity, times and original deadlines remain intact.
+Other source duplication is left alone to keep this repair small. No payload
+limits, transport rejection rules, source grammar, legality or advice gates changed.
+
+The regression uses the installed MAIN API, isolated responder, real content-script
+epoch callback and collector/export. It derives synthetic hand246 source frames
+from the existing sanitized fixture, inserts nine continuous pre-activation
+updates for 29 frames, captures at activation +3,703ms, and uses the current
+`readLiveTable` on synthetic DOM with long multibyte player names. The older UI
+fixture omitted production seat/stack evidence and did not expose this size
+pressure. Before the repair this case produces the exact 32KiB rejection; after
+it the bounded object is 18,069 bytes and the outer checkpoint is paired. Tests
+also preserve exact UI values, raw frames, blockers and absence of clicks,
+outgoing socket actions or recommendation requests. Three additional epoch
+mutation cases cover changed IDs, changed fingerprint strings and unavailable
+fingerprints. Existing oversized-response and rejection tests remain enabled.
+
+| Repair validation | Result |
+| --- | --- |
+| Four focused capture/source/production-path suites | 305 passed |
+| `npm.cmd test -- -- --maxWorkers=1` | 3,390 passed across 107 files |
+| Python PHH replay suite in `.data/phase5d-venv` | 14 passed |
+| `npm.cmd run typecheck --workspaces --if-present` | All workspaces/apps passed |
+| `npm.cmd run build` | Passed; production bundles rebuilt |
+| `npm.cmd run build:extension` | Passed |
+| Working/staged `git diff --check` | Passed |
+
+No raw evidence or local validation logs are included in the commit. A fresh real
+capture is still needed to confirm pairing for the original live table/profile.

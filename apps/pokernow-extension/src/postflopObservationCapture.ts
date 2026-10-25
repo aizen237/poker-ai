@@ -94,9 +94,18 @@ export function capturePostflopObservation(d: Dependencies) {
     reasons.push("Existing source certificate is outside its original deadline.");
   const profile = proof ? "existing_narrow_source_certificate" : "unsupported_or_uncertified";
   if (!proof) limitations.push("No current certified flop profile; no source decision deadline is available or created.");
+  // stateJson is an internal, nested JSON fingerprint of the UI and source
+  // revision, not an epoch identifier. Compare it in full above, but do not
+  // serialize two additional escaped copies of that evidence into the bridge.
+  // Keep the original epoch IDs, availability and exact comparison outcomes.
+  const epochObservation = (epoch: typeof epochBefore, snapshot: LiveTimelineDiagnostic) => ({
+    decisionEpoch: epoch.decisionEpoch, stateAvailable: epoch.stateJson !== null,
+    matchesRead: epoch.stateJson !== null && epoch.stateJson === polled(snapshot),
+  });
   return { version: 1 as const, mode: "postflop_observation" as const, developmentOnly: true, authoritative: false,
     permission: null, legalityCertified: false, historyComplete: false, liveRecommendationsAllowed: false,
-    startedAt, completedAt, tableUrl, epochBefore, epochAfter, epochStatus,
+    startedAt, completedAt, tableUrl, epochBefore: epochObservation(epochBefore, first),
+    epochAfter: epochObservation(epochAfter, last), epochStatus,
     before, after, profile,
     sourceVerifiedFacts: proof ? { origin: "Existing narrow source certificate only; never broadened by this capture", proof } : null,
     unverifiedObservations: { source: before.carried, ui: read, board: cards,
