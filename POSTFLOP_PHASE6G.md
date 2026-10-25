@@ -148,12 +148,18 @@ postflop strategy still require independent proof; observations cannot supply it
 
 ## Payload-size repair after d66368f
 
-The reported hand246 capture had 29 frames, no rejected frames and a checkpoint
-3,703ms after hero activation, but the isolated responder rejected its observation
-at the existing 32KiB bound. The raw capture file was not available in this
-workspace for this repair. Its discarded observation cannot be measured from
-`observation:null`; the byte measurements below are an explicitly synthetic
-reproduction, not measurements of that original hand's lost UI response.
+The reported hand246 capture had 29 exported frames, no rejected frames and a
+checkpoint 3,703ms after hero activation, but the isolated responder rejected its
+observation at the existing 32KiB bound. After repair commit `5637024`, the user
+identified `evidence/postflop-observation-paired.json` and it was inspected locally.
+Both checkpoint recorder brackets contain 27 frames, not 29; frames 28 and 29
+arrived 8,725ms and 9,552ms after the checkpoint request. The reply took 21ms.
+The saved export is 21,675 UTF-8 bytes, its serialized checkpoint is 4,299 bytes,
+and its serialized rawSocket object is 16,504 bytes. None is the rejected object:
+the responder already discarded that observation and its UI read. Its exact
+original size cannot be recovered from `observation:null`. The measurements below
+remain an explicitly synthetic reproduction, not measurements of that original
+hand's lost UI response; the real file confirms the failure, not its field sizes.
 
 The precise bounded object is `JSON.stringify({ observation })` in
 `installRaiseEvidenceResponder`, measured in UTF-8 bytes, not the embedded raw
@@ -177,7 +183,9 @@ limits, transport rejection rules, source grammar, legality or advice gates chan
 The regression uses the installed MAIN API, isolated responder, real content-script
 epoch callback and collector/export. It derives synthetic hand246 source frames
 from the existing sanitized fixture, inserts nine continuous pre-activation
-updates for 29 frames, captures at activation +3,703ms, and uses the current
+updates for 29 frames at capture (the reported export count, rather than the
+subsequently verified 27-frame live checkpoint), captures at activation +3,703ms,
+and uses the current
 `readLiveTable` on synthetic DOM with long multibyte player names. The older UI
 fixture omitted production seat/stack evidence and did not expose this size
 pressure. Before the repair this case produces the exact 32KiB rejection; after
