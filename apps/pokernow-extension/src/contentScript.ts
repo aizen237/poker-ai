@@ -293,7 +293,7 @@ async function requestRecommendation(packet: DecisionPacket, stateDescription: s
     policy = evaluateDecisionPolicy(packet);
     locked = lockedEngineRecommendation(policy);
     if (locked && requestKey === lastRecommendationRequestKey) {
-      bindDisplayLifetime(requestKey);
+      bindDisplayLifetime(requestKey, packet);
       overlayState.aiResult = {
         ...locked,
         action: locked.action === "RAISE" && packet.preflopExecution?.exactOpeningSize ? "RAISE TO 5 CHIPS (2.5 BB)"
@@ -324,7 +324,7 @@ async function requestRecommendation(packet: DecisionPacket, stateDescription: s
     // of assuming the last one-second snapshot still describes the live turn.
     const latest = readLiveTable();
     const latestFingerprint = JSON.stringify([decisionFingerprint(location.origin + location.pathname, latest.raw, latest.context, latest.raiseControl), liveProofRevision(handTimeline.snapshot())]);
-    if (requestKey !== decisionRequestKey(requestSequence, latestFingerprint)) {
+    if (requestKey !== decisionRequestKey(requestSequence, latestFingerprint) || !responseProofStillCurrent(packet, latest)) {
       lastRecommendationRequestKey = null;
       overlayState.aiResult = null;
       overlayState.aiStatus = "blocked";
@@ -438,8 +438,16 @@ try {
 
 // Display-only deadline: never renews evidence or participates in activation.
 // No old action is retained after expiry or any decision/source change.
-let displayLifetime: { requestKey: string; expiresAt: number; receivedAt: number; dom: string; source: string } | null = null;
+let displayLifetime: { requestKey: string; expiresAt: number; receivedAt: number; dom: string; source: string; responsePacket?: DecisionPacket } | null = null;
 let expiryTimer: number | undefined;
+/** Reuse the adapter so new control contradictions also invalidate pending/displayed HJ folds. */
+function responseProofStillCurrent(packet: DecisionPacket, read: ReturnType<typeof readLiveTable>): boolean {
+  if (!packet.preflopExecution?.hjResponseWindow) return true;
+  const assessment = assessLiveState(read.raw, read.context), timeline = handTimeline.snapshot();
+  const preflop = buildLivePreflopContext(assessment, actionHistory, timeline, read);
+  return buildLiveDecisionProofs(read, assessment, timeline, preflop,
+    packet.decisionProofs!.decisionEpoch, packet).activation.allowed;
+}
 function displaySourceBinding() {
   const revision = JSON.parse(liveProofRevision(handTimeline.snapshot()));
   // Expiry removes the witness; retain only the expired label for this exact
@@ -449,6 +457,7 @@ function displaySourceBinding() {
   delete revision.co;
   delete revision.btn;
   delete revision.sb;
+  delete revision.facingOpen;
   return JSON.stringify(revision);
 }
 function clearDisplayLifetime() {
@@ -456,19 +465,20 @@ function clearDisplayLifetime() {
   if (expiryTimer !== undefined) window.clearTimeout(expiryTimer);
   expiryTimer = undefined;
 }
-function bindDisplayLifetime(requestKey: string) {
+function bindDisplayLifetime(requestKey: string, packet: DecisionPacket) {
   clearDisplayLifetime();
   const source = handTimeline.snapshot().sourceStatus;
-  const proof = source.firstUtgProof ?? source.hjProof ?? source.coProof ?? source.btnProof ?? source.sbProof;
+  const proof = source.firstUtgProof ?? source.hjProof ?? source.coProof ?? source.btnProof ?? source.sbProof ?? source.facingOpenProof;
   if (!proof || lastDomStateJson === null) return;
   displayLifetime = { requestKey, receivedAt: proof.witness.receivedAt, expiresAt: proof.expiresAt,
-    dom: lastDomStateJson, source: displaySourceBinding() };
+    dom: lastDomStateJson, source: displaySourceBinding(),
+    ...(packet.preflopExecution?.hjResponseWindow ? { responsePacket: packet } : {}) };
   expiryTimer = window.setTimeout(refreshFreshnessDisplay, Math.max(0, displayLifetime.expiresAt - Date.now()));
 }
 function refreshDisplayLifetime() {
   if (!displayLifetime) return;
   if (displayLifetime.dom !== lastDomStateJson || displayLifetime.source !== displaySourceBinding() || Date.now() < displayLifetime.receivedAt ||
-      Date.now() < displayLifetime.expiresAt && !(handTimeline.snapshot().sourceStatus.firstUtgProof ?? handTimeline.snapshot().sourceStatus.hjProof ?? handTimeline.snapshot().sourceStatus.coProof ?? handTimeline.snapshot().sourceStatus.btnProof ?? handTimeline.snapshot().sourceStatus.sbProof)) {
+      Date.now() < displayLifetime.expiresAt && !(handTimeline.snapshot().sourceStatus.firstUtgProof ?? handTimeline.snapshot().sourceStatus.hjProof ?? handTimeline.snapshot().sourceStatus.coProof ?? handTimeline.snapshot().sourceStatus.btnProof ?? handTimeline.snapshot().sourceStatus.sbProof ?? handTimeline.snapshot().sourceStatus.facingOpenProof)) {
     clearDisplayLifetime();
     overlayState.aiResult = null;
     overlayState.policyLine = null;
@@ -491,7 +501,8 @@ function refreshFreshnessDisplay() {
   try {
     const read = readLiveTable();
     const dom = decisionFingerprint(location.origin + location.pathname, read.raw, read.context, read.raiseControl);
-    if (dom !== displayLifetime.dom) {
+    if (dom !== displayLifetime.dom || displayLifetime.responsePacket && Date.now() < displayLifetime.expiresAt &&
+        !responseProofStillCurrent(displayLifetime.responsePacket, read)) {
       clearDisplayLifetime();
       lastRecommendationRequestKey = null;
       overlayState.aiResult = null;
@@ -552,9 +563,9 @@ setInterval(() => {
     lastRecommendationRequestKey = null;
     requestSequence++;
     const { state, confidence, bigBlind, amountToCall: parsedAmountToCall, positions, decisionPot } = assessment;
-    // Only a cross-checked first-turn window anchored to the forced-blind
-    // boundary can supply absent zeros. Generic monetary/EV rules are unchanged.
-    const amountToCall = (preflop?.openingEvidence === "first_utg_hand_start" || preflop?.openingEvidence === "hj_after_utg_fold" || preflop?.openingEvidence === "co_after_utg_hj_folds" || preflop?.openingEvidence === "btn_after_utg_hj_co_folds" || preflop?.openingEvidence === "sb_after_utg_hj_co_btn_folds") && bigBlind !== null
+    // Only cross-checked source windows can supply absent contribution zeros.
+    // The HJ response price follows the accepted UTG total, not a CALL control.
+    const amountToCall = (preflop?.actionWindowEvidence === "hj_facing_utg_open5" || preflop?.openingEvidence === "first_utg_hand_start" || preflop?.openingEvidence === "hj_after_utg_fold" || preflop?.openingEvidence === "co_after_utg_hj_folds" || preflop?.openingEvidence === "btn_after_utg_hj_co_folds" || preflop?.openingEvidence === "sb_after_utg_hj_co_btn_folds") && bigBlind !== null
       ? preflop.amountToCallBB! * bigBlind : parsedAmountToCall;
     overlayState.street = state?.street ?? "unreadable";
     overlayState.opponentStatsLine = state ? state.seats.filter(s=>s.isOccupied&&!s.isYou&&!s.isFolded).map(s=>{const evidence=opponentStats.profile(s.playerName);return s.playerName+": "+(evidence?evidence.playerProfile.handsObserved+" observed windows / "+evidence.playerProfile.eligibleHands+" eligible hands ("+evidence.statsStorage+")":"identity ambiguous");}).join("; ") : null;
@@ -606,7 +617,8 @@ setInterval(() => {
         table: { potBB: decisionPot === null ? null : decisionPot / bigBlind, board: [], street: "preflop", numOpponentsRemaining: preflop.activeOpponents },
         facingAction: { type: facing, ...(amountToCall > 0 ? { amountBB: amountToCall / bigBlind } : {}) },
         candidateActions: deriveCandidateActions(facing), engineCalculations: {}, dataConfidence: confidence.level, preflop,
-        preflopExecution: buildLivePreflopExecution(read, assessment, liveProofRevision(timelineSnapshot), scoped.openingSize ?? undefined),
+        preflopExecution: { ...buildLivePreflopExecution(read, assessment, liveProofRevision(timelineSnapshot), scoped.openingSize ?? undefined)!,
+          ...(scoped.responseExecution ? { hjResponseWindow: scoped.responseExecution } : {}) },
         potEvidence: { ...assessment.pot, bigBlind },
         opponentContext: { opponents: state.seats.filter(s=>s.isOccupied&&!s.isYou&&!s.isFolded).map(s=>({seat:s.seatNumber,position:positions.get(s.seatNumber)??null,rangeBasis:"Preflop context remains uncertain",rangeConfidence:"low",rangeStatus:"prior_only",...(opponentStats.profile(s.playerName)??{})})) },
       };

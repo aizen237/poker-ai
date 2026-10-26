@@ -86,6 +86,12 @@ export async function getPolicyRecommendation(
     } catch {
       // An explanation outage must not erase or change a supported engine selection.
     }
+    if (packet.preflopExecution?.hjResponseWindow) {
+      const refreshed = assessPacketDecisionProofs(packet, true)!;
+      if (!refreshed.allowed) return { result: null, policy: { ...policy, activation: refreshed },
+        activation: refreshed, decisionSource: "abstained", blocked: true,
+        blockedReason: "scoped_decision_proof", uncertainty: refreshed.reasons };
+    }
     // Provider confidence, alternatives, action and size are never copied over the lock.
     return { result: { ...fixed, reasoning }, policy, ...(activation ? { activation } : {}), decisionSource: "engine_policy", explanationSource };
   }

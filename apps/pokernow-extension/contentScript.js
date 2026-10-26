@@ -5642,6 +5642,20 @@
   var PreflopExecutionSchema = external_exports.object({
     heroIsCurrentToAct: external_exports.boolean(),
     sourceWindowKey: external_exports.string().min(1).max(1e5),
+    /** Projection of the existing facing-open source proof, bound to this packet/epoch. */
+    hjResponseWindow: external_exports.object({
+      profile: external_exports.literal("pokernow-0.1.72-th-4fun-1-2-exact5-v1"),
+      tableId: external_exports.string().min(1),
+      handId: external_exports.string().min(1),
+      heroId: external_exports.string().min(1),
+      heroSeat: external_exports.number().int().positive(),
+      heroCards: external_exports.array(external_exports.string().regex(/^[2-9TJQKA][shdc]$/)).length(2),
+      generation: external_exports.number().int().positive(),
+      sourceCursor: external_exports.number().int().nonnegative(),
+      decisionEpoch: external_exports.string().min(1),
+      receivedAt: external_exports.number().finite(),
+      expiresAt: external_exports.number().finite()
+    }).strict().optional(),
     /** Independent sizing evidence; selected input alone cannot populate this. */
     raiseBounds: external_exports.object({
       source: external_exports.string().min(1),
@@ -5847,6 +5861,197 @@
     };
   }
 
+  // ../../packages/ai-core/dist/preflopResponsePolicy.js
+  var HJ_RESPONSE_POLICY_VERSION = "hj-vs-utg-2.5bb-reference-v1";
+  var HJ_RESPONSE_PROFILE = "pokernow-0.1.72-th-4fun-1-2-exact5-v1";
+  var positions = ["UTG", "HJ", "CO", "BTN", "SB", "BB"];
+  var handTypes = new Set(allHandTypes().map(formatHandType));
+  var text = external_exports.string().trim().min(1).max(2e3);
+  var weight = external_exports.number().finite().min(0).max(1);
+  var depth = external_exports.number().finite().min(100);
+  var allocation = external_exports.discriminatedUnion("action", [
+    external_exports.object({ action: external_exports.literal("FOLD"), frequency: weight }).strict(),
+    external_exports.object({ action: external_exports.literal("CALL"), frequency: weight }).strict(),
+    external_exports.object({
+      action: external_exports.literal("THREE_BET"),
+      frequency: weight,
+      raiseToBB: external_exports.number().finite().gt(2.5)
+    }).strict()
+  ]);
+  var HjResponseReferenceSchema = external_exports.object({
+    schemaVersion: external_exports.literal(1),
+    id: text,
+    version: text,
+    provenance: external_exports.object({
+      kind: external_exports.enum(["verified_reference", "adaptation", "heuristic", "test_fixture"]),
+      url: external_exports.string().url(),
+      node: text,
+      review: external_exports.enum(["pending", "reviewed"]),
+      reviewNotes: text,
+      assumptions: external_exports.array(text).min(1).max(32)
+    }).strict(),
+    referenceSettings: external_exports.object({
+      players: external_exports.literal(6),
+      hero: external_exports.literal("HJ"),
+      opener: external_exports.literal("UTG"),
+      openToBB: external_exports.literal(2.5),
+      anteBB: external_exports.literal(0),
+      startingCapacitiesBB: external_exports.object({ UTG: depth, HJ: depth, CO: depth, BTN: depth, SB: depth, BB: depth }).strict(),
+      // null preserves an unknown source tree; pure FOLD needs no CALL permission.
+      rakeDescription: text,
+      coldCallsAllowed: external_exports.boolean().nullable(),
+      threeBetSizesBB: external_exports.array(external_exports.number().finite().gt(2.5)).max(8)
+    }).strict(),
+    application: external_exports.object({
+      profile: external_exports.literal(HJ_RESPONSE_PROFILE),
+      minCapacityBB: external_exports.number().finite().min(100),
+      maxCapacityBB: external_exports.number().finite().min(100),
+      /** Required even for an exact reference: why its rake/tree/depth fits. */
+      rationale: text
+    }).strict(),
+    entries: external_exports.array(external_exports.object({
+      hand: external_exports.string().refine((h) => handTypes.has(h), "Expected canonical hand type"),
+      allocations: external_exports.array(allocation).min(1).max(10)
+    }).strict()).min(1).max(169)
+  }).strict().superRefine((r, ctx) => {
+    const issue = (message) => ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message });
+    const { minCapacityBB: min, maxCapacityBB: max } = r.application;
+    if (max < min)
+      issue("Reversed depth coverage.");
+    const nativeDepths = Object.values(r.referenceSettings.startingCapacitiesBB);
+    if (r.provenance.kind === "verified_reference" && (min !== Math.min(...nativeDepths) || max !== Math.max(...nativeDepths)))
+      issue("Depth coverage different from the native stack vector must be explicitly labeled an adaptation.");
+    if (new Set(r.entries.map((e) => e.hand)).size !== r.entries.length)
+      issue("Duplicate hand entries.");
+    if (new Set(r.referenceSettings.threeBetSizesBB).size !== r.referenceSettings.threeBetSizesBB.length)
+      issue("Duplicate reference sizes.");
+    for (const e of r.entries) {
+      if (Math.abs(e.allocations.reduce((sum, a) => sum + a.frequency, 0) - 1) > 1e-9)
+        issue(`Frequencies for ${e.hand} must sum to one; do not invent a residual fold frequency.`);
+      const keys = e.allocations.map((a) => a.action === "THREE_BET" ? `${a.action}:${a.raiseToBB}` : a.action);
+      if (new Set(keys).size !== keys.length)
+        issue(`Duplicate action/size for ${e.hand}.`);
+      if (e.allocations.some((a) => a.action === "CALL" && a.frequency > 0) && !r.referenceSettings.coldCallsAllowed)
+        issue("CALL frequencies contradict the reference tree.");
+      if (e.allocations.some((a) => a.action === "THREE_BET" && !r.referenceSettings.threeBetSizesBB.includes(a.raiseToBB)))
+        issue("3-bet entry lacks a documented reference size.");
+    }
+  });
+  function reviewHjResponseReference(input, reference) {
+    const result = {
+      policyVersion: HJ_RESPONSE_POLICY_VERSION,
+      status: "invalid_context",
+      hand: null,
+      strategyClass: null,
+      raiseToBB: null,
+      allocations: null,
+      reference: null,
+      chosenAction: null,
+      liveAuthorized: false,
+      reasons: []
+    };
+    const fail = (status, reason) => ({ ...result, status, reasons: [reason] });
+    const parsed = PreflopInputSchema.safeParse(input.preflop);
+    const cards = external_exports.array(external_exports.object({ rank: external_exports.number().int().min(2).max(14), suit: external_exports.enum(["s", "h", "d", "c"]) }).strict()).length(2).safeParse(input.holeCards);
+    if (!parsed.success || !cards.success || new Set(cards.data.map((c) => `${c.rank}${c.suit}`)).size !== 2)
+      return fail("invalid_context", "Invalid response context/cards.");
+    let context;
+    try {
+      context = buildPreflopContext(parsed.data);
+    } catch {
+      return fail("invalid_context", "Response seats or context are contradictory.");
+    }
+    const [a, b] = cards.data;
+    result.hand = formatHandType({
+      highRank: a.rank >= b.rank ? a.rank : b.rank,
+      lowRank: a.rank >= b.rank ? b.rank : a.rank,
+      suited: a.suit === b.suit
+    });
+    const utg = context.players.find((p) => p.position === "UTG"), action2 = context.actions[0];
+    if (context.actionWindowEvidence !== "hj_facing_utg_open5" || context.openingEvidence !== void 0 || context.situation !== "facing_open" || context.heroPosition !== "HJ" || context.playersDealtIn !== 6 || context.players.length !== 6 || positions.some((pos) => context.players.filter((p) => p.position === pos).length !== 1) || context.historyCoverage !== "complete" || context.contributionMeaning !== "street_total" || context.tournamentContext !== "chip_ev_only" || context.amountToCallBB !== 2.5 || context.actions.length !== 1 || action2?.action !== "raise" || action2.wagerAction !== "raise" || action2.seat !== utg?.seat || action2.totalContributionBB !== 2.5 || context.players.some((p) => p.folded || p.allIn || p.remainingStackBB === null || p.contributionBB !== (p.position === "UTG" ? 2.5 : p.position === "SB" ? 0.5 : p.position === "BB" ? 1 : 0)))
+      return fail("invalid_context", "Only the certified six-player HJ first response to UTG 2.5BB is covered.");
+    const capacities = context.players.map((p) => p.remainingStackBB + p.contributionBB);
+    if (capacities.some((n) => n < 100))
+      return fail("invalid_context", "Every starting capacity must be known and at least 100BB.");
+    if (reference === null)
+      return fail("reference_missing", "No reviewed HJ-versus-UTG 2.5BB response reference is installed. Frequencies, cold-call tree, rake/profile applicability and bounded stack coverage are required; no fallback FOLD.");
+    const checked = HjResponseReferenceSchema.safeParse(reference);
+    if (!checked.success)
+      return fail("invalid_reference", "Response reference metadata, coverage or frequencies are invalid.");
+    const r = checked.data;
+    result.reference = { id: r.id, version: r.version, provenance: r.provenance, referenceSettings: r.referenceSettings, application: r.application };
+    if (r.provenance.kind === "verified_reference" && context.players.some((p) => p.remainingStackBB + p.contributionBB !== r.referenceSettings.startingCapacitiesBB[p.position]))
+      return fail("out_of_scope", "Exact reference requires its full position-specific starting stack vector; an interval is not extrapolation permission.");
+    if (capacities.some((n) => n < r.application.minCapacityBB || n > r.application.maxCapacityBB))
+      return fail("out_of_scope", "Stack capacities lie outside the explicitly reviewed reference/adaptation interval.");
+    const entry = r.entries.find((e) => e.hand === result.hand);
+    if (!entry)
+      return fail("uncovered", "Hand is not explicitly covered; absence is not FOLD.");
+    result.allocations = entry.allocations;
+    const positive = entry.allocations.filter((a2) => a2.frequency > 0);
+    if (positive.length !== 1 || positive[0].frequency !== 1)
+      return { ...result, status: "mixed", reasons: ["Mixed frequencies/sizes retained; no pure action or random sample selected."] };
+    const pure = positive[0];
+    return {
+      ...result,
+      status: "pure",
+      strategyClass: pure.action,
+      raiseToBB: pure.action === "THREE_BET" ? pure.raiseToBB : null,
+      reasons: ["Reference classification only. Review status and source/action legality must be independently enforced before any live activation."]
+    };
+  }
+  var liveReference = {
+    schemaVersion: 1,
+    id: "hj-utg-72o-conservative-fold",
+    version: "1",
+    provenance: {
+      kind: "heuristic",
+      review: "reviewed",
+      url: "https://github.com/jensbaagaard/poker-practice/blob/590b8f65a9728a99ab8fb5d7a4ec9dc40a65225e/data/openSourcePokerData/Cash_100_GTO.json",
+      node: "3BetHJvsLJ[72o]=0; CallHJvsLJ[72o]=0; both 169-hand nodes present. Six-max LJ maps to UTG.",
+      reviewNotes: "Reviewed explicit zeros, not missing-hand defaults. Corroborated by GTO MAX 2026-10-16 HJ vs first-seat 3bet-or-fold chart. Conservative 72o-only adaptation; not exact GTO or solver-certified.",
+      assumptions: [
+        "Source: 100BB, six-max, no ante, 2.5BB open. Poker Trainer extraction is documented; original solver, rake rate/cap and solve accuracy are unverified.",
+        "The HJ-vs-LJ CALL node is all-zero; whether cold calls were available in the original solve is unknown. A named CALL node does not prove that tree permission.",
+        "Corroboration: https://gtomax.ai/free-poker-rta-charts/charts.json; raked 100BB, restricted 3bet-or-fold tree. This does not certify an unraked strategy.",
+        "Application: unraked normal play-money Hold'em, no ante/straddle, six dealt-in players, all starting capacities 100-150BB; existing source checks also require at least 100BB remaining.",
+        "Only 72o: unpaired, offsuit, disconnected, no ace/king blocker; conservatively decline cold entry against an early open with four players behind. No assumption that every raked fold transfers to no rake.",
+        "Population baseline only; no exploit against an unusually wide opener or opponents overfolding to reraises. No claimed EV margin or depth-invariance proof."
+      ]
+    },
+    referenceSettings: {
+      players: 6,
+      hero: "HJ",
+      opener: "UTG",
+      openToBB: 2.5,
+      anteBB: 0,
+      startingCapacitiesBB: { UTG: 100, HJ: 100, CO: 100, BTN: 100, SB: 100, BB: 100 },
+      rakeDescription: "Unspecified by the extracted dataset; not verified as unraked.",
+      coldCallsAllowed: null,
+      threeBetSizesBB: [7.5]
+    },
+    application: {
+      profile: HJ_RESPONSE_PROFILE,
+      minCapacityBB: 100,
+      maxCapacityBB: 150,
+      rationale: "Explicit conservative heuristic for 72o only across a bounded ordinary deep-stack interval and no rake. Weak disconnected offsuit cold entry is declined; additional depth/rake changes are not claimed solved. Other hands and capacities abstain."
+    },
+    entries: [{ hand: "72o", allocations: [{ action: "FOLD", frequency: 1 }] }]
+  };
+  function isReviewedHjFold(review) {
+    return review.status === "pure" && review.strategyClass === "FOLD" && review.reference?.provenance.review === "reviewed" && review.reference.provenance.kind !== "test_fixture";
+  }
+  function inspectLiveHjResponseStrategy(input) {
+    return reviewHjResponseReference(input, liveReference);
+  }
+  function liveHjFoldReview(packet) {
+    const r = inspectLiveHjResponseStrategy({ preflop: packet.preflop, holeCards: packet.hero.holeCards });
+    const p = packet.preflop, e = packet.preflopExecution, w = e?.hjResponseWindow, now = Date.now();
+    if (!isReviewedHjFold(r) || !p || !w || !e?.heroIsCurrentToAct || !e.sourceWindowKey || packet.table.street !== "preflop" || packet.table.board.length || packet.hero.position !== "HJ" || p.heroPosition !== packet.hero.position || p.heroStackBB !== packet.hero.stackBB || packet.table.numOpponentsRemaining !== 5 || packet.facingAction.type !== "raise" || packet.facingAction.amountBB !== 2.5 || !packet.candidateActions.includes("FOLD") || w.profile !== HJ_RESPONSE_PROFILE || w.heroSeat !== p.heroSeat || w.heroCards.join(",") !== packet.hero.holeCards.map((c) => `${"23456789TJQKA"[c.rank - 2]}${c.suit}`).sort().join(",") || packet.potEvidence?.bigBlind !== 2 || packet.decisionProofs?.handId !== `${w.tableId}:hand:${w.handId}` || packet.decisionProofs.connectionGeneration !== w.generation || packet.decisionProofs.decisionEpoch !== w.decisionEpoch || w.expiresAt !== w.receivedAt + 1e4 || now < w.receivedAt || now >= w.expiresAt)
+      return null;
+    return r;
+  }
+
   // ../../packages/ai-core/dist/decisionProofs.js
   var PROOF_SCOPES = [
     "decisionState",
@@ -5885,13 +6090,15 @@
   });
   function assessDecisionProofs(input, evidence) {
     const type = input.street === null ? "unclassified" : input.street === "preflop" ? input.preflopSituation === "unopened" || input.preflopRfiCandidate ? "preflop_unopened" : input.preflopSituation === "facing_open" ? "preflop_facing_open" : "preflop_unclassified" : input.opponents === null ? "unclassified" : input.opponents !== 1 ? "multiway_postflop" : input.amountToCall === null ? "unclassified" : input.amountToCall > 0 ? "heads_up_call_fold" : "heads_up_bet_check";
-    const required = type === "preflop_unopened" ? ["decisionState", "connection", "actionWindow", "position", "roster", "blinds", "stack", "callCost"] : ["decisionState", "connection", "actionWindow", "blinds", "stack", "callCost", "pot", "eligibility", "accounting", "legalActions"];
+    const responseFold = type === "preflop_facing_open" && input.reviewedHjFold === true;
+    const required = type === "preflop_unopened" || responseFold ? ["decisionState", "connection", "actionWindow", "position", "roster", "blinds", "stack", "callCost"] : ["decisionState", "connection", "actionWindow", "blinds", "stack", "callCost", "pot", "eligibility", "accounting", "legalActions"];
     if (type === "preflop_unopened") {
       if (input.preflopAction !== "FOLD")
         required.push("raiseLegality");
-    } else if (input.street === "preflop")
-      required.push("position", "roster", "raiseLegality", "reopening");
-    else {
+    } else if (input.street === "preflop") {
+      if (!responseFold)
+        required.push("position", "roster", "raiseLegality", "reopening");
+    } else {
       required.push("rangeInput", "equity", "terminal", "reopening");
       if (input.amountToCall === 0 || input.aggressionPossible !== false)
         required.push("raiseLegality");
@@ -5906,7 +6113,7 @@
       }
       return { ...proof, permits: proof.status === "proven" && required.includes(scope) ? [type] : [] };
     });
-    const failed = proofs.filter((p) => required.includes(p.scope) && p.status !== "proven");
+    const failed = proofs.filter((p) => required.includes(p.scope) && p.status !== "proven" || responseFold && p.status === "contradicted");
     const contradicted = failed.some((p) => p.status === "contradicted");
     const unsupported = type === "multiway_postflop";
     return {
@@ -5960,7 +6167,8 @@
     if (envelope && (!envelope.handId || envelope.connectionGeneration === null))
       replace("connection", "insufficient", "Hand identity/connection generation is missing from the scoped evidence.");
     const rfiCandidate = packet.table.street === "preflop" && (packet.preflop?.situation === "unopened" || !!packet.preflopExecution && packet.preflop?.situation === "unknown");
-    if (!rfiCandidate && packet.dataConfidence !== "high")
+    const responseFold = liveHjFoldReview(packet) !== null;
+    if (!rfiCandidate && !responseFold && packet.dataConfidence !== "high")
       replace("decisionState", "insufficient", "Existing table-read confidence gate is not high.");
     if (!packet.potEvidence?.isPotSemanticsVerified || packet.potEvidence.decisionPot === null || !packet.potEvidence.decisionPotSource) {
       replace("pot", "insufficient", "No independently verified contestable decision pot.");
@@ -5992,13 +6200,14 @@
       preflopSituation: preflop?.situation ?? null,
       preflopRfiCandidate: rfiCandidate,
       preflopAction: unopenedChartAction(packet),
+      reviewedHjFold: responseFold,
       aggressionPossible: ctx?.legal.aggressionReopened ?? null
     }, evidence);
     if (packet.table.street === "preflop" && activation.state !== "unsafe") {
-      if (!rfiCandidate) {
+      if (!rfiCandidate && !responseFold) {
         activation.allowed = false;
         activation.state = "unsupported";
-        activation.reasons.push("No deterministic preflop response model for this situation; only the scoped six-max 100BB+ unopened reference is implemented.");
+        activation.reasons.push("No deterministic preflop response model for this situation: the reviewed HJ pure-FOLD subset does not match this packet/window. Other responses remain unsupported.");
       }
     } else if (packet.table.street !== "river" && activation.state !== "unsafe") {
       activation.allowed = false;
@@ -6217,6 +6426,18 @@
       result.llmMayChoose = false;
       if (!activation)
         return stop("Scoped proofs are mandatory for the deterministic preflop reference.");
+      const response = liveHjFoldReview(packet);
+      if (response) {
+        result.status = "selected";
+        result.chosenAction = "FOLD";
+        result.strategySource = `${response.reference.id}@${response.reference.version}: reviewed conservative heuristic`;
+        result.ruleExplanation = "Fold 72o facing UTG's 5-chip open from HJ. Reviewed conservative heuristic for six players at 100-150BB starting capacity, unraked 1/2 chips; not exact GTO or a solved EV comparison.";
+        result.assumptions = response.reference.provenance.assumptions;
+        result.confidence = "medium";
+        result.equitySource = "not used by the pure-FOLD reference";
+        result.foldEquitySource = "not assumed";
+        return result;
+      }
       const reference = evaluatePreflopReference(packet);
       result.strategySource = reference.strategySource;
       result.reasons.push(...reference.reasons);
@@ -6566,148 +6787,6 @@
   }
   function lockedEngineRecommendation(policy) {
     return policy.status === "selected" && policy.activation?.allowed === true && policy.llmMayChoose === false && policy.chosenAction !== null ? engineExplanation(policy) : null;
-  }
-
-  // ../../packages/ai-core/dist/preflopResponsePolicy.js
-  var HJ_RESPONSE_POLICY_VERSION = "hj-vs-utg-2.5bb-reference-v1";
-  var HJ_RESPONSE_PROFILE = "pokernow-0.1.72-th-4fun-1-2-exact5-v1";
-  var positions = ["UTG", "HJ", "CO", "BTN", "SB", "BB"];
-  var handTypes = new Set(allHandTypes().map(formatHandType));
-  var text = external_exports.string().trim().min(1).max(2e3);
-  var weight = external_exports.number().finite().min(0).max(1);
-  var depth = external_exports.number().finite().min(100);
-  var allocation = external_exports.discriminatedUnion("action", [
-    external_exports.object({ action: external_exports.literal("FOLD"), frequency: weight }).strict(),
-    external_exports.object({ action: external_exports.literal("CALL"), frequency: weight }).strict(),
-    external_exports.object({
-      action: external_exports.literal("THREE_BET"),
-      frequency: weight,
-      raiseToBB: external_exports.number().finite().gt(2.5)
-    }).strict()
-  ]);
-  var HjResponseReferenceSchema = external_exports.object({
-    schemaVersion: external_exports.literal(1),
-    id: text,
-    version: text,
-    provenance: external_exports.object({
-      kind: external_exports.enum(["verified_reference", "adaptation", "heuristic", "test_fixture"]),
-      url: external_exports.string().url(),
-      node: text,
-      review: external_exports.enum(["pending", "reviewed"]),
-      reviewNotes: text,
-      assumptions: external_exports.array(text).min(1).max(32)
-    }).strict(),
-    referenceSettings: external_exports.object({
-      players: external_exports.literal(6),
-      hero: external_exports.literal("HJ"),
-      opener: external_exports.literal("UTG"),
-      openToBB: external_exports.literal(2.5),
-      anteBB: external_exports.literal(0),
-      startingCapacitiesBB: external_exports.object({ UTG: depth, HJ: depth, CO: depth, BTN: depth, SB: depth, BB: depth }).strict(),
-      rakeDescription: text,
-      coldCallsAllowed: external_exports.boolean(),
-      threeBetSizesBB: external_exports.array(external_exports.number().finite().gt(2.5)).max(8)
-    }).strict(),
-    application: external_exports.object({
-      profile: external_exports.literal(HJ_RESPONSE_PROFILE),
-      minCapacityBB: external_exports.number().finite().min(100),
-      maxCapacityBB: external_exports.number().finite().min(100),
-      /** Required even for an exact reference: why its rake/tree/depth fits. */
-      rationale: text
-    }).strict(),
-    entries: external_exports.array(external_exports.object({
-      hand: external_exports.string().refine((h) => handTypes.has(h), "Expected canonical hand type"),
-      allocations: external_exports.array(allocation).min(1).max(10)
-    }).strict()).min(1).max(169)
-  }).strict().superRefine((r, ctx) => {
-    const issue = (message) => ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message });
-    const { minCapacityBB: min, maxCapacityBB: max } = r.application;
-    if (max < min)
-      issue("Reversed depth coverage.");
-    const nativeDepths = Object.values(r.referenceSettings.startingCapacitiesBB);
-    if (r.provenance.kind === "verified_reference" && (min !== Math.min(...nativeDepths) || max !== Math.max(...nativeDepths)))
-      issue("Depth coverage different from the native stack vector must be explicitly labeled an adaptation.");
-    if (new Set(r.entries.map((e) => e.hand)).size !== r.entries.length)
-      issue("Duplicate hand entries.");
-    if (new Set(r.referenceSettings.threeBetSizesBB).size !== r.referenceSettings.threeBetSizesBB.length)
-      issue("Duplicate reference sizes.");
-    for (const e of r.entries) {
-      if (Math.abs(e.allocations.reduce((sum, a) => sum + a.frequency, 0) - 1) > 1e-9)
-        issue(`Frequencies for ${e.hand} must sum to one; do not invent a residual fold frequency.`);
-      const keys = e.allocations.map((a) => a.action === "THREE_BET" ? `${a.action}:${a.raiseToBB}` : a.action);
-      if (new Set(keys).size !== keys.length)
-        issue(`Duplicate action/size for ${e.hand}.`);
-      if (e.allocations.some((a) => a.action === "CALL" && a.frequency > 0) && !r.referenceSettings.coldCallsAllowed)
-        issue("CALL frequencies contradict the reference tree.");
-      if (e.allocations.some((a) => a.action === "THREE_BET" && !r.referenceSettings.threeBetSizesBB.includes(a.raiseToBB)))
-        issue("3-bet entry lacks a documented reference size.");
-    }
-  });
-  function reviewHjResponseReference(input, reference) {
-    const result = {
-      policyVersion: HJ_RESPONSE_POLICY_VERSION,
-      status: "invalid_context",
-      hand: null,
-      strategyClass: null,
-      raiseToBB: null,
-      allocations: null,
-      reference: null,
-      chosenAction: null,
-      liveAuthorized: false,
-      reasons: []
-    };
-    const fail = (status, reason) => ({ ...result, status, reasons: [reason] });
-    const parsed = PreflopInputSchema.safeParse(input.preflop);
-    const cards = external_exports.array(external_exports.object({ rank: external_exports.number().int().min(2).max(14), suit: external_exports.enum(["s", "h", "d", "c"]) }).strict()).length(2).safeParse(input.holeCards);
-    if (!parsed.success || !cards.success || new Set(cards.data.map((c) => `${c.rank}${c.suit}`)).size !== 2)
-      return fail("invalid_context", "Invalid response context/cards.");
-    let context;
-    try {
-      context = buildPreflopContext(parsed.data);
-    } catch {
-      return fail("invalid_context", "Response seats or context are contradictory.");
-    }
-    const [a, b] = cards.data;
-    result.hand = formatHandType({
-      highRank: a.rank >= b.rank ? a.rank : b.rank,
-      lowRank: a.rank >= b.rank ? b.rank : a.rank,
-      suited: a.suit === b.suit
-    });
-    const utg = context.players.find((p) => p.position === "UTG"), action2 = context.actions[0];
-    if (context.actionWindowEvidence !== "hj_facing_utg_open5" || context.openingEvidence !== void 0 || context.situation !== "facing_open" || context.heroPosition !== "HJ" || context.playersDealtIn !== 6 || context.players.length !== 6 || positions.some((pos) => context.players.filter((p) => p.position === pos).length !== 1) || context.historyCoverage !== "complete" || context.contributionMeaning !== "street_total" || context.tournamentContext !== "chip_ev_only" || context.amountToCallBB !== 2.5 || context.actions.length !== 1 || action2?.action !== "raise" || action2.wagerAction !== "raise" || action2.seat !== utg?.seat || action2.totalContributionBB !== 2.5 || context.players.some((p) => p.folded || p.allIn || p.remainingStackBB === null || p.contributionBB !== (p.position === "UTG" ? 2.5 : p.position === "SB" ? 0.5 : p.position === "BB" ? 1 : 0)))
-      return fail("invalid_context", "Only the certified six-player HJ first response to UTG 2.5BB is covered.");
-    const capacities = context.players.map((p) => p.remainingStackBB + p.contributionBB);
-    if (capacities.some((n) => n < 100))
-      return fail("invalid_context", "Every starting capacity must be known and at least 100BB.");
-    if (reference === null)
-      return fail("reference_missing", "No reviewed HJ-versus-UTG 2.5BB response reference is installed. Frequencies, cold-call tree, rake/profile applicability and bounded stack coverage are required; no fallback FOLD.");
-    const checked = HjResponseReferenceSchema.safeParse(reference);
-    if (!checked.success)
-      return fail("invalid_reference", "Response reference metadata, coverage or frequencies are invalid.");
-    const r = checked.data;
-    result.reference = { id: r.id, version: r.version, provenance: r.provenance, referenceSettings: r.referenceSettings, application: r.application };
-    if (r.provenance.kind === "verified_reference" && context.players.some((p) => p.remainingStackBB + p.contributionBB !== r.referenceSettings.startingCapacitiesBB[p.position]))
-      return fail("out_of_scope", "Exact reference requires its full position-specific starting stack vector; an interval is not extrapolation permission.");
-    if (capacities.some((n) => n < r.application.minCapacityBB || n > r.application.maxCapacityBB))
-      return fail("out_of_scope", "Stack capacities lie outside the explicitly reviewed reference/adaptation interval.");
-    const entry = r.entries.find((e) => e.hand === result.hand);
-    if (!entry)
-      return fail("uncovered", "Hand is not explicitly covered; absence is not FOLD.");
-    result.allocations = entry.allocations;
-    const positive = entry.allocations.filter((a2) => a2.frequency > 0);
-    if (positive.length !== 1 || positive[0].frequency !== 1)
-      return { ...result, status: "mixed", reasons: ["Mixed frequencies/sizes retained; no pure action or random sample selected."] };
-    const pure = positive[0];
-    return {
-      ...result,
-      status: "pure",
-      strategyClass: pure.action,
-      raiseToBB: pure.action === "THREE_BET" ? pure.raiseToBB : null,
-      reasons: ["Reference classification only. Review status and source/action legality must be independently enforced before any live activation."]
-    };
-  }
-  function inspectLiveHjResponseStrategy(input) {
-    return reviewHjResponseReference(input, null);
   }
 
   // ../../packages/browser-reader/dist/cardParsing.js
@@ -8402,7 +8481,7 @@
           players: response.players.map((p) => ({
             seat: p.seat,
             position: p.position,
-            remainingStackBB: state.seats.find((s) => s.seatNumber === p.seat).stack / bigBlind,
+            remainingStackBB: coResponse ? state.seats.find((s) => s.seatNumber === p.seat).stack / bigBlind : (p.sourceStack - p.contribution) / bigBlind,
             contributionBB: p.contribution / bigBlind,
             folded: false,
             allIn: false
@@ -8421,7 +8500,7 @@
           })),
           historyNotes: [
             `Complete only for the closed ${proof.scope} decision prefix. Global historyComplete=false.`,
-            "Response strategy, re-raise legality/grid/reopening and contestable pot remain unproven."
+            coResponse ? "Response strategy, re-raise legality/grid/reopening and contestable pot remain unproven." : "Response strategy is independently reviewed; re-raise legality/grid/reopening and contestable pot remain unproven."
           ],
           tournamentContext: "chip_ev_only"
         });
@@ -9832,6 +9911,30 @@
         THREE_BET: ["reviewed_response_strategy_and_size", "raise_rights", "minimum_and_maximum_totals", "chip_grid"]
       }
     } : null;
+    const responseFold = responseStrategy !== null && isReviewedHjFold(responseStrategy);
+    if (responseFold) responseStrategy.remainingRequirements.FOLD = [];
+    if (responseFold && facing && pot.mainPot !== null && pot.displayedTotalPot !== null && pot.displayedTotalPot !== pot.mainPot + facing.players.reduce((sum, p) => sum + p.contribution, 0))
+      set(
+        "pot",
+        "contradicted",
+        "Current pot displays + source-proven street totals",
+        ["Pot displays contradict collected pot plus the certified response contributions."]
+      );
+    const responseExecution = facing ? {
+      profile: "pokernow-0.1.72-th-4fun-1-2-exact5-v1",
+      tableId: facing.tableId,
+      handId: facing.handId,
+      heroId: facing.heroId,
+      heroSeat: facing.heroSeat,
+      heroCards: [...facing.heroCards].sort(),
+      generation: facing.generation,
+      sourceCursor: facing.cursor,
+      decisionEpoch: epoch,
+      receivedAt: facing.receivedAt,
+      expiresAt: source.facingOpenProof.expiresAt
+    } : void 0;
+    if (packet?.preflopExecution?.hjResponseWindow && JSON.stringify(packet.preflopExecution.hjResponseWindow) !== JSON.stringify(responseExecution))
+      set("decisionState", "contradicted", "Facing-open source/packet cross-check", ["Response window belongs to a different source, actor, cards, or epoch."]);
     const response = facing ?? coFacing;
     const responseWindow = facing ? source.facingOpenProof : coFacing ? source.coFacingOpenProof : null;
     if (response && responseWindow) {
@@ -9862,19 +9965,20 @@
       opponents: assessment.activeOpponents,
       amountToCall: assessment.amountToCall,
       preflopSituation: preflop?.situation ?? null,
-      preflopRfiCandidate: unopened?.candidate ?? false,
+      preflopRfiCandidate: !facing && (unopened?.candidate ?? false),
       preflopAction: chartAction,
+      reviewedHjFold: responseFold,
       aggressionPossible: assessment.legality.aggressionReopened
     }, proofs);
     if (facing && callLegality?.ui.status === "contradicted") {
       activation.allowed = false;
       activation.state = "unsafe";
       activation.reasons.push(...callLegality.ui.reasons);
-    } else if (facing && activation.state !== "unsafe") {
+    } else if (facing && !responseFold && activation.state !== "unsafe") {
       activation.allowed = false;
       activation.state = "unsupported";
       activation.reasons.push(...responseStrategy.reasons);
-      activation.reasons.push("HJ response activation remains disabled; missing CALL/3-BET legality must never substitute FOLD.");
+      activation.reasons.push("No reviewed pure FOLD for this hand/profile; missing CALL/3-BET legality must never substitute FOLD.");
     } else if (coFacing && activation.state !== "unsafe") {
       activation.allowed = false;
       activation.state = "unsupported";
@@ -9887,6 +9991,7 @@
       openingSize: opening.size,
       responseWindow,
       responseStrategy,
+      responseExecution,
       callLegality,
       // Separate diagnostic; never promotes a general decision scope or permission.
       postflopCall: flopCallEvidence(read, assessment, timeline, epoch),
@@ -10017,7 +10122,7 @@
         candidateSizeStatus: packet?.policyContext ? "see policy reasons and verified bounds" : "withheld: no verified policy legality/pot inputs",
         policy,
         preflopExecution: assessment.state?.street === "preflop" ? buildLivePreflopExecution(read, assessment, handTimeline2 ? liveProofRevision(handTimeline2) : "source unavailable") : null,
-        preflopStrategyScope: "Conditional six-max 100BB+ RFI reference, 2.5BB fixed opening convention. Facing-open response unsupported. Cards/turn/window/connection/roster/position/blinds/stacks need independent proofs; RAISE also needs size legality. Contestable pot, EV, rake and postflop eligibility are not chart prerequisites.",
+        preflopStrategyScope: "Conditional six-max 100BB+ RFI reference, 2.5BB fixed opening convention. HJ versus accepted UTG open5: 72o FOLD only, reviewed conservative unraked 100-150BB starting-capacity heuristic, not exact GTO. Existing source checks still require 100BB remaining. Cards/turn/window/connection/roster/position/blinds/stacks need independent proofs; RAISE also needs size legality. Pot EV, CALL permission and raise sizing are not pure-FOLD prerequisites; contradictions still block.",
         potEvidence: packet?.potEvidence ?? null,
         engineCalculations: packet?.engineCalculations ?? null
       },
@@ -11749,7 +11854,7 @@
       policy = evaluateDecisionPolicy(packet);
       locked = lockedEngineRecommendation(policy);
       if (locked && requestKey === lastRecommendationRequestKey) {
-        bindDisplayLifetime(requestKey);
+        bindDisplayLifetime(requestKey, packet);
         overlayState.aiResult = {
           ...locked,
           action: locked.action === "RAISE" && packet.preflopExecution?.exactOpeningSize ? "RAISE TO 5 CHIPS (2.5 BB)" : locked.action === "RAISE" && policy.raiseToBB !== null ? `RAISE TO ${policy.raiseToBB} BB` : locked.action + (locked.sizingBB === void 0 ? "" : ` ${locked.sizingBB}BB additional`)
@@ -11774,7 +11879,7 @@
       }
       const latest = readLiveTable();
       const latestFingerprint = JSON.stringify([decisionFingerprint(location.origin + location.pathname, latest.raw, latest.context, latest.raiseControl), liveProofRevision(handTimeline.snapshot())]);
-      if (requestKey !== decisionRequestKey(requestSequence, latestFingerprint)) {
+      if (requestKey !== decisionRequestKey(requestSequence, latestFingerprint) || !responseProofStillCurrent(packet, latest)) {
         lastRecommendationRequestKey = null;
         overlayState.aiResult = null;
         overlayState.aiStatus = "blocked";
@@ -11883,6 +11988,19 @@
   }
   var displayLifetime = null;
   var expiryTimer;
+  function responseProofStillCurrent(packet, read) {
+    if (!packet.preflopExecution?.hjResponseWindow) return true;
+    const assessment = assessLiveState(read.raw, read.context), timeline = handTimeline.snapshot();
+    const preflop = buildLivePreflopContext(assessment, actionHistory, timeline, read);
+    return buildLiveDecisionProofs(
+      read,
+      assessment,
+      timeline,
+      preflop,
+      packet.decisionProofs.decisionEpoch,
+      packet
+    ).activation.allowed;
+  }
   function displaySourceBinding() {
     const revision = JSON.parse(liveProofRevision(handTimeline.snapshot()));
     delete revision.firstUtg;
@@ -11890,6 +12008,7 @@
     delete revision.co;
     delete revision.btn;
     delete revision.sb;
+    delete revision.facingOpen;
     return JSON.stringify(revision);
   }
   function clearDisplayLifetime() {
@@ -11897,23 +12016,24 @@
     if (expiryTimer !== void 0) window.clearTimeout(expiryTimer);
     expiryTimer = void 0;
   }
-  function bindDisplayLifetime(requestKey) {
+  function bindDisplayLifetime(requestKey, packet) {
     clearDisplayLifetime();
     const source = handTimeline.snapshot().sourceStatus;
-    const proof = source.firstUtgProof ?? source.hjProof ?? source.coProof ?? source.btnProof ?? source.sbProof;
+    const proof = source.firstUtgProof ?? source.hjProof ?? source.coProof ?? source.btnProof ?? source.sbProof ?? source.facingOpenProof;
     if (!proof || lastDomStateJson === null) return;
     displayLifetime = {
       requestKey,
       receivedAt: proof.witness.receivedAt,
       expiresAt: proof.expiresAt,
       dom: lastDomStateJson,
-      source: displaySourceBinding()
+      source: displaySourceBinding(),
+      ...packet.preflopExecution?.hjResponseWindow ? { responsePacket: packet } : {}
     };
     expiryTimer = window.setTimeout(refreshFreshnessDisplay, Math.max(0, displayLifetime.expiresAt - Date.now()));
   }
   function refreshDisplayLifetime() {
     if (!displayLifetime) return;
-    if (displayLifetime.dom !== lastDomStateJson || displayLifetime.source !== displaySourceBinding() || Date.now() < displayLifetime.receivedAt || Date.now() < displayLifetime.expiresAt && !(handTimeline.snapshot().sourceStatus.firstUtgProof ?? handTimeline.snapshot().sourceStatus.hjProof ?? handTimeline.snapshot().sourceStatus.coProof ?? handTimeline.snapshot().sourceStatus.btnProof ?? handTimeline.snapshot().sourceStatus.sbProof)) {
+    if (displayLifetime.dom !== lastDomStateJson || displayLifetime.source !== displaySourceBinding() || Date.now() < displayLifetime.receivedAt || Date.now() < displayLifetime.expiresAt && !(handTimeline.snapshot().sourceStatus.firstUtgProof ?? handTimeline.snapshot().sourceStatus.hjProof ?? handTimeline.snapshot().sourceStatus.coProof ?? handTimeline.snapshot().sourceStatus.btnProof ?? handTimeline.snapshot().sourceStatus.sbProof ?? handTimeline.snapshot().sourceStatus.facingOpenProof)) {
       clearDisplayLifetime();
       overlayState.aiResult = null;
       overlayState.policyLine = null;
@@ -11934,7 +12054,7 @@
     try {
       const read = readLiveTable();
       const dom = decisionFingerprint(location.origin + location.pathname, read.raw, read.context, read.raiseControl);
-      if (dom !== displayLifetime.dom) {
+      if (dom !== displayLifetime.dom || displayLifetime.responsePacket && Date.now() < displayLifetime.expiresAt && !responseProofStillCurrent(displayLifetime.responsePacket, read)) {
         clearDisplayLifetime();
         lastRecommendationRequestKey = null;
         overlayState.aiResult = null;
@@ -11989,7 +12109,7 @@
         lastRecommendationRequestKey = null;
         requestSequence++;
         const { state, confidence, bigBlind, amountToCall: parsedAmountToCall, positions: positions2, decisionPot } = assessment;
-        const amountToCall = (preflop?.openingEvidence === "first_utg_hand_start" || preflop?.openingEvidence === "hj_after_utg_fold" || preflop?.openingEvidence === "co_after_utg_hj_folds" || preflop?.openingEvidence === "btn_after_utg_hj_co_folds" || preflop?.openingEvidence === "sb_after_utg_hj_co_btn_folds") && bigBlind !== null ? preflop.amountToCallBB * bigBlind : parsedAmountToCall;
+        const amountToCall = (preflop?.actionWindowEvidence === "hj_facing_utg_open5" || preflop?.openingEvidence === "first_utg_hand_start" || preflop?.openingEvidence === "hj_after_utg_fold" || preflop?.openingEvidence === "co_after_utg_hj_folds" || preflop?.openingEvidence === "btn_after_utg_hj_co_folds" || preflop?.openingEvidence === "sb_after_utg_hj_co_btn_folds") && bigBlind !== null ? preflop.amountToCallBB * bigBlind : parsedAmountToCall;
         overlayState.street = state?.street ?? "unreadable";
         overlayState.opponentStatsLine = state ? state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded).map((s) => {
           const evidence = opponentStats.profile(s.playerName);
@@ -12042,7 +12162,10 @@
             engineCalculations: {},
             dataConfidence: confidence.level,
             preflop,
-            preflopExecution: buildLivePreflopExecution(read, assessment, liveProofRevision(timelineSnapshot), scoped.openingSize ?? void 0),
+            preflopExecution: {
+              ...buildLivePreflopExecution(read, assessment, liveProofRevision(timelineSnapshot), scoped.openingSize ?? void 0),
+              ...scoped.responseExecution ? { hjResponseWindow: scoped.responseExecution } : {}
+            },
             potEvidence: { ...assessment.pot, bigBlind },
             opponentContext: { opponents: state.seats.filter((s) => s.isOccupied && !s.isYou && !s.isFolded).map((s) => ({ seat: s.seatNumber, position: positions2.get(s.seatNumber) ?? null, rangeBasis: "Preflop context remains uncertain", rangeConfidence: "low", rangeStatus: "prior_only", ...opponentStats.profile(s.playerName) ?? {} })) }
           };

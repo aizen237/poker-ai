@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { allHandTypes, formatHandType } from "@poker-ai/range-engine";
 import type { Card } from "@poker-ai/shared";
+import type { DecisionPacket } from "./decisionPacket.js";
 import { buildPreflopContext, PreflopInputSchema } from "./preflopContext.js";
 
 export const HJ_RESPONSE_POLICY_VERSION = "hj-vs-utg-2.5bb-reference-v1";
@@ -32,7 +33,8 @@ export const HjResponseReferenceSchema = z.object({
     players: z.literal(6), hero: z.literal("HJ"), opener: z.literal("UTG"),
     openToBB: z.literal(2.5), anteBB: z.literal(0),
     startingCapacitiesBB: z.object({ UTG: depth, HJ: depth, CO: depth, BTN: depth, SB: depth, BB: depth }).strict(),
-    rakeDescription: text, coldCallsAllowed: z.boolean(),
+    // null preserves an unknown source tree; pure FOLD needs no CALL permission.
+    rakeDescription: text, coldCallsAllowed: z.boolean().nullable(),
     threeBetSizesBB: z.array(z.number().finite().gt(2.5)).max(8),
   }).strict(),
   application: z.object({
@@ -83,7 +85,7 @@ export interface HjResponseReview {
 }
 
 /** Offline review facility. Supplying a reference here cannot enable live advice.
- * Live uses the separate catalog-free entry point below, after Phase 4A checks. */
+ * Live uses only the installed reference below, after independent source checks. */
 export function reviewHjResponseReference(input: { preflop: unknown; holeCards: unknown }, reference: unknown): HjResponseReview {
   const result: HjResponseReview = { policyVersion: HJ_RESPONSE_POLICY_VERSION, status: "invalid_context",
     hand: null, strategyClass: null, raiseToBB: null, allocations: null, reference: null,
@@ -137,8 +139,57 @@ export function reviewHjResponseReference(input: { preflop: unknown; holeCards: 
     reasons: ["Reference classification only. Review status and source/action legality must be independently enforced before any live activation."] };
 }
 
-/** No reviewed artifact was obtainable in Phase 4B. Keep production closed;
- * caller-supplied charts, heuristics and test allocations cannot enter here. */
+/** Reviewed 2026-10-25: only this explicit hand is installed. See HJ_RESPONSE_FOLD.md.
+ * The dataset's name is not a claim of solver provenance or unraked accuracy. */
+const liveReference: HjResponseReference = {
+  schemaVersion: 1, id: "hj-utg-72o-conservative-fold", version: "1",
+  provenance: {
+    kind: "heuristic", review: "reviewed",
+    url: "https://github.com/jensbaagaard/poker-practice/blob/590b8f65a9728a99ab8fb5d7a4ec9dc40a65225e/data/openSourcePokerData/Cash_100_GTO.json",
+    node: "3BetHJvsLJ[72o]=0; CallHJvsLJ[72o]=0; both 169-hand nodes present. Six-max LJ maps to UTG.",
+    reviewNotes: "Reviewed explicit zeros, not missing-hand defaults. Corroborated by GTO MAX 2026-10-16 HJ vs first-seat 3bet-or-fold chart. Conservative 72o-only adaptation; not exact GTO or solver-certified.",
+    assumptions: [
+      "Source: 100BB, six-max, no ante, 2.5BB open. Poker Trainer extraction is documented; original solver, rake rate/cap and solve accuracy are unverified.",
+      "The HJ-vs-LJ CALL node is all-zero; whether cold calls were available in the original solve is unknown. A named CALL node does not prove that tree permission.",
+      "Corroboration: https://gtomax.ai/free-poker-rta-charts/charts.json; raked 100BB, restricted 3bet-or-fold tree. This does not certify an unraked strategy.",
+      "Application: unraked normal play-money Hold'em, no ante/straddle, six dealt-in players, all starting capacities 100-150BB; existing source checks also require at least 100BB remaining.",
+      "Only 72o: unpaired, offsuit, disconnected, no ace/king blocker; conservatively decline cold entry against an early open with four players behind. No assumption that every raked fold transfers to no rake.",
+      "Population baseline only; no exploit against an unusually wide opener or opponents overfolding to reraises. No claimed EV margin or depth-invariance proof.",
+    ],
+  },
+  referenceSettings: { players: 6, hero: "HJ", opener: "UTG", openToBB: 2.5, anteBB: 0,
+    startingCapacitiesBB: { UTG: 100, HJ: 100, CO: 100, BTN: 100, SB: 100, BB: 100 },
+    rakeDescription: "Unspecified by the extracted dataset; not verified as unraked.",
+    coldCallsAllowed: null, threeBetSizesBB: [7.5] },
+  application: { profile: HJ_RESPONSE_PROFILE, minCapacityBB: 100, maxCapacityBB: 150,
+    rationale: "Explicit conservative heuristic for 72o only across a bounded ordinary deep-stack interval and no rake. Weak disconnected offsuit cold entry is declined; additional depth/rake changes are not claimed solved. Other hands and capacities abstain." },
+  entries: [{ hand: "72o", allocations: [{ action: "FOLD", frequency: 1 }] }],
+};
+
+export function isReviewedHjFold(review: HjResponseReview): boolean {
+  return review.status === "pure" && review.strategyClass === "FOLD" &&
+    review.reference?.provenance.review === "reviewed" && review.reference.provenance.kind !== "test_fixture";
+}
+
+/** Private installed catalog only; caller-supplied references remain offline. */
 export function inspectLiveHjResponseStrategy(input: { preflop: unknown; holeCards: unknown }): HjResponseReview {
-  return reviewHjResponseReference(input, null);
+  return reviewHjResponseReference(input, liveReference);
+}
+
+/** Dependent packet cross-check; independent source/DOM scoped proofs are still mandatory. */
+export function liveHjFoldReview(packet: DecisionPacket): HjResponseReview | null {
+  const r = inspectLiveHjResponseStrategy({ preflop: packet.preflop, holeCards: packet.hero.holeCards });
+  const p = packet.preflop, e = packet.preflopExecution, w = e?.hjResponseWindow, now = Date.now();
+  if (!isReviewedHjFold(r) || !p || !w || !e?.heroIsCurrentToAct || !e.sourceWindowKey ||
+      packet.table.street !== "preflop" || packet.table.board.length || packet.hero.position !== "HJ" ||
+      p.heroPosition !== packet.hero.position || p.heroStackBB !== packet.hero.stackBB ||
+      packet.table.numOpponentsRemaining !== 5 || packet.facingAction.type !== "raise" ||
+      packet.facingAction.amountBB !== 2.5 || !packet.candidateActions.includes("FOLD") ||
+      w.profile !== HJ_RESPONSE_PROFILE || w.heroSeat !== p.heroSeat ||
+      w.heroCards.join(",") !== packet.hero.holeCards.map(c => `${"23456789TJQKA"[c.rank - 2]}${c.suit}`).sort().join(",") ||
+      packet.potEvidence?.bigBlind !== 2 ||
+      packet.decisionProofs?.handId !== `${w.tableId}:hand:${w.handId}` ||
+      packet.decisionProofs.connectionGeneration !== w.generation || packet.decisionProofs.decisionEpoch !== w.decisionEpoch ||
+      w.expiresAt !== w.receivedAt + 10_000 || now < w.receivedAt || now >= w.expiresAt) return null;
+  return r;
 }

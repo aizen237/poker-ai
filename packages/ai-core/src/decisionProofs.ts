@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { DecisionPacket } from "./decisionPacket.js";
 import { unopenedChartAction } from "./preflopPolicy.js";
+import { liveHjFoldReview } from "./preflopResponsePolicy.js";
 
 export const PROOF_SCOPES = ["decisionState", "connection", "actionWindow", "position", "roster", "blinds",
   "stack", "callCost", "pot", "eligibility", "accounting", "legalActions", "raiseLegality", "reopening",
@@ -33,6 +34,7 @@ export interface DecisionScopeInput {
   /** Candidate classification still requires an independently proven window before activation. */
   preflopRfiCandidate?: boolean;
   preflopAction?: "FOLD" | "RAISE" | null;
+  reviewedHjFold?: boolean;
   /** True or unknown means aggression cannot silently be omitted from the comparison. */
   aggressionPossible: boolean | null;
 }
@@ -52,13 +54,15 @@ export function assessDecisionProofs(input: DecisionScopeInput, evidence: readon
     ? input.preflopSituation === "unopened" || input.preflopRfiCandidate ? "preflop_unopened" : input.preflopSituation === "facing_open" ? "preflop_facing_open" : "preflop_unclassified"
     : input.opponents === null ? "unclassified" : input.opponents !== 1 ? "multiway_postflop"
     : input.amountToCall === null ? "unclassified" : input.amountToCall > 0 ? "heads_up_call_fold" : "heads_up_bet_check";
-  const required: ProofScope[] = type === "preflop_unopened"
+  const responseFold = type === "preflop_facing_open" && input.reviewedHjFold === true;
+  const required: ProofScope[] = type === "preflop_unopened" || responseFold
     ? ["decisionState", "connection", "actionWindow", "position", "roster", "blinds", "stack", "callCost"]
     : ["decisionState", "connection", "actionWindow", "blinds", "stack", "callCost", "pot", "eligibility", "accounting", "legalActions"];
   if (type === "preflop_unopened") {
     if (input.preflopAction !== "FOLD") required.push("raiseLegality");
-  } else if (input.street === "preflop") required.push("position", "roster", "raiseLegality", "reopening");
-  else {
+  } else if (input.street === "preflop") {
+    if (!responseFold) required.push("position", "roster", "raiseLegality", "reopening");
+  } else {
     required.push("rangeInput", "equity", "terminal", "reopening");
     if (input.amountToCall === 0 || input.aggressionPossible !== false) required.push("raiseLegality");
   }
@@ -71,7 +75,8 @@ export function assessDecisionProofs(input: DecisionScopeInput, evidence: readon
     }
     return { ...proof, permits: proof.status === "proven" && required.includes(scope) ? [type] : [] };
   });
-  const failed = proofs.filter(p => required.includes(p.scope) && p.status !== "proven");
+  const failed = proofs.filter(p => (required.includes(p.scope) && p.status !== "proven") ||
+    (responseFold && p.status === "contradicted"));
   const contradicted = failed.some(p => p.status === "contradicted");
   const unsupported = type === "multiway_postflop";
   return { allowed: !failed.length && !unsupported && type !== "unclassified" && type !== "preflop_unclassified",
@@ -110,9 +115,10 @@ export function assessPacketDecisionProofs(packet: DecisionPacket, requireProofs
   if (envelope && (!envelope.handId || envelope.connectionGeneration === null)) replace("connection", "insufficient", "Hand identity/connection generation is missing from the scoped evidence.");
   const rfiCandidate = packet.table.street === "preflop" && (packet.preflop?.situation === "unopened" ||
     !!packet.preflopExecution && packet.preflop?.situation === "unknown");
+  const responseFold = liveHjFoldReview(packet) !== null;
   // Aggregate confidence includes pot/EV uncertainty. The chart uses its own
   // independently proven decisionState/stack/blind/etc. scopes instead.
-  if (!rfiCandidate && packet.dataConfidence !== "high") replace("decisionState", "insufficient", "Existing table-read confidence gate is not high.");
+  if (!rfiCandidate && !responseFold && packet.dataConfidence !== "high") replace("decisionState", "insufficient", "Existing table-read confidence gate is not high.");
   if (!packet.potEvidence?.isPotSemanticsVerified || packet.potEvidence.decisionPot === null || !packet.potEvidence.decisionPotSource) {
     replace("pot", "insufficient", "No independently verified contestable decision pot.");
   }
@@ -132,11 +138,11 @@ export function assessPacketDecisionProofs(packet: DecisionPacket, requireProofs
   }
   const activation = assessDecisionProofs({ street: packet.table.street, opponents: packet.table.numOpponentsRemaining, amountToCall: call,
     preflopSituation: preflop?.situation ?? null, preflopRfiCandidate: rfiCandidate,
-    preflopAction: unopenedChartAction(packet), aggressionPossible: ctx?.legal.aggressionReopened ?? null }, evidence);
+    preflopAction: unopenedChartAction(packet), reviewedHjFold: responseFold, aggressionPossible: ctx?.legal.aggressionReopened ?? null }, evidence);
   if (packet.table.street === "preflop" && activation.state !== "unsafe") {
-    if (!rfiCandidate) {
+    if (!rfiCandidate && !responseFold) {
       activation.allowed = false; activation.state = "unsupported";
-      activation.reasons.push("No deterministic preflop response model for this situation; only the scoped six-max 100BB+ unopened reference is implemented.");
+      activation.reasons.push("No deterministic preflop response model for this situation: the reviewed HJ pure-FOLD subset does not match this packet/window. Other responses remain unsupported.");
     }
   } else if (packet.table.street !== "river" && activation.state !== "unsafe") {
     activation.allowed = false; activation.state = "unsupported";

@@ -195,8 +195,12 @@ async function live(change?: (fs: any[], read: any) => void, originalObserver = 
     return read;
   });
   const requests: unknown[] = [];
+  let resolveRecommendation: ((response: Response) => void) | undefined;
   vi.stubGlobal("fetch", vi.fn((url: string) => {
-    if (url.endsWith("/recommendation")) requests.push(url);
+    if (url.endsWith("/recommendation")) {
+      requests.push(url);
+      return new Promise<Response>(resolve => { resolveRecommendation = resolve; });
+    }
     if (logActions) return Promise.resolve(new Response(JSON.stringify(url.includes(`hand_number=${hand238 ? 238 : 169}`)
       ? [{ msg: `-- starting hand #${hand238 ? 238 : 169}`, createdAt: "1000" }, ...logActions.map((msg, i) => ({ msg, createdAt: String(1001 + i) }))] : [])));
     return new Promise(() => {});
@@ -220,10 +224,110 @@ async function live(change?: (fs: any[], read: any) => void, originalObserver = 
     return row ? JSON.parse(row[1]) : null;
   };
   return { read, document, requests, socket, poll, refresh, incoming, turn, diagnostic,
+    respond: async (body: unknown) => {
+      resolveRecommendation?.(new Response(JSON.stringify(body)));
+      await new Promise(resolve => setTimeout(resolve, 0));
+    },
     atAge: (age: number) => { now = turn.localReceivedAt + age; },
     text: () => document.getElementById("poker-ai-reader-overlay")!.textContent!,
     action: () => document.querySelector('#poker-ai-reader-overlay [style*="font-size:16px"]')?.textContent ?? null };
 }
+
+// Deliberately synthetic private cards; reuses the reviewed public source grammar.
+// No hand-specific collection or assertion that recorded HJ actually held 72o.
+function foldCards(fs: any[], read: any) {
+  for (const frame of fs) {
+    const cards = (frame.payload.gameState ?? frame.payload).pC?.PLAYER_2?.cards;
+    if (cards) cards.forEach((c: any, i: number) => { c.value = ["7h", "2c"][i]; });
+  }
+  read.raw.seats.find((s: any) => s.seatNumber === 2).holeCardClassLists = ["7h", "2c"].map(c =>
+    ["card-container", `card-${c[1]}`, `card-s-${c[0]}`, "flipped", "med"]);
+}
+describe("reviewed 72o HJ fold through the existing locked overlay", () => {
+  it("paints FOLD before a pending explanation with absent CALL and raise controls/pot EV", async () => {
+    const f = await live(foldCards), d = f.diagnostic();
+    expect(d.decision.scopedProofs.responseStrategy).toMatchObject({ status: "pure", hand: "72o",
+      strategyClass: "FOLD", chosenAction: null, liveAuthorized: false,
+      reference: { provenance: { kind: "heuristic", review: "reviewed" } },
+      remainingRequirements: { FOLD: [] }, call: { authorization: "unproven" } });
+    expect(d.decision.scopedProofs.activation.allowed).toBe(true);
+    expect(f.action()).toBe("FOLD");
+    expect(f.text()).toContain("conservative heuristic");
+    expect(f.text()).toContain("not exact GTO");
+    expect(f.requests).toHaveLength(1);
+    expect(f.socket.send).not.toHaveBeenCalled();
+    f.atAge(9999); f.refresh(); expect(f.action()).toBe("FOLD");
+    f.atAge(10000); f.refresh(); expect(f.action()).toBeNull();
+    expect(f.text()).toContain("EVIDENCE EXPIRED");
+    await f.respond({ ok: true, decisionSource: "engine_policy", result: { action: "FOLD", confidence: 1, reasoning: "Late" } });
+    expect(f.action()).toBeNull();
+  });
+  it("rejects an explanation changing the locked action", async () => {
+    const f = await live(foldCards);
+    expect(f.action(), f.text()).toBe("FOLD");
+    await f.respond({ ok: true, decisionSource: "engine_policy", result: { action: "CALL", confidence: 1, reasoning: "Override" } });
+    expect(f.action()).toBe("FOLD");
+    expect(f.text()).toContain("conservative heuristic");
+  });
+  it.each(["refresh", "pending-response"])("rechecks a new CALL-price contradiction on %s", async variant => {
+    const f = await live(foldCards, false, undefined, '<button type="button">Call 5</button>');
+    expect(f.action()).toBe("FOLD");
+    f.document.querySelector("button")!.textContent = "Call 6";
+    if (variant === "refresh") f.refresh();
+    else await f.respond({ ok: true, decisionSource: "engine_policy", result: { action: "FOLD", confidence: 1, reasoning: "Late" } });
+    expect(f.action()).toBeNull();
+  });
+  it("does not require a total-pot display or verified contestable pot for a pure fold", async () => {
+    const f = await live((fs, read) => {
+      foldCards(fs, read); read.raw.potTotalValueText = null;
+    });
+    expect(f.action(), f.text()).toBe("FOLD");
+  });
+  it.each(["disconnect", "source-update", "cards", "actor", "clock-regression"])(
+    "clears the displayed fold on %s and discards a late explanation", async variant => {
+      const f = await live(foldCards);
+      expect(f.action()).toBe("FOLD");
+      if (variant === "disconnect") f.socket.dispatchEvent(new Event("close"));
+      if (variant === "source-update") f.incoming({ ...f.turn, localReceiveSequence: 68,
+        localReceivedAt: f.turn.localReceivedAt + 2000,
+        payload: { pre: f.turn.payload.now, now: f.turn.payload.now + 1, eventsData: [], fV: "0.1.72" } });
+      if (variant === "cards") f.read.raw.seats.find((s: any) => s.seatNumber === 2).holeCardClassLists = [["card-h", "card-s-A"], ["card-d", "card-s-K"]];
+      if (variant === "actor") f.read.raw.seats.find((s: any) => s.seatNumber === 2).statusClasses = ["table-player", "you-player"];
+      if (variant === "clock-regression") f.atAge(-1);
+      f.refresh(); f.poll();
+      expect(f.action()).toBeNull();
+      await f.respond({ ok: true, decisionSource: "engine_policy", result: { action: "FOLD", confidence: 1, reasoning: "Late" } });
+      expect(f.action()).toBeNull();
+    });
+  it.each(["out-of-range", "unknown-stack", "pot-conflict", "source-cards", "profile", "wrong-open", "gap"])(
+    "abstains for 72o with %s", async variant => {
+      const f = await live((fs, read) => {
+        foldCards(fs, read);
+        if (variant === "out-of-range") {
+          for (const frame of fs) {
+            const p = (frame.payload.gameState ?? frame.payload).players?.PLAYER_2;
+            if (p?.stack !== undefined) p.stack = 302;
+          }
+          const hero = read.raw.seats.find((s: any) => s.seatNumber === 2);
+          hero.stackText = hero.stackContainerText = "302";
+        }
+        if (variant === "unknown-stack") read.raw.seats.find((s: any) => s.seatNumber === 2).stackText = null;
+        if (variant === "pot-conflict") read.raw.potTotalValueText = "99";
+        if (variant === "source-cards") fs.at(-3).payload.pC.PLAYER_2.cards[0].value = "Ah";
+        if (variant === "profile") fs.at(-3).payload.fV = "0.1.73";
+        if (variant === "wrong-open") fs.at(-2).payload.tB.PLAYER_1 = 6;
+        if (variant === "gap") fs.at(-1).payload.pre++;
+      });
+      expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
+    });
+  it("contradictory CALL price blocks FOLD, while a missing/disabled CALL control does not", async () => {
+    const f = await live(foldCards, false, undefined, '<button type="button">Call 6</button>');
+    expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
+    expect(f.diagnostic().decision.scopedProofs.activation.state).toBe("unsafe");
+    const g = await live(foldCards, false, undefined, '<button type="button" disabled>Call 5</button>');
+    expect(g.action()).toBe("FOLD");
+  });
+});
 
 describe("HJ facing recorded UTG open through the production context/display path", () => {
   it("classifies facing_open with five-chip call gap, but selects nothing, even with AK", async () => {
@@ -235,7 +339,7 @@ describe("HJ facing recorded UTG open through the production context/display pat
     expect(d.preflop.actions).toEqual([{ seat: 1, action: "raise", totalContributionBB: 2.5, observation: 66, wagerAction: "raise" }]);
     expect(d.handTimeline.current.historyComplete).toBe(false);
     expect(d.decision.scopedProofs.activation).toMatchObject({ allowed: false, state: "unsupported" });
-    expect(d.decision.scopedProofs.responseStrategy).toMatchObject({ status: "reference_missing",
+    expect(d.decision.scopedProofs.responseStrategy).toMatchObject({ status: "uncovered",
       chosenAction: null, strategyClass: null, liveAuthorized: false,
       call: { contributionGapChips: 5, payableIfCallAuthorizedChips: 5, authorization: "unproven" },
       threeBet: { fullMinimumRaiseToChips: null, permittedMaximumRaiseToChips: null, chipUnit: null, raiseRights: "unproven" } });
@@ -297,8 +401,8 @@ describe("HJ facing recorded UTG open through the production context/display pat
     expect(f.diagnostic().handTimeline.current.historyComplete).toBe(false);
     expect(f.requests).toHaveLength(0);
   });
-  it.each([["7h", "2c", "72o"], ["8h", "8d", "88"], ["Ah", "Ad", "AA"]])(
-    "synthetic HJ %s %s remains blocked without a reviewed reference", async (a, b, hand) => {
+  it.each([["8h", "8d", "88"], ["Ah", "Ad", "AA"]])(
+    "synthetic HJ %s %s remains uncovered by the installed fold subset", async (a, b, hand) => {
       const f = await live((fs, read) => {
         for (const frame of fs) {
           const cards = (frame.payload.gameState ?? frame.payload).pC?.PLAYER_2?.cards;
@@ -308,8 +412,8 @@ describe("HJ facing recorded UTG open through the production context/display pat
           ["card-container", `card-${c[1]}`, `card-s-${c[0]}`, "flipped", "med"]);
       });
       expect(f.diagnostic().decision.scopedProofs.responseStrategy).toMatchObject({ hand,
-        status: "reference_missing", chosenAction: null, liveAuthorized: false });
-      expect(f.text()).toContain("No reviewed HJ-versus-UTG");
+        status: "uncovered", chosenAction: null, liveAuthorized: false });
+      expect(f.text()).toContain("Hand is not explicitly covered");
       expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
       expect(f.socket.send).not.toHaveBeenCalled();
     });
@@ -343,7 +447,7 @@ describe("HJ facing recorded UTG open through the production context/display pat
         remainingStackChips: 249, capacitySufficient: true },
       costProof: { status: "proven" }, ui: { status: "observed_matching", observation: { amountChips: 5 } },
       serverLegality: { status: "unproven" }, legalActionsProof: { status: "insufficient" } });
-    expect(d.decision.scopedProofs.responseStrategy.status).toBe("reference_missing");
+    expect(d.decision.scopedProofs.responseStrategy.status).toBe("uncovered");
     expect(d.decision.scopedProofs.activation.allowed).toBe(false);
     expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0); expect(f.socket.send).not.toHaveBeenCalled();
   });
@@ -446,7 +550,7 @@ describe("hand238 scoped empirical CALL permission through production", () => {
     expect(c.permission.players.map((p: any) => [p.position, p.seat, p.sourceStack, p.contribution])).toEqual([
       ["BTN", 3, 244, 0], ["SB", 5, 254, 1], ["BB", 9, 246, 2],
       ["UTG", 10, 265, 5], ["HJ", 1, 253, 0], ["CO", 2, 240, 0] ]);
-    expect(d.decision.scopedProofs.responseStrategy).toMatchObject({ status: "reference_missing", hand: "K7o",
+    expect(d.decision.scopedProofs.responseStrategy).toMatchObject({ status: "uncovered", hand: "K7o",
       chosenAction: null, liveAuthorized: false, call: { authorization: "proven" },
       remainingRequirements: { CALL: ["reviewed_response_strategy"] } });
     for (const scope of ["legalActions", "raiseLegality", "reopening", "pot", "accounting"])

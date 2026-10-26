@@ -1,5 +1,5 @@
 import { assessDecisionProofs, assessPacketDecisionProofs, decisionProofBinding, PROOF_SCOPES,
-  unopenedChartAction, inspectLiveHjResponseStrategy, type DecisionPacket, type PreflopContext, type ScopedProof, type ProofScope, type DecisionProofs } from "@poker-ai/ai-core";
+  unopenedChartAction, inspectLiveHjResponseStrategy, isReviewedHjFold, type DecisionPacket, type PreflopContext, type ScopedProof, type ProofScope, type DecisionProofs } from "@poker-ai/ai-core";
 import type { LiveStateAssessment } from "@poker-ai/browser-reader";
 import type { LiveTableRead } from "./tableRead.js";
 import type { LiveTimelineDiagnostic } from "./liveTimeline.js";
@@ -126,6 +126,23 @@ export function buildLiveDecisionProofs(read: LiveTableRead, assessment: LiveSta
       THREE_BET: ["reviewed_response_strategy_and_size", "raise_rights", "minimum_and_maximum_totals", "chip_grid"],
     },
   } : null;
+  const responseFold = responseStrategy !== null && isReviewedHjFold(responseStrategy);
+  if (responseFold) responseStrategy.remainingRequirements.FOLD = [];
+  // Source-proven zeros permit the existing main + street-total display
+  // cross-check. This detects conflict only; it never certifies a decision pot.
+  if (responseFold && facing && pot.mainPot !== null && pot.displayedTotalPot !== null &&
+      pot.displayedTotalPot !== pot.mainPot + facing.players.reduce((sum, p) => sum + p.contribution, 0))
+    set("pot", "contradicted", "Current pot displays + source-proven street totals",
+      ["Pot displays contradict collected pot plus the certified response contributions."]);
+  const responseExecution: NonNullable<DecisionPacket["preflopExecution"]>["hjResponseWindow"] = facing ? {
+    profile: "pokernow-0.1.72-th-4fun-1-2-exact5-v1", tableId: facing.tableId, handId: facing.handId,
+    heroId: facing.heroId, heroSeat: facing.heroSeat, heroCards: [...facing.heroCards].sort(),
+    generation: facing.generation, sourceCursor: facing.cursor, decisionEpoch: epoch,
+    receivedAt: facing.receivedAt, expiresAt: source!.facingOpenProof!.expiresAt,
+  } : undefined;
+  if (packet?.preflopExecution?.hjResponseWindow &&
+      JSON.stringify(packet.preflopExecution.hjResponseWindow) !== JSON.stringify(responseExecution))
+    set("decisionState", "contradicted", "Facing-open source/packet cross-check", ["Response window belongs to a different source, actor, cards, or epoch."]);
   const response = facing ?? coFacing;
   const responseWindow = facing ? source!.facingOpenProof! : coFacing ? source!.coFacingOpenProof! : null;
   if (response && responseWindow) {
@@ -151,24 +168,24 @@ export function buildLiveDecisionProofs(read: LiveTableRead, assessment: LiveSta
     ? unopenedChartAction({ table: { street: "preflop" }, hero: { holeCards: hero.holeCards as DecisionPacket["hero"]["holeCards"] }, preflop }) : null;
   const activation = packet ? assessPacketDecisionProofs({ ...packet, decisionProofs: envelope }, true)!
     : assessDecisionProofs({ street: state?.street ?? null, opponents: assessment.activeOpponents, amountToCall: assessment.amountToCall,
-      preflopSituation: preflop?.situation ?? null, preflopRfiCandidate: unopened?.candidate ?? false,
-      preflopAction: chartAction, aggressionPossible: assessment.legality.aggressionReopened }, proofs);
+      preflopSituation: preflop?.situation ?? null, preflopRfiCandidate: !facing && (unopened?.candidate ?? false),
+      preflopAction: chartAction, reviewedHjFold: responseFold, aggressionPossible: assessment.legality.aggressionReopened }, proofs);
   if (facing && callLegality?.ui.status === "contradicted") {
     activation.allowed = false;
     activation.state = "unsafe";
     activation.reasons.push(...callLegality.ui.reasons);
-  } else if (facing && activation.state !== "unsafe") {
+  } else if (facing && !responseFold && activation.state !== "unsafe") {
     activation.allowed = false;
     activation.state = "unsupported";
     activation.reasons.push(...responseStrategy!.reasons);
-    activation.reasons.push("HJ response activation remains disabled; missing CALL/3-BET legality must never substitute FOLD.");
+    activation.reasons.push("No reviewed pure FOLD for this hand/profile; missing CALL/3-BET legality must never substitute FOLD.");
   } else if (coFacing && activation.state !== "unsafe") {
     activation.allowed = false;
     activation.state = "unsupported";
     activation.reasons.push("CO facing UTG open plus HJ caller: no reviewed response strategy or independent CO action permission. Unsupported CALL/3-BET must never substitute FOLD.");
   }
   return { evidence: envelope, activation, unopened, openingSize: opening.size,
-    responseWindow, responseStrategy, callLegality,
+    responseWindow, responseStrategy, responseExecution, callLegality,
     // Separate diagnostic; never promotes a general decision scope or permission.
     postflopCall: flopCallEvidence(read, assessment, timeline, epoch),
     coResponse: coFacing && responseWindow ? { binding: { decisionEpoch: epoch, tableId: coFacing.tableId,

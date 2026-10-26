@@ -7,6 +7,14 @@ import { buildPreflopContext } from "./preflopContext.js";
 export const PreflopExecutionSchema = z.object({
   heroIsCurrentToAct: z.boolean(),
   sourceWindowKey: z.string().min(1).max(100_000),
+  /** Projection of the existing facing-open source proof, bound to this packet/epoch. */
+  hjResponseWindow: z.object({
+    profile: z.literal("pokernow-0.1.72-th-4fun-1-2-exact5-v1"),
+    tableId: z.string().min(1), handId: z.string().min(1), heroId: z.string().min(1),
+    heroSeat: z.number().int().positive(), heroCards: z.array(z.string().regex(/^[2-9TJQKA][shdc]$/)).length(2),
+    generation: z.number().int().positive(), sourceCursor: z.number().int().nonnegative(),
+    decisionEpoch: z.string().min(1), receivedAt: z.number().finite(), expiresAt: z.number().finite(),
+  }).strict().optional(),
   /** Independent sizing evidence; selected input alone cannot populate this. */
   raiseBounds: z.object({ source: z.string().min(1), verified: z.boolean(),
     chipUnitBB: z.number().finite().positive(), minRaiseToBB: z.number().finite().positive(),

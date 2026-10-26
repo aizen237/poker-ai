@@ -32,14 +32,16 @@ export function buildLivePreflopContext(assessment: LiveStateAssessment, actionH
       return buildPreflopContext({
         heroSeat: response.heroSeat, playersDealtIn: 6,
         players: response.players.map(p => ({ seat: p.seat, position: p.position,
-          remainingStackBB: state!.seats.find(s => s.seatNumber === p.seat)!.stack! / bigBlind,
+          remainingStackBB: coResponse ? state!.seats.find(s => s.seatNumber === p.seat)!.stack! / bigBlind
+            : (p.sourceStack - p.contribution) / bigBlind,
           contributionBB: p.contribution / bigBlind, folded: false, allIn: false })),
         potBB: decisionPot === null ? null : decisionPot / bigBlind, amountToCallBB: 5 / bigBlind,
         contributionMeaning: "street_total", historyCoverage: "complete", actionWindowEvidence: proof.scope,
         actions: proof.transitions.map(action => ({ seat: action.actor.seat, action: action.action, totalContributionBB: action.newContributionChips / bigBlind,
           observation: action.sequence, wagerAction: action.action })),
         historyNotes: [`Complete only for the closed ${proof.scope} decision prefix. Global historyComplete=false.`,
-          "Response strategy, re-raise legality/grid/reopening and contestable pot remain unproven."],
+          coResponse ? "Response strategy, re-raise legality/grid/reopening and contestable pot remain unproven."
+            : "Response strategy is independently reviewed; re-raise legality/grid/reopening and contestable pot remain unproven."],
         tournamentContext: "chip_ev_only",
       });
     }

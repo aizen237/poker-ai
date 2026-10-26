@@ -2,9 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import { parseCards } from "@poker-ai/shared";
 import { buildPreflopContext, type PreflopInput } from "./preflopContext.js";
 import { HjResponseReferenceSchema, HJ_RESPONSE_PROFILE, inspectLiveHjResponseStrategy,
-  reviewHjResponseReference, type HjResponseReference } from "./preflopResponsePolicy.js";
+  reviewHjResponseReference, isReviewedHjFold, type HjResponseReference } from "./preflopResponsePolicy.js";
 import { getPolicyRecommendation } from "./policyRecommendation.js";
-import { validateDecisionPacket } from "./decisionPacket.js";
+import { validateDecisionPacket, type DecisionPacket } from "./decisionPacket.js";
+import { decisionProofBinding, PROOF_SCOPES } from "./decisionProofs.js";
+import { evaluateDecisionPolicy } from "./decisionPolicy.js";
+import { lockedEngineRecommendation } from "./policyRecommendation.js";
 import type { ModelRouter } from "./modelRouter.js";
 
 // These allocations test the importer/classifier contract ONLY. They are not a
@@ -39,10 +42,133 @@ function input(cards = "7h 2c") {
     actions: [{ seat: 1, action: "raise", totalContributionBB: 2.5, observation: 66, wagerAction: "raise" }] };
   return { preflop, holeCards: parseCards(cards) };
 }
-describe("HJ response reference review (no installed live strategy)", () => {
-  it.each(["7h 2c", "8s 8h", "Ah Ac", "Ah Qh"])("never invents a live action for %s", cards => {
-    expect(inspectLiveHjResponseStrategy(input(cards))).toMatchObject({ status: "reference_missing",
-      chosenAction: null, strategyClass: null, liveAuthorized: false, allocations: null, reference: null });
+// Synthetic scoped certificates test consumption, not source acceptance.
+function foldPacket(): DecisionPacket {
+  const i = input(), now = Date.now();
+  const packet = validateDecisionPacket({
+    hero: { holeCards: i.holeCards, position: "HJ", stackBB: 125 },
+    table: { street: "preflop", board: [], potBB: null, numOpponentsRemaining: 5 },
+    facingAction: { type: "raise", amountBB: 2.5 }, candidateActions: ["FOLD", "CALL", "RAISE"],
+    preflop: buildPreflopContext(i.preflop), engineCalculations: {}, dataConfidence: "low",
+    potEvidence: { unit: "chips", bigBlind: 2, mainPot: null, displayedTotalPot: null,
+      decisionPot: null, decisionPotSource: null, isPotSemanticsVerified: false },
+    preflopExecution: { heroIsCurrentToAct: true, sourceWindowKey: "synthetic-window",
+      hjResponseWindow: { profile: HJ_RESPONSE_PROFILE, tableId: "T", handId: "H", heroId: "hero", heroSeat: 2,
+        heroCards: ["2c", "7h"], generation: 1, sourceCursor: 67, decisionEpoch: "E", receivedAt: now, expiresAt: now + 10000 },
+      controls: { source: "No raise controls needed", formVisible: false, raiseSubmitVisible: false,
+        raiseSubmitEnabled: null, selectedRaiseToBB: null, issues: [] } },
+  });
+  packet.decisionProofs = { version: 1, binding: "pending", decisionEpoch: "E", handId: "T:hand:H", connectionGeneration: 1,
+    proofs: PROOF_SCOPES.map(scope => {
+      const required = ["decisionState", "connection", "actionWindow", "position", "roster", "blinds", "stack", "callCost"].includes(scope);
+      return { scope, status: required ? "proven" : "insufficient", confidence: required ? "high" : "low",
+        provenance: ["Synthetic independent scoped test evidence"], reasons: required ? [] : ["Not available"] };
+    }) };
+  return rebind(packet);
+}
+function rebind(packet: DecisionPacket) {
+  packet.decisionProofs!.binding = decisionProofBinding(packet, packet.decisionProofs!.decisionEpoch);
+  return packet;
+}
+describe("locked HJ fold production policy", () => {
+  it("withholds a relay response if its explanation finishes at the original deadline", async () => {
+    const packet = foldPacket();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(packet.preflopExecution!.hjResponseWindow!.receivedAt);
+    try {
+      const router = { getRecommendation: vi.fn().mockImplementation(async () => {
+        clock.mockReturnValue(packet.preflopExecution!.hjResponseWindow!.expiresAt);
+        return { action: "FOLD", confidence: 1, reasoning: "Late explanation" };
+      }) } as unknown as ModelRouter;
+      const result = await getPolicyRecommendation(packet, router, { mode: "fast" }, true);
+      expect(result).toMatchObject({ result: null, decisionSource: "abstained", activation: { allowed: false } });
+      expect(lockedEngineRecommendation(result.policy)).toBeNull();
+    } finally { clock.mockRestore(); }
+  });
+  it("selects without pot EV, CALL permission, raise sizing or aggregate confidence", async () => {
+    const packet = foldPacket(), policy = evaluateDecisionPolicy(packet);
+    expect(policy).toMatchObject({ status: "selected", chosenAction: "FOLD", chosenSizeBB: null,
+      raiseToBB: null, llmMayChoose: false, actionEVs: [], activation: { allowed: true, supportedDecisionType: "preflop_facing_open" } });
+    expect(policy.activation!.requiredProofs).not.toEqual(expect.arrayContaining(["pot"]));
+    expect(lockedEngineRecommendation(policy)?.action).toBe("FOLD");
+    const router = { getRecommendation: vi.fn().mockResolvedValue({ action: "CALL", confidence: 1, reasoning: "Override" }) } as unknown as ModelRouter;
+    const result = await getPolicyRecommendation(validateDecisionPacket(packet), router, { mode: "fast" }, true);
+    expect(result).toMatchObject({ decisionSource: "engine_policy", result: { action: "FOLD" }, explanationSource: "engine" });
+    expect((result.result as any).reasoning).toContain("not exact GTO");
+  });
+  it.each(PROOF_SCOPES)("retains a concrete contradiction in %s, including unrelated scopes", scope => {
+    const packet = foldPacket();
+    const proof = packet.decisionProofs!.proofs.find(p => p.scope === scope)!;
+    proof.status = "contradicted"; proof.reasons = ["Conflicting observation"];
+    const policy = evaluateDecisionPolicy(rebind(packet));
+    expect(policy.activation).toMatchObject({ allowed: false, state: "unsafe" });
+    expect(lockedEngineRecommendation(policy)).toBeNull();
+  });
+  it.each(["decisionState", "connection", "actionWindow", "position", "roster", "blinds", "stack", "callCost"])(
+    "requires independent %s evidence", scope => {
+      const packet = foldPacket();
+      packet.decisionProofs!.proofs = packet.decisionProofs!.proofs.filter(p => p.scope !== scope);
+      expect(evaluateDecisionPolicy(rebind(packet)).chosenAction).toBeNull();
+    });
+  it.each(["expired", "clock-regression", "renewed-deadline", "hand", "generation", "epoch", "cards", "seat",
+    "hero", "stack", "call", "actor", "window", "source-key", "board", "no-fold", "binding", "no-proofs"])(
+    "abstains on %s", variant => {
+      const packet = foldPacket(), w = packet.preflopExecution!.hjResponseWindow!;
+      if (variant === "expired") { w.receivedAt -= 10000; w.expiresAt -= 10000; }
+      if (variant === "clock-regression") { w.receivedAt += 10000; w.expiresAt += 10000; }
+      if (variant === "renewed-deadline") w.expiresAt++;
+      if (variant === "hand") w.handId = "OTHER";
+      if (variant === "generation") w.generation++;
+      if (variant === "epoch") w.decisionEpoch = "OTHER";
+      if (variant === "cards") w.heroCards = ["2d", "7h"];
+      if (variant === "seat") w.heroSeat++;
+      if (variant === "hero") packet.hero.position = "CO";
+      if (variant === "stack") packet.hero.stackBB++;
+      if (variant === "call") packet.facingAction.amountBB = 3;
+      if (variant === "actor") packet.preflopExecution!.heroIsCurrentToAct = false;
+      if (variant === "window") delete packet.preflopExecution!.hjResponseWindow;
+      if (variant === "source-key") packet.preflopExecution!.sourceWindowKey = "";
+      if (variant === "board") packet.table.board = parseCards("Ah");
+      if (variant === "no-fold") packet.candidateActions = ["CALL", "RAISE"];
+      rebind(packet);
+      if (variant === "binding") packet.decisionProofs!.binding = "different";
+      if (variant === "no-proofs") delete packet.decisionProofs;
+      const policy = evaluateDecisionPolicy(packet);
+      expect(policy.chosenAction).toBeNull();
+      expect(lockedEngineRecommendation(policy)).toBeNull();
+    });
+});
+
+describe("HJ response reference review", () => {
+  it("installs only the reviewed 72o heuristic, retaining source caveats", () => {
+    const r = inspectLiveHjResponseStrategy(input());
+    expect(r).toMatchObject({ status: "pure", strategyClass: "FOLD", chosenAction: null, liveAuthorized: false,
+      reference: { provenance: { kind: "heuristic", review: "reviewed" },
+        application: { minCapacityBB: 100, maxCapacityBB: 150 } } });
+    expect(isReviewedHjFold(r)).toBe(true);
+    expect(r.reference!.provenance.assumptions.join(" ")).toContain("unverified");
+    expect(isReviewedHjFold(reviewHjResponseReference(input(), reference()))).toBe(false);
+    const pending = reference(); pending.provenance.kind = "heuristic";
+    expect(isReviewedHjFold(reviewHjResponseReference(input(), pending))).toBe(false);
+    pending.provenance.review = "reviewed"; pending.provenance.kind = "test_fixture";
+    expect(isReviewedHjFold(reviewHjResponseReference(input(), pending))).toBe(false);
+  });
+  it("unknown cold-call tree is permitted for pure FOLD only, never an allocated CALL", () => {
+    const r = reference(); r.referenceSettings.coldCallsAllowed = null;
+    expect(HjResponseReferenceSchema.safeParse(r).success).toBe(false);
+    r.entries = [r.entries[0]!];
+    expect(HjResponseReferenceSchema.safeParse(r).success).toBe(true);
+  });
+  it.each([99.5, 150.5, 1000])("excludes an unsupported %sBB capacity for any seat", capacity => {
+    for (const player of input().preflop.players) {
+      const i = input();
+      const p = i.preflop.players.find(p => p.seat === player.seat)!;
+      p.remainingStackBB = capacity - p.contributionBB!;
+      expect(isReviewedHjFold(inspectLiveHjResponseStrategy(i))).toBe(false);
+    }
+  });
+  it.each(["8s 8h", "Ah Ac", "Ah Qh"])("never invents a live action for uncovered %s", cards => {
+    expect(inspectLiveHjResponseStrategy(input(cards))).toMatchObject({ status: "uncovered",
+      chosenAction: null, strategyClass: null, liveAuthorized: false, allocations: null });
   });
   it.each([["7h 2c", "FOLD", null], ["8s 8h", "CALL", null], ["Ah Ac", "THREE_BET", 8]] as const)(
     "classifies synthetic %s allocations without selecting live advice", (cards, strategyClass, raiseToBB) => {
@@ -147,7 +273,7 @@ describe("HJ response reference review (no installed live strategy)", () => {
         r.application.minCapacityBB = 125;
       }
       expect(reviewHjResponseReference(input("Ah Ac"), r)).toMatchObject({ chosenAction: null, liveAuthorized: false });
-      expect(inspectLiveHjResponseStrategy(input("Ah Ac")).status).toBe("reference_missing");
+      expect(inspectLiveHjResponseStrategy(input("Ah Ac")).status).toBe("uncovered");
     });
   it.each(["7h 2c", "8h 8d", "Ah Ad"])("the real policy/router cannot fall back to FOLD or an LLM for %s", async cards => {
     const i = input(cards), preflop = buildPreflopContext(i.preflop);
