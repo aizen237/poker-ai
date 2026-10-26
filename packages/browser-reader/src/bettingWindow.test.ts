@@ -28,7 +28,7 @@ function frames(hjObserver = false): any[] {
 function replay(change?: (f: any[]) => void, projectionChange?: (p: any) => void, recorded = frames()) {
   const f = recorded; change?.(f);
   let now = 0, hero: string | null = null;
-  const source = createFirstUtgSource("TABLE_TEST", () => now);
+  const source = createFirstUtgSource(f[0].payload.gameState.id, () => now);
   const accept = (frame: any) => {
     now = frame.localReceivedAt;
     const p = projectFirstUtgSource("42" + JSON.stringify([frame.event, frame.payload]), hero);
@@ -39,6 +39,113 @@ function replay(change?: (f: any[]) => void, projectionChange?: (p: any) => void
   return { source, frames: f, accept, at: (time: number) => { now = time; } };
 }
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+describe("recorded hand261 stack-reset boundary", () => {
+  it("uses all six new-hand stacks for the accepted open and linked HJ turn", () => {
+    const frames = load("pokernow-hj-open-261.json").frames;
+    const f = replay(undefined, undefined, frames.slice(0, 2));
+    expect(f.source.diagnostic().carriedState?.projection.frame.players.PLAYER_1.stack).toBe(250);
+    expect(f.source.diagnostic().hjWindow.anchor?.sequence).toBe(2);
+    expect(f.source.facingOpenProof()).toBeNull();
+    f.accept(frames[2]);
+    expect(f.source.diagnostic().facingOpenWindow.transition?.newContributionChips).toBe(5);
+    expect(f.source.facingOpenProof()).toBeNull();
+    f.accept(frames[3]);
+    const p = f.source.facingOpenProof();
+    expect(p, JSON.stringify(f.source.diagnostic().facingOpenWindow)).not.toBeNull();
+    expect(p).toMatchObject({ scope: "hj_facing_utg_open5", anchor: { sequence: 2 }, activation: { sequence: 4 },
+      witness: { handNumber: 261, heroId: "PLAYER_1", heroSeat: 1, heroCards: ["5c", "Ts"] },
+      actor: { playerId: "PLAYER_1", position: "HJ" }, facts: { amountToCallChips: 5 } });
+    expect(p!.witness.players.map(p => p.sourceStack)).toEqual(Array(6).fill(250));
+    expect(p!.transitions[0].originalRoster.map(p => p.sourceStack)).toEqual(Array(6).fill(250));
+    expect(p!.transitions[0]).toMatchObject({ sequence: 3, priorContributionChips: 0, newContributionChips: 5,
+      actor: { playerId: "PLAYER_6", seat: 10, position: "UTG" }, evidence: { raw: frames[2].payload } });
+  });
+  it.each(["missing-players", "partial", "extra-player", "wrong-id", "missing-stack", "string-stack", "null-stack", "fractional-stack",
+    "negative-stack", "unsafe-stack", "short-stack", "deleted-player", "identity", "status", "disconnected", "hidden-player-mutation",
+    "unknown-boundary-mutation", "seats", "roster", "dealer", "blinds", "profile", "ante", "postflop",
+    "sequence", "predecessor", "generation", "replayed", "raise6", "wrong-turn", "unknown-open-mutation", "unknown-turn-mutation",
+    "turn-players", "malformed-turn-capacity", "coalesced", "missing-open", "intervening-update"])("rejects %s", variant => {
+    const f = replay(fs => {
+      const b = fs[1].payload, r = fs[2].payload, t = fs[3].payload, hero = "PLAYER_1";
+      if (variant === "missing-players") delete b.players;
+      if (variant === "partial") delete b.players[hero];
+      if (variant === "extra-player") b.players.EXTRA = { stack: 250 };
+      if (variant === "wrong-id") { delete b.players[hero]; b.players.EXTRA = { stack: 250 }; }
+      if (variant === "missing-stack") b.players[hero] = {};
+      if (variant === "string-stack") b.players[hero].stack = "250";
+      if (variant === "null-stack") b.players[hero].stack = null;
+      if (variant === "fractional-stack") b.players[hero].stack = 250.5;
+      if (variant === "negative-stack") b.players[hero].stack = -1;
+      if (variant === "unsafe-stack") b.players[hero].stack = Number.MAX_SAFE_INTEGER + 1;
+      if (variant === "short-stack") b.players[hero].stack = 201;
+      if (variant === "deleted-player") b.players[hero] = "<D>";
+      if (variant === "identity") b.players[hero].id = "OTHER";
+      if (variant === "status") b.players[hero].status = "inGame";
+      if (variant === "disconnected") b.players[hero].disconnectedSince = 123;
+      if (variant === "hidden-player-mutation") b.players[hero].name = "OTHER";
+      if (variant === "unknown-boundary-mutation") b.unknownAction = true;
+      if (variant === "seats") { b.seats = structuredClone(fs[0].payload.gameState.seats); b.seats[0][0] = 0; }
+      if (variant === "roster") b.iHPI[0] = "OTHER";
+      if (variant === "dealer") b.dealerSeat = 2;
+      if (variant === "blinds") b.tB[b.sBPI] = 2;
+      if (variant === "profile") b.fV = "0.1.73";
+      if (variant === "ante") b.ante = 1;
+      if (variant === "postflop") b.gT = [1, 1];
+      if (variant === "sequence") fs[3].localReceiveSequence++;
+      if (variant === "predecessor") t.pre++;
+      if (variant === "generation") fs[3].connectionGeneration++;
+      if (variant === "replayed") fs.splice(3, 0, structuredClone(fs[2]));
+      if (variant === "raise6") r.tB.PLAYER_6 = r.cHB = 6;
+      if (variant === "wrong-turn") t.cPI = t.pITT = "PLAYER_2";
+      if (variant === "unknown-open-mutation") r.unknownAction = true;
+      if (variant === "unknown-turn-mutation") t.unknownAction = true;
+      if (variant === "turn-players") t.players = { [hero]: { stack: 251 } };
+      if (variant === "malformed-turn-capacity") t.mAVTB = null;
+      if (variant === "coalesced") r.cPI = r.pITT = hero;
+      if (variant === "missing-open") fs.splice(2, 1);
+      if (variant === "intervening-update") {
+        fs.splice(3, 0, { ...fs[3], payload: { pre: r.now, now: r.now + 1, eventsData: [], fV: "0.1.72" } });
+        fs[4].localReceiveSequence++; t.pre = r.now + 1;
+      }
+    }, undefined, load("pokernow-hj-open-261.json").frames);
+    expect(f.source.facingOpenProof()).toBeNull();
+  });
+  it.each(["missing-reset-shape", "missing-turn-raw", "mismatched-turn-projection"])("rejects %s", variant => {
+    const f = replay(undefined, p => {
+      if (variant === "missing-reset-shape" && p) delete p.handStartStackReset;
+      if (p?.frame.cPI === "PLAYER_1") {
+        if (variant === "missing-turn-raw") delete p.bettingPatch;
+        if (variant === "mismatched-turn-projection") p.frame.pITT = "PLAYER_2";
+      }
+    }, load("pokernow-hj-open-261.json").frames);
+    expect(f.source.facingOpenProof()).toBeNull();
+  });
+  it("uses authoritative reset amounts even when previous-hand stacks were short", () => {
+    const f = replay(fs => {
+      for (const p of Object.values(fs[0].payload.gameState.players) as any[]) p.stack = 100;
+    }, undefined, load("pokernow-hj-open-261.json").frames);
+    expect(f.source.facingOpenProof()!.witness.players.every(p => p.sourceStack === 250)).toBe(true);
+  });
+  it("does not extend the no-mAVTB turn shape to an unopened HJ window", () => {
+    const f = replay(fs => {
+      const b = fs[1].payload, r = fs[2].payload;
+      fs[2].payload = { now: r.now, pre: r.pre, eventsData: [], mEV: 0, fV: "0.1.72", sN: r.sN,
+        pGS: { [b.cPI]: "fold" }, sNA: "NSAF", pITT: null, sNAA: r.sNAA, wBACPI: [b.bBPI] };
+    }, undefined, load("pokernow-hj-open-261.json").frames);
+    expect(f.source.facingOpenProof()).toBeNull();
+    expect(f.source.hjProof()).toBeNull();
+  });
+  it("expires and never renews from an unrelated source update", () => {
+    const f = replay(undefined, undefined, load("pokernow-hj-open-261.json").frames), t = f.frames[3];
+    f.at(t.localReceivedAt - 1); expect(f.source.facingOpenProof()).toBeNull();
+    f.at(t.localReceivedAt + 9999); expect(f.source.facingOpenProof()).not.toBeNull();
+    f.at(t.localReceivedAt + 10000); expect(f.source.facingOpenProof()).toBeNull();
+    f.accept({ ...t, localReceiveSequence: 5, localReceivedAt: t.localReceivedAt + 11000,
+      payload: { pre: t.payload.now, now: t.payload.now + 1, eventsData: [], fV: "0.1.72" } });
+    expect(f.source.facingOpenProof()).toBeNull();
+  });
+});
 
 describe("recorded hand169 accepted opening transition", () => {
   it("uses the unchanged UTG observer capture, frozen roster and original HJ deadline", () => {
@@ -133,9 +240,10 @@ describe("recorded hand169 accepted opening transition", () => {
 // Real MAIN bridge -> source runtime -> context/proofs -> overlay. Only the
 // observer's unavailable private-card view and DOM cross-check are simulated.
 async function live(change?: (fs: any[], read: any) => void, originalObserver = false, logActions?: string[], callMarkup = "", hand238 = false,
-  co238?: { originalObserver?: boolean }) {
+  co238?: { originalObserver?: boolean }, captured?: any[]) {
   vi.resetModules();
-  const fs = hand238 ? load("pokernow-hj-call-238.json").frames.slice(0, co238 ? 16 : 14) : frames(!originalObserver);
+  const fs = captured ?? (hand238 ? load("pokernow-hj-call-238.json").frames.slice(0, co238 ? 16 : 14) : frames(!originalObserver));
+  const tableId = fs[0].payload.gameState.id;
   const start = (co238 ? fs[11] : fs.at(-3)).payload, turn = fs.at(-1);
   if (co238 && !co238.originalObserver) for (const f of fs) {
     // Public envelopes unchanged; CO registration/cards are explicitly simulated.
@@ -145,18 +253,20 @@ async function live(change?: (fs: any[], read: any) => void, originalObserver = 
       hand.cards.forEach((c: any, i: number) => { c.value = id === "PLAYER_2" ? ["Ah", "Kd"][i] : null; });
   }
   const read = load("utg-reader-cross-check.json").read;
-  const hero = co238 && !co238.originalObserver ? "PLAYER_2" : hand238 ? "PLAYER_1" : originalObserver ? "PLAYER_1" : "PLAYER_2";
-  const utg = hand238 ? "PLAYER_10" : "PLAYER_1", hj = hand238 ? "PLAYER_1" : "PLAYER_2";
+  const hero = captured ? fs[0].payload.currentPlayer.id : co238 && !co238.originalObserver ? "PLAYER_2" : hand238 ? "PLAYER_1" : originalObserver ? "PLAYER_1" : "PLAYER_2";
+  const utg = captured ? start.cPI : hand238 ? "PLAYER_10" : "PLAYER_1", hj = captured ? turn.payload.cPI : hand238 ? "PLAYER_1" : "PLAYER_2";
   const stacks: Record<string, number> = {};
   for (const f of fs) for (const [id, p] of Object.entries((f.payload.gameState ?? f.payload).players ?? {}) as [string, any][]) {
     if (p.stack !== undefined) stacks[id] = p.stack;
   }
   for (const s of read.raw.seats) if (s.isOccupied) {
-    const id = `PLAYER_${s.seatNumber}`, total = id === utg || co238 && id === hj ? 5 : start.tB[id] ?? 0;
+    const id = captured ? fs[0].payload.gameState.seats.find(([seat]: [number, string]) => seat === s.seatNumber)[1] : `PLAYER_${s.seatNumber}`;
+    const total = id === utg || co238 && id === hj ? 5 : start.tB[id] ?? 0;
+    if (captured) s.playerNameText = fs[0].payload.gameState.players[id].name;
     s.isYou = id === hero;
     s.statusClasses = ["table-player", ...(s.isYou ? ["you-player"] : []), ...(id === (co238 ? "PLAYER_2" : hj) ? ["decision-current"] : [])];
     // Same class used by existing recorded reader scaffolding.
-    s.holeCardClassLists = s.isYou ? (co238 && !co238.originalObserver ? ["Ah", "Kd"] : hand238 ? ["7h", "Kd"] : originalObserver ? ["8h", "Qd"] : ["Ah", "Kd"])
+    s.holeCardClassLists = s.isYou ? (captured ? start.pC[hero].cards.map((c: any) => c.value) : co238 && !co238.originalObserver ? ["Ah", "Kd"] : hand238 ? ["7h", "Kd"] : originalObserver ? ["8h", "Qd"] : ["Ah", "Kd"])
       .map(c => ["card-container", `card-${c[1]}`, `card-s-${c[0]}`, "flipped", "med"]) : [];
     s.stackText = s.stackContainerText = String(stacks[id] - total);
     s.betValueText = total ? String(total) : null;
@@ -165,7 +275,7 @@ async function live(change?: (fs: any[], read: any) => void, originalObserver = 
   read.raw.potMainValueText = "0"; read.raw.potTotalValueText = co238 ? "13" : "8";
   change?.(fs, read);
   const { document } = parseHTML(`<html><body>${callMarkup}</body></html>`);
-  const location = new URL("https://www.pokernow.com/games/TABLE_TEST");
+  const location = new URL(`https://www.pokernow.com/games/${tableId}`);
   const listeners: Array<(e: any) => void> = [];
   let now = fs[0].localReceivedAt, poll = () => {}, refresh = () => {};
   class Socket extends EventTarget {
@@ -210,7 +320,7 @@ async function live(change?: (fs: any[], read: any) => void, originalObserver = 
   let socket!: Socket, generation = 0;
   const incoming = (f: any) => {
     now = f.localReceivedAt;
-    while (generation < f.connectionGeneration) { generation++; socket = new win.WebSocket("wss://www.pokernow.com/socket.io/?gameID=TABLE_TEST"); }
+    while (generation < f.connectionGeneration) { generation++; socket = new win.WebSocket(`wss://www.pokernow.com/socket.io/?gameID=${tableId}`); }
     socket.incoming(f);
   };
   for (const f of fs) {
@@ -233,25 +343,69 @@ async function live(change?: (fs: any[], read: any) => void, originalObserver = 
     action: () => document.querySelector('#poker-ai-reader-overlay [style*="font-size:16px"]')?.textContent ?? null };
 }
 
+describe("hand261 captured source with matching simulated DOM", () => {
+  // Source shapes/cards are retained; identifiers and clocks are sanitized. No recorded DOM exists for hand261;
+  // the read scaffold supplies its six seats, dealer, T5o, 250-chip capacities,
+  // remaining stacks (UTG 245, SB 249, BB 248), wagers and current HJ actor.
+  const capturedLive = (change?: (fs: any[], read: any) => void) =>
+    live(change, false, undefined, '<button type="button">Call 5</button>', false, undefined,
+      load("pokernow-hj-open-261.json").frames);
+  it("classifies T5o and displays the existing locked FOLD, then expires", async () => {
+    const f = await capturedLive(), d = f.diagnostic();
+    expect(d.preflop).toMatchObject({ situation: "facing_open", heroPosition: "HJ", amountToCallBB: 2.5,
+      actionWindowEvidence: "hj_facing_utg_open5" });
+    expect(d.decision.scopedProofs.responseStrategy).toMatchObject({ status: "pure", hand: "T5o", strategyClass: "FOLD" });
+    expect(d.decision.scopedProofs.activation.allowed).toBe(true);
+    expect(f.action(), f.text()).toBe("FOLD");
+    expect(f.requests).toHaveLength(1);
+    expect(f.socket.send).not.toHaveBeenCalled();
+    await f.respond({ ok: true, decisionSource: "engine_policy", result: { action: "CALL", confidence: 1, reasoning: "Override" } });
+    expect(f.action()).toBe("FOLD");
+    f.atAge(9999); f.refresh(); expect(f.action()).toBe("FOLD");
+    f.atAge(10000); f.refresh(); expect(f.action()).toBeNull();
+    expect(f.text()).toContain("EVIDENCE EXPIRED");
+  });
+  it.each(["old-stacks", "source-stack-conflict", "short-stack", "over-strategy-capacity", "cards", "actor", "dealer", "wager", "pot"])(
+    "withholds advice for %s", async variant => {
+      const f = await capturedLive((fs, read) => {
+        const hero = read.raw.seats.find((s: any) => s.isYou);
+        if (variant === "old-stacks") hero.stackText = hero.stackContainerText = "338";
+        if (variant === "source-stack-conflict") fs[1].payload.players.PLAYER_1.stack = 251;
+        if (variant === "short-stack" || variant === "over-strategy-capacity") {
+          const amount = variant === "short-stack" ? 201 : 301;
+          fs[1].payload.players.PLAYER_1.stack = amount;
+          hero.stackText = hero.stackContainerText = String(amount);
+        }
+        if (variant === "cards") hero.holeCardClassLists = [["card-h", "card-s-A"], ["card-d", "card-s-K"]];
+        if (variant === "actor") hero.statusClasses = ["table-player", "you-player"];
+        if (variant === "dealer") read.context.dealerSeatNumber = 2;
+        if (variant === "wager") read.raw.seats.find((s: any) => s.seatNumber === 10).betValueText = "6";
+        if (variant === "pot") read.raw.potTotalValueText = "99";
+      });
+      expect(f.action(), f.text()).toBeNull(); expect(f.requests).toHaveLength(0);
+    });
+});
+
 // Deliberately synthetic private cards; reuses the reviewed public source grammar.
-// No hand-specific collection or assertion that recorded HJ actually held 72o.
-function foldCards(fs: any[], read: any) {
+// No hand-specific collection or assertion that recorded HJ held these cards.
+function foldCards(fs: any[], read: any, hand = ["7h", "2c"]) {
   for (const frame of fs) {
     const cards = (frame.payload.gameState ?? frame.payload).pC?.PLAYER_2?.cards;
-    if (cards) cards.forEach((c: any, i: number) => { c.value = ["7h", "2c"][i]; });
+    if (cards) cards.forEach((c: any, i: number) => { c.value = hand[i]; });
   }
-  read.raw.seats.find((s: any) => s.seatNumber === 2).holeCardClassLists = ["7h", "2c"].map(c =>
+  read.raw.seats.find((s: any) => s.seatNumber === 2).holeCardClassLists = hand.map(c =>
     ["card-container", `card-${c[1]}`, `card-s-${c[0]}`, "flipped", "med"]);
 }
-describe("reviewed 72o HJ fold through the existing locked overlay", () => {
-  it("paints FOLD before a pending explanation with absent CALL and raise controls/pot EV", async () => {
-    const f = await live(foldCards), d = f.diagnostic();
-    expect(d.decision.scopedProofs.responseStrategy).toMatchObject({ status: "pure", hand: "72o",
+describe("reviewed weak-offsuit HJ folds through the existing locked overlay", () => {
+  it.each(["72o", "94o", "Q7o"])("paints and explains %s before a pending explanation, then expires", async hand => {
+    const f = await live((fs, read) => foldCards(fs, read, [`${hand[0]}h`, `${hand[1]}c`])), d = f.diagnostic();
+    expect(d.decision.scopedProofs.responseStrategy).toMatchObject({ status: "pure", hand,
       strategyClass: "FOLD", chosenAction: null, liveAuthorized: false,
       reference: { provenance: { kind: "heuristic", review: "reviewed" } },
       remainingRequirements: { FOLD: [] }, call: { authorization: "unproven" } });
     expect(d.decision.scopedProofs.activation.allowed).toBe(true);
     expect(f.action()).toBe("FOLD");
+    expect(f.text()).toContain(`Fold ${hand} facing UTG`);
     expect(f.text()).toContain("conservative heuristic");
     expect(f.text()).toContain("not exact GTO");
     expect(f.requests).toHaveLength(1);
@@ -262,6 +416,12 @@ describe("reviewed 72o HJ fold through the existing locked overlay", () => {
     await f.respond({ ok: true, decisionSource: "engine_policy", result: { action: "FOLD", confidence: 1, reasoning: "Late" } });
     expect(f.action()).toBeNull();
   });
+  it.each([["Qh", "8c"], ["7h", "2h"], ["Kh", "2c"], ["9h", "9c"]])(
+    "abstains through the overlay for uncovered %s %s", async (a, b) => {
+      const f = await live((fs, read) => foldCards(fs, read, [a, b]));
+      expect(f.diagnostic().decision.scopedProofs.responseStrategy.status).toBe("uncovered");
+      expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
+    });
   it("rejects an explanation changing the locked action", async () => {
     const f = await live(foldCards);
     expect(f.action(), f.text()).toBe("FOLD");
@@ -300,9 +460,9 @@ describe("reviewed 72o HJ fold through the existing locked overlay", () => {
       expect(f.action()).toBeNull();
     });
   it.each(["out-of-range", "unknown-stack", "pot-conflict", "source-cards", "profile", "wrong-open", "gap"])(
-    "abstains for 72o with %s", async variant => {
+    "abstains for newly supported Q7o with %s", async variant => {
       const f = await live((fs, read) => {
-        foldCards(fs, read);
+        foldCards(fs, read, ["Qh", "7c"]);
         if (variant === "out-of-range") {
           for (const frame of fs) {
             const p = (frame.payload.gameState ?? frame.payload).players?.PLAYER_2;

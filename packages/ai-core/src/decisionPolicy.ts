@@ -234,7 +234,7 @@ function evaluatePolicyWithProofs(packet: DecisionPacket): DecisionPolicyResult 
     if (response) {
       result.status = "selected"; result.chosenAction = "FOLD";
       result.strategySource = `${response.reference!.id}@${response.reference!.version}: reviewed conservative heuristic`;
-      result.ruleExplanation = "Fold 72o facing UTG's 5-chip open from HJ. Reviewed conservative heuristic for six players at 100-150BB starting capacity, unraked 1/2 chips; not exact GTO or a solved EV comparison.";
+      result.ruleExplanation = `Fold ${response.hand} facing UTG's 5-chip open from HJ. Reviewed conservative heuristic (weak-offsuit subset) for six players at 100-150BB starting capacity, unraked 1/2 chips; not exact GTO or a solved EV comparison.`;
       result.assumptions = response.reference!.provenance.assumptions;
       result.confidence = "medium"; result.equitySource = "not used by the pure-FOLD reference";
       result.foldEquitySource = "not assumed";

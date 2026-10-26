@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { parseCards } from "@poker-ai/shared";
+import { allHandTypes, formatHandType } from "@poker-ai/range-engine";
 import { buildPreflopContext, type PreflopInput } from "./preflopContext.js";
 import { HjResponseReferenceSchema, HJ_RESPONSE_PROFILE, inspectLiveHjResponseStrategy,
   reviewHjResponseReference, isReviewedHjFold, type HjResponseReference } from "./preflopResponsePolicy.js";
@@ -9,6 +10,10 @@ import { decisionProofBinding, PROOF_SCOPES } from "./decisionProofs.js";
 import { evaluateDecisionPolicy } from "./decisionPolicy.js";
 import { lockedEngineRecommendation } from "./policyRecommendation.js";
 import type { ModelRouter } from "./modelRouter.js";
+
+// Independently enumerated review boundary; never derive expectations from the catalog.
+const reviewedHands = ["72o", "82o", "83o", "92o", "93o", "94o", "T2o", "T3o", "T4o", "T5o",
+  "J2o", "J3o", "J4o", "J5o", "J6o", "Q2o", "Q3o", "Q4o", "Q5o", "Q6o", "Q7o"];
 
 // These allocations test the importer/classifier contract ONLY. They are not a
 // poker chart, reviewed strategy, solve, or evidence for activating any action.
@@ -43,8 +48,8 @@ function input(cards = "7h 2c") {
   return { preflop, holeCards: parseCards(cards) };
 }
 // Synthetic scoped certificates test consumption, not source acceptance.
-function foldPacket(): DecisionPacket {
-  const i = input(), now = Date.now();
+function foldPacket(cards = "7h 2c"): DecisionPacket {
+  const i = input(cards), now = Date.now();
   const packet = validateDecisionPacket({
     hero: { holeCards: i.holeCards, position: "HJ", stackBB: 125 },
     table: { street: "preflop", board: [], potBB: null, numOpponentsRemaining: 5 },
@@ -54,7 +59,7 @@ function foldPacket(): DecisionPacket {
       decisionPot: null, decisionPotSource: null, isPotSemanticsVerified: false },
     preflopExecution: { heroIsCurrentToAct: true, sourceWindowKey: "synthetic-window",
       hjResponseWindow: { profile: HJ_RESPONSE_PROFILE, tableId: "T", handId: "H", heroId: "hero", heroSeat: 2,
-        heroCards: ["2c", "7h"], generation: 1, sourceCursor: 67, decisionEpoch: "E", receivedAt: now, expiresAt: now + 10000 },
+        heroCards: cards.split(" ").sort(), generation: 1, sourceCursor: 67, decisionEpoch: "E", receivedAt: now, expiresAt: now + 10000 },
       controls: { source: "No raise controls needed", formVisible: false, raiseSubmitVisible: false,
         raiseSubmitEnabled: null, selectedRaiseToBB: null, issues: [] } },
   });
@@ -71,6 +76,18 @@ function rebind(packet: DecisionPacket) {
   return packet;
 }
 describe("locked HJ fold production policy", () => {
+  it.each(reviewedHands)("selects and correctly explains all 12 offsuit combinations of %s", hand => {
+    for (const a of "shdc") for (const b of "shdc") {
+      if (a === b) continue;
+      // Reverse hole-card order as well: the displayed hand must be canonical.
+      for (const cards of [`${hand[0]}${a} ${hand[1]}${b}`, `${hand[1]}${b} ${hand[0]}${a}`]) {
+        const policy = evaluateDecisionPolicy(foldPacket(cards));
+        expect(policy.chosenAction, cards).toBe("FOLD");
+        expect(policy.ruleExplanation).toContain(`Fold ${hand} facing UTG`);
+        expect(lockedEngineRecommendation(policy)?.reasoning).toContain(`Fold ${hand} facing UTG`);
+      }
+    }
+  });
   it("withholds a relay response if its explanation finishes at the original deadline", async () => {
     const packet = foldPacket();
     const clock = vi.spyOn(Date, "now").mockReturnValue(packet.preflopExecution!.hjResponseWindow!.receivedAt);
@@ -139,7 +156,7 @@ describe("locked HJ fold production policy", () => {
 });
 
 describe("HJ response reference review", () => {
-  it("installs only the reviewed 72o heuristic, retaining source caveats", () => {
+  it("installs the reviewed weak-offsuit heuristic, retaining source caveats", () => {
     const r = inspectLiveHjResponseStrategy(input());
     expect(r).toMatchObject({ status: "pure", strategyClass: "FOLD", chosenAction: null, liveAuthorized: false,
       reference: { provenance: { kind: "heuristic", review: "reviewed" },
@@ -151,6 +168,23 @@ describe("HJ response reference review", () => {
     expect(isReviewedHjFold(reviewHjResponseReference(input(), pending))).toBe(false);
     pending.provenance.review = "reviewed"; pending.provenance.kind = "test_fixture";
     expect(isReviewedHjFold(reviewHjResponseReference(input(), pending))).toBe(false);
+  });
+  it("covers exactly the reviewed 21 categories and abstains on all other 148 categories", () => {
+    const covered: string[] = [];
+    for (const hand of allHandTypes().map(formatHandType)) {
+      const cards = `${hand[0]}h ${hand[1]}${hand.endsWith("s") ? "h" : "c"}`;
+      const r = inspectLiveHjResponseStrategy(input(cards));
+      if (reviewedHands.includes(hand)) {
+        expect(r).toMatchObject({ status: "pure", hand, strategyClass: "FOLD",
+          allocations: [{ action: "FOLD", frequency: 1 }] });
+        covered.push(hand);
+      } else {
+        expect(r, hand).toMatchObject({ status: "uncovered", strategyClass: null, allocations: null });
+        expect(evaluateDecisionPolicy(foldPacket(cards)).chosenAction, hand).toBeNull();
+      }
+    }
+    expect(covered.sort()).toEqual([...reviewedHands].sort());
+    expect(covered.length * 12).toBe(252);
   });
   it("unknown cold-call tree is permitted for pure FOLD only, never an allocated CALL", () => {
     const r = reference(); r.referenceSettings.coldCallsAllowed = null;

@@ -6002,20 +6002,20 @@
   }
   var liveReference = {
     schemaVersion: 1,
-    id: "hj-utg-72o-conservative-fold",
-    version: "1",
+    id: "hj-utg-weak-offsuit-conservative-fold",
+    version: "2",
     provenance: {
       kind: "heuristic",
       review: "reviewed",
       url: "https://github.com/jensbaagaard/poker-practice/blob/590b8f65a9728a99ab8fb5d7a4ec9dc40a65225e/data/openSourcePokerData/Cash_100_GTO.json",
-      node: "3BetHJvsLJ[72o]=0; CallHJvsLJ[72o]=0; both 169-hand nodes present. Six-max LJ maps to UTG.",
-      reviewNotes: "Reviewed explicit zeros, not missing-hand defaults. Corroborated by GTO MAX 2026-10-16 HJ vs first-seat 3bet-or-fold chart. Conservative 72o-only adaptation; not exact GTO or solver-certified.",
+      node: "3BetHJvsLJ[hand]=0 and CallHJvsLJ[hand]=0 for each of the 21 explicitly listed hands; both 169-hand nodes present. Six-max LJ maps to UTG.",
+      reviewNotes: "Reviewed weak-offsuit heuristic subset: 72o plus 20 additions, individually checked against Git blob 3102a91612bda6ffe8b8185ed1ecca07d089dcce. Explicit zeros, not missing-hand defaults. All excluded by GTO MAX 2026-10-16 HJ vs first-seat 3bet-or-fold chart. Per-hand rationale in HJ_RESPONSE_FOLD.md; not exact GTO or solver-certified.",
       assumptions: [
         "Source: 100BB, six-max, no ante, 2.5BB open. Poker Trainer extraction is documented; original solver, rake rate/cap and solve accuracy are unverified.",
         "The HJ-vs-LJ CALL node is all-zero; whether cold calls were available in the original solve is unknown. A named CALL node does not prove that tree permission.",
         "Corroboration: https://gtomax.ai/free-poker-rta-charts/charts.json; raked 100BB, restricted 3bet-or-fold tree. This does not certify an unraked strategy.",
         "Application: unraked normal play-money Hold'em, no ante/straddle, six dealt-in players, all starting capacities 100-150BB; existing source checks also require at least 100BB remaining.",
-        "Only 72o: unpaired, offsuit, disconnected, no ace/king blocker; conservatively decline cold entry against an early open with four players behind. No assumption that every raked fold transfers to no rake.",
+        "Only the 21 listed hands: unpaired, offsuit, no ace/king, rank separation at least five (no straight can use both hole cards). Low pairs or weak kickers offer poor cold-entry prospects against an early open with four players behind. J/Q blockers alone do not justify entry. No transfer of the full fold complement.",
         "Population baseline only; no exploit against an unusually wide opener or opponents overfolding to reraises. No claimed EV margin or depth-invariance proof."
       ]
     },
@@ -6034,9 +6034,31 @@
       profile: HJ_RESPONSE_PROFILE,
       minCapacityBB: 100,
       maxCapacityBB: 150,
-      rationale: "Explicit conservative heuristic for 72o only across a bounded ordinary deep-stack interval and no rake. Weak disconnected offsuit cold entry is declined; additional depth/rake changes are not claimed solved. Other hands and capacities abstain."
+      rationale: "Explicit reviewed 21-hand weak-offsuit heuristic subset across a bounded ordinary deep-stack interval and no rake. Weak disconnected offsuit cold entry is declined; additional depth/rake changes are not claimed solved. Other hands and capacities abstain."
     },
-    entries: [{ hand: "72o", allocations: [{ action: "FOLD", frequency: 1 }] }]
+    entries: [
+      { hand: "72o", allocations: [{ action: "FOLD", frequency: 1 }] },
+      { hand: "82o", allocations: [{ action: "FOLD", frequency: 1 }] },
+      { hand: "83o", allocations: [{ action: "FOLD", frequency: 1 }] },
+      { hand: "92o", allocations: [{ action: "FOLD", frequency: 1 }] },
+      { hand: "93o", allocations: [{ action: "FOLD", frequency: 1 }] },
+      { hand: "94o", allocations: [{ action: "FOLD", frequency: 1 }] },
+      { hand: "T2o", allocations: [{ action: "FOLD", frequency: 1 }] },
+      { hand: "T3o", allocations: [{ action: "FOLD", frequency: 1 }] },
+      { hand: "T4o", allocations: [{ action: "FOLD", frequency: 1 }] },
+      { hand: "T5o", allocations: [{ action: "FOLD", frequency: 1 }] },
+      { hand: "J2o", allocations: [{ action: "FOLD", frequency: 1 }] },
+      { hand: "J3o", allocations: [{ action: "FOLD", frequency: 1 }] },
+      { hand: "J4o", allocations: [{ action: "FOLD", frequency: 1 }] },
+      { hand: "J5o", allocations: [{ action: "FOLD", frequency: 1 }] },
+      { hand: "J6o", allocations: [{ action: "FOLD", frequency: 1 }] },
+      { hand: "Q2o", allocations: [{ action: "FOLD", frequency: 1 }] },
+      { hand: "Q3o", allocations: [{ action: "FOLD", frequency: 1 }] },
+      { hand: "Q4o", allocations: [{ action: "FOLD", frequency: 1 }] },
+      { hand: "Q5o", allocations: [{ action: "FOLD", frequency: 1 }] },
+      { hand: "Q6o", allocations: [{ action: "FOLD", frequency: 1 }] },
+      { hand: "Q7o", allocations: [{ action: "FOLD", frequency: 1 }] }
+    ]
   };
   function isReviewedHjFold(review) {
     return review.status === "pure" && review.strategyClass === "FOLD" && review.reference?.provenance.review === "reviewed" && review.reference.provenance.kind !== "test_fixture";
@@ -6431,7 +6453,7 @@
         result.status = "selected";
         result.chosenAction = "FOLD";
         result.strategySource = `${response.reference.id}@${response.reference.version}: reviewed conservative heuristic`;
-        result.ruleExplanation = "Fold 72o facing UTG's 5-chip open from HJ. Reviewed conservative heuristic for six players at 100-150BB starting capacity, unraked 1/2 chips; not exact GTO or a solved EV comparison.";
+        result.ruleExplanation = `Fold ${response.hand} facing UTG's 5-chip open from HJ. Reviewed conservative heuristic (weak-offsuit subset) for six players at 100-150BB starting capacity, unraked 1/2 chips; not exact GTO or a solved EV comparison.`;
         result.assumptions = response.reference.provenance.assumptions;
         result.confidence = "medium";
         result.equitySource = "not used by the pure-FOLD reference";
@@ -9158,6 +9180,17 @@
     ];
     return Object.keys(raw).length === keys.length && keys.every((k) => Object.hasOwn(raw, k)) && integer2(raw.now) && integer2(raw.pre) && raw.now > raw.pre && integer2(raw.sNAA) && integer2(raw.sN) && raw.mR === 8 && raw.cHB === 5 && raw.mEV === 0 && raw.fV === "0.1.72" && raw.sNA === "NSAA" && raw.pITT === null && same(raw.pGS, {}) && same(raw.wBACPI, []) && same(raw.eventsData, []) && object2(raw.tB) && Object.keys(raw.tB).length === 1 && Object.values(raw.tB)[0] === 5 && same(raw.cRPI, Object.keys(raw.tB));
   }
+  function isObservedHjFacingTurnPatch(raw) {
+    const fields = ["now", "pre", "eventsData", "mEV", "fV", "sN", "cPI", "pITT", "sNA", "pASA", "sNAA"];
+    return object2(raw) && Object.keys(raw).length === fields.length && fields.every((k) => Object.hasOwn(raw, k)) && integer2(raw.now) && integer2(raw.pre) && raw.now > raw.pre && integer2(raw.sN) && raw.mEV === 0 && raw.fV === "0.1.72" && same(raw.eventsData, []) && typeof raw.cPI === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(raw.cPI) && raw.pITT === raw.cPI && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now;
+  }
+  function validatedFacingTurnPatch(data, heroId) {
+    const existing = validatedOpeningPatch(data, heroId);
+    if (existing) return existing;
+    const raw = data.bettingPatch, fields = ["now", "pre", "eventsData", "fV", "pITT", "cPI"];
+    if (data.event !== "gC" || data.heroId !== heroId || !isObservedHjFacingTurnPatch(raw) || Object.keys(data.frame).length !== fields.length || !fields.every((k) => Object.hasOwn(data.frame, k) && same(data.frame[k], raw[k]))) return null;
+    return { raw, kind: "turn" };
+  }
   function advanceFacingOpenWindow(pending, data, previous, next, sequence, at) {
     const w = pending.witness, utg = w.players.find((p) => p.position === "UTG"), hj = w.players.find((p) => p.position === "HJ");
     if (!w.openingSizeProfile || data.heroId !== w.heroId || data.event !== "gC" || previous.hI !== w.handId || next.hI !== w.handId || next.gN !== w.handNumber || !same(next.gT, [1, 0])) return null;
@@ -9270,7 +9303,7 @@
       };
       return { pending: { ...pending, transition } };
     }
-    const patch = validatedOpeningPatch(data, w.heroId), t = pending.transition;
+    const patch = validatedFacingTurnPatch(data, w.heroId), t = pending.transition;
     if (!patch || patch.kind !== "turn" || sequence !== t.sequence + 1 || patch.raw.pre !== t.cursor || previous.pITT !== null || next.cPI !== hj.playerId || next.pITT !== hj.playerId || !w.players.every((p) => (next.tB[p.playerId] ?? 0) === (p.playerId === utg.playerId ? 5 : p.contribution))) return null;
     return { pending: { ...pending, hjActivation: { sequence, sourcePatch: structuredClone(patch.raw), receivedAt: at } }, proof: {
       version: 1,
@@ -10122,7 +10155,7 @@
         candidateSizeStatus: packet?.policyContext ? "see policy reasons and verified bounds" : "withheld: no verified policy legality/pot inputs",
         policy,
         preflopExecution: assessment.state?.street === "preflop" ? buildLivePreflopExecution(read, assessment, handTimeline2 ? liveProofRevision(handTimeline2) : "source unavailable") : null,
-        preflopStrategyScope: "Conditional six-max 100BB+ RFI reference, 2.5BB fixed opening convention. HJ versus accepted UTG open5: 72o FOLD only, reviewed conservative unraked 100-150BB starting-capacity heuristic, not exact GTO. Existing source checks still require 100BB remaining. Cards/turn/window/connection/roster/position/blinds/stacks need independent proofs; RAISE also needs size legality. Pot EV, CALL permission and raise sizing are not pure-FOLD prerequisites; contradictions still block.",
+        preflopStrategyScope: "Conditional six-max 100BB+ RFI reference, 2.5BB fixed opening convention. HJ versus accepted UTG open5: FOLD only for the explicit 21-hand weak-offsuit subset (including 72o), reviewed conservative unraked 100-150BB starting-capacity heuristic, not exact GTO. Existing source checks still require 100BB remaining. Cards/turn/window/connection/roster/position/blinds/stacks need independent proofs; RAISE also needs size legality. Pot EV, CALL permission and raise sizing are not pure-FOLD prerequisites; contradictions still block.",
         potEvidence: packet?.potEvidence ?? null,
         engineCalculations: packet?.engineCalculations ?? null
       },
@@ -10713,6 +10746,7 @@
   var token4 = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(v);
   var integer5 = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
   var same3 = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  var stackReset = (players) => object7(players) && Object.keys(players).length === 6 && Object.values(players).every((p) => object7(p) && Object.keys(p).length === 1 && Object.hasOwn(p, "stack") && integer5(p.stack));
   var equivalent = (a, b) => {
     if (a === b) return true;
     if (Array.isArray(a)) return Array.isArray(b) && a.length === b.length && a.every((v, i) => equivalent(v, b[i]));
@@ -10722,7 +10756,7 @@
     const a = reg.frame, b = next.frame, hero = reg.heroId;
     const firstActor = role === "UTG" ? hero : b.cPI;
     if (role !== "UTG" && (a.version !== "0.1.72" || (b.version ?? a.version) !== "0.1.72" || b.fV !== "0.1.72")) return null;
-    if (!hero || next.event !== "gC" || a.id !== tableId || Object.hasOwn(b, "id") && b.id !== tableId || b.r === true || next.heroId !== hero || !integer5(a.now) || !integer5(b.now) || b.pre !== a.now || b.now <= a.now || !integer5(a.gN) || b.gN !== a.gN + 1 || !token4(a.hI) || !token4(b.hI) || a.hI === b.hI || !same3(a.gT, [1, 5]) || !same3(b.gT, [1, 0]) || !same3(b.oTC, { "1": [] }) || b.gameResult !== "<D>" || b.cPI !== firstActor || b.pITT !== firstActor || !same3(b.cRPI, []) || !same3(b.eventsData, []) || !same3(b.players, {}) || !same3(b.rHP, []) || b.rHC !== null) return null;
+    if (!hero || next.event !== "gC" || a.id !== tableId || Object.hasOwn(b, "id") && b.id !== tableId || b.r === true || next.heroId !== hero || !integer5(a.now) || !integer5(b.now) || b.pre !== a.now || b.now <= a.now || !integer5(a.gN) || b.gN !== a.gN + 1 || !token4(a.hI) || !token4(b.hI) || a.hI === b.hI || !same3(a.gT, [1, 5]) || !same3(b.gT, [1, 0]) || !same3(b.oTC, { "1": [] }) || b.gameResult !== "<D>" || b.cPI !== firstActor || b.pITT !== firstActor || !same3(b.cRPI, []) || !same3(b.eventsData, []) || !same3(b.players, {}) && (next.handStartStackReset !== true || !stackReset(b.players)) || !same3(b.rHP, []) || b.rHC !== null) return null;
     const profile = { smallBlind: 1, bigBlind: 2, ante: null, deadButton: false, gM: "th", mode: "4fun", aD: false, aS: false, cM: false, cR: false };
     for (const [k, value] of Object.entries(profile)) if (!same3(a[k], value) || Object.hasOwn(b, k) && !same3(b[k], value)) return null;
     if (!Array.isArray(a.seats) || a.seats.length !== 6 || Object.hasOwn(b, "seats") && !same3(a.seats, b.seats) || !Array.isArray(b.iHPI) || b.iHPI.length !== 6 || !object7(a.players) || !object7(b.pC) || !object7(b.tB) || !object7(a.pGS) || !object7(b.pGS)) return null;
@@ -10731,6 +10765,8 @@
     const rows = seats;
     const ids2 = rows.map((s) => s[1]);
     if (new Set(ids2).size !== 6 || new Set(b.iHPI).size !== 6 || Object.keys(b.pC).length !== 6 || !ids2.every((id) => b.iHPI.includes(id) && Object.hasOwn(b.pC, id)) || Object.keys(a.players).length !== 6 || Object.keys(b.pGS).some((id) => !ids2.includes(id))) return null;
+    const reset = !same3(b.players, {});
+    if (reset && !ids2.every((id) => Object.hasOwn(b.players, id))) return null;
     const dealer = rows.findIndex(([seat, id]) => seat === b.dealerSeat && id === b.dealerID);
     if (dealer < 0) return null;
     const cycle = [...rows.slice(dealer), ...rows.slice(0, dealer)];
@@ -10740,8 +10776,9 @@
     const players = [];
     for (let i = 0; i < cycle.length; i++) {
       const [seat, playerId] = cycle[i], p = a.players[playerId], cards = b.pC[playerId]?.cards;
-      if (!object7(p) || p.id !== playerId || !integer5(p.stack) || p.stack < 202 || p.status !== "inGame" || Object.hasOwn(p, "disconnectedSince") || (b.pGS[playerId] ?? a.pGS[playerId]) !== "inGame" || !Array.isArray(cards) || cards.length !== 2 || cards.some((c) => !object7(c) || c.showing !== false || (playerId === hero ? typeof c.value !== "string" || !/^[2-9TJQKA][shdc]$/.test(c.value) : c.value !== null))) return null;
-      players.push({ seat, playerId, position: roles[i], sourceStack: p.stack, contribution: i === 1 ? 1 : i === 2 ? 2 : 0 });
+      const sourceStack = reset ? b.players[playerId].stack : p?.stack;
+      if (!object7(p) || p.id !== playerId || !integer5(p.stack) || !integer5(sourceStack) || sourceStack < 202 || p.status !== "inGame" || Object.hasOwn(p, "disconnectedSince") || (b.pGS[playerId] ?? a.pGS[playerId]) !== "inGame" || !Array.isArray(cards) || cards.length !== 2 || cards.some((c) => !object7(c) || c.showing !== false || (playerId === hero ? typeof c.value !== "string" || !/^[2-9TJQKA][shdc]$/.test(c.value) : c.value !== null))) return null;
+      players.push({ seat, playerId, position: roles[i], sourceStack, contribution: i === 1 ? 1 : i === 2 ? 2 : 0 });
     }
     const heroCards2 = b.pC[hero].cards.map((c) => c.value);
     if (new Set(heroCards2).size !== 2) return null;

@@ -43,6 +43,27 @@ export function isObservedUtgOpenPatch(raw: unknown): raw is Record<string, any>
     Object.values(raw.tB)[0] === 5 && same(raw.cRPI, Object.keys(raw.tB));
 }
 
+/** Hand261 HJ activation omits mAVTB. No capacity is inferred from that field;
+ * this closed shape is consumed only immediately after an accepted UTG open5. */
+export function isObservedHjFacingTurnPatch(raw: unknown): raw is Record<string, any> {
+  const fields = ["now", "pre", "eventsData", "mEV", "fV", "sN", "cPI", "pITT", "sNA", "pASA", "sNAA"];
+  return object(raw) && Object.keys(raw).length === fields.length && fields.every(k => Object.hasOwn(raw, k)) &&
+    integer(raw.now) && integer(raw.pre) && raw.now > raw.pre && integer(raw.sN) &&
+    raw.mEV === 0 && raw.fV === "0.1.72" && same(raw.eventsData, []) &&
+    typeof raw.cPI === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(raw.cPI) && raw.pITT === raw.cPI &&
+    raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now;
+}
+
+function validatedFacingTurnPatch(data: UtgProjection, heroId: string) {
+  const existing = validatedOpeningPatch(data, heroId);
+  if (existing) return existing;
+  const raw = data.bettingPatch, fields = ["now", "pre", "eventsData", "fV", "pITT", "cPI"];
+  if (data.event !== "gC" || data.heroId !== heroId || !isObservedHjFacingTurnPatch(raw) ||
+      Object.keys(data.frame).length !== fields.length ||
+      !fields.every(k => Object.hasOwn(data.frame, k) && same(data.frame[k], raw[k]))) return null;
+  return { raw, kind: "turn" as const };
+}
+
 /** Source-derived event with explicit chip semantics, original actor/roster and
  * ordering provenance. The closed action union deliberately exposes only the
  * implemented grammar; future actions require their own reviewed recognizers. */
@@ -196,7 +217,7 @@ export function advanceFacingOpenWindow(pending: FacingOpenPending, data: UtgPro
     };
     return { pending: { ...pending, transition } };
   }
-  const patch = validatedOpeningPatch(data, w.heroId), t = pending.transition;
+  const patch = validatedFacingTurnPatch(data, w.heroId), t = pending.transition;
   if (!patch || patch.kind !== "turn" || sequence !== t.sequence + 1 || patch.raw.pre !== t.cursor ||
       previous.pITT !== null || next.cPI !== hj.playerId || next.pITT !== hj.playerId ||
       !w.players.every(p => (next.tB[p.playerId] ?? 0) === (p.playerId === utg.playerId ? 5 : p.contribution))) return null;

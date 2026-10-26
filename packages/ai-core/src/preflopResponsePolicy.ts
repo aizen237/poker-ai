@@ -139,21 +139,21 @@ export function reviewHjResponseReference(input: { preflop: unknown; holeCards: 
     reasons: ["Reference classification only. Review status and source/action legality must be independently enforced before any live activation."] };
 }
 
-/** Reviewed 2026-10-25: only this explicit hand is installed. See HJ_RESPONSE_FOLD.md.
+/** Reviewed 2026-10-26: explicit 21-hand weak-offsuit subset. See HJ_RESPONSE_FOLD.md.
  * The dataset's name is not a claim of solver provenance or unraked accuracy. */
 const liveReference: HjResponseReference = {
-  schemaVersion: 1, id: "hj-utg-72o-conservative-fold", version: "1",
+  schemaVersion: 1, id: "hj-utg-weak-offsuit-conservative-fold", version: "2",
   provenance: {
     kind: "heuristic", review: "reviewed",
     url: "https://github.com/jensbaagaard/poker-practice/blob/590b8f65a9728a99ab8fb5d7a4ec9dc40a65225e/data/openSourcePokerData/Cash_100_GTO.json",
-    node: "3BetHJvsLJ[72o]=0; CallHJvsLJ[72o]=0; both 169-hand nodes present. Six-max LJ maps to UTG.",
-    reviewNotes: "Reviewed explicit zeros, not missing-hand defaults. Corroborated by GTO MAX 2026-10-16 HJ vs first-seat 3bet-or-fold chart. Conservative 72o-only adaptation; not exact GTO or solver-certified.",
+    node: "3BetHJvsLJ[hand]=0 and CallHJvsLJ[hand]=0 for each of the 21 explicitly listed hands; both 169-hand nodes present. Six-max LJ maps to UTG.",
+    reviewNotes: "Reviewed weak-offsuit heuristic subset: 72o plus 20 additions, individually checked against Git blob 3102a91612bda6ffe8b8185ed1ecca07d089dcce. Explicit zeros, not missing-hand defaults. All excluded by GTO MAX 2026-10-16 HJ vs first-seat 3bet-or-fold chart. Per-hand rationale in HJ_RESPONSE_FOLD.md; not exact GTO or solver-certified.",
     assumptions: [
       "Source: 100BB, six-max, no ante, 2.5BB open. Poker Trainer extraction is documented; original solver, rake rate/cap and solve accuracy are unverified.",
       "The HJ-vs-LJ CALL node is all-zero; whether cold calls were available in the original solve is unknown. A named CALL node does not prove that tree permission.",
       "Corroboration: https://gtomax.ai/free-poker-rta-charts/charts.json; raked 100BB, restricted 3bet-or-fold tree. This does not certify an unraked strategy.",
       "Application: unraked normal play-money Hold'em, no ante/straddle, six dealt-in players, all starting capacities 100-150BB; existing source checks also require at least 100BB remaining.",
-      "Only 72o: unpaired, offsuit, disconnected, no ace/king blocker; conservatively decline cold entry against an early open with four players behind. No assumption that every raked fold transfers to no rake.",
+      "Only the 21 listed hands: unpaired, offsuit, no ace/king, rank separation at least five (no straight can use both hole cards). Low pairs or weak kickers offer poor cold-entry prospects against an early open with four players behind. J/Q blockers alone do not justify entry. No transfer of the full fold complement.",
       "Population baseline only; no exploit against an unusually wide opener or opponents overfolding to reraises. No claimed EV margin or depth-invariance proof.",
     ],
   },
@@ -162,8 +162,30 @@ const liveReference: HjResponseReference = {
     rakeDescription: "Unspecified by the extracted dataset; not verified as unraked.",
     coldCallsAllowed: null, threeBetSizesBB: [7.5] },
   application: { profile: HJ_RESPONSE_PROFILE, minCapacityBB: 100, maxCapacityBB: 150,
-    rationale: "Explicit conservative heuristic for 72o only across a bounded ordinary deep-stack interval and no rake. Weak disconnected offsuit cold entry is declined; additional depth/rake changes are not claimed solved. Other hands and capacities abstain." },
-  entries: [{ hand: "72o", allocations: [{ action: "FOLD", frequency: 1 }] }],
+    rationale: "Explicit reviewed 21-hand weak-offsuit heuristic subset across a bounded ordinary deep-stack interval and no rake. Weak disconnected offsuit cold entry is declined; additional depth/rake changes are not claimed solved. Other hands and capacities abstain." },
+  entries: [
+    { hand: "72o", allocations: [{ action: "FOLD", frequency: 1 }] },
+    { hand: "82o", allocations: [{ action: "FOLD", frequency: 1 }] },
+    { hand: "83o", allocations: [{ action: "FOLD", frequency: 1 }] },
+    { hand: "92o", allocations: [{ action: "FOLD", frequency: 1 }] },
+    { hand: "93o", allocations: [{ action: "FOLD", frequency: 1 }] },
+    { hand: "94o", allocations: [{ action: "FOLD", frequency: 1 }] },
+    { hand: "T2o", allocations: [{ action: "FOLD", frequency: 1 }] },
+    { hand: "T3o", allocations: [{ action: "FOLD", frequency: 1 }] },
+    { hand: "T4o", allocations: [{ action: "FOLD", frequency: 1 }] },
+    { hand: "T5o", allocations: [{ action: "FOLD", frequency: 1 }] },
+    { hand: "J2o", allocations: [{ action: "FOLD", frequency: 1 }] },
+    { hand: "J3o", allocations: [{ action: "FOLD", frequency: 1 }] },
+    { hand: "J4o", allocations: [{ action: "FOLD", frequency: 1 }] },
+    { hand: "J5o", allocations: [{ action: "FOLD", frequency: 1 }] },
+    { hand: "J6o", allocations: [{ action: "FOLD", frequency: 1 }] },
+    { hand: "Q2o", allocations: [{ action: "FOLD", frequency: 1 }] },
+    { hand: "Q3o", allocations: [{ action: "FOLD", frequency: 1 }] },
+    { hand: "Q4o", allocations: [{ action: "FOLD", frequency: 1 }] },
+    { hand: "Q5o", allocations: [{ action: "FOLD", frequency: 1 }] },
+    { hand: "Q6o", allocations: [{ action: "FOLD", frequency: 1 }] },
+    { hand: "Q7o", allocations: [{ action: "FOLD", frequency: 1 }] },
+  ],
 };
 
 export function isReviewedHjFold(review: HjResponseReview): boolean {

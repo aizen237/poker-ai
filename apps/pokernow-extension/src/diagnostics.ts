@@ -70,7 +70,7 @@ export function buildLiveDiagnosticSnapshot(
       policy,
       preflopExecution: assessment.state?.street === "preflop"
         ? buildLivePreflopExecution(read, assessment, handTimeline ? liveProofRevision(handTimeline) : "source unavailable") : null,
-      preflopStrategyScope: "Conditional six-max 100BB+ RFI reference, 2.5BB fixed opening convention. HJ versus accepted UTG open5: 72o FOLD only, reviewed conservative unraked 100-150BB starting-capacity heuristic, not exact GTO. Existing source checks still require 100BB remaining. Cards/turn/window/connection/roster/position/blinds/stacks need independent proofs; RAISE also needs size legality. Pot EV, CALL permission and raise sizing are not pure-FOLD prerequisites; contradictions still block.",
+      preflopStrategyScope: "Conditional six-max 100BB+ RFI reference, 2.5BB fixed opening convention. HJ versus accepted UTG open5: FOLD only for the explicit 21-hand weak-offsuit subset (including 72o), reviewed conservative unraked 100-150BB starting-capacity heuristic, not exact GTO. Existing source checks still require 100BB remaining. Cards/turn/window/connection/roster/position/blinds/stacks need independent proofs; RAISE also needs size legality. Pot EV, CALL permission and raise sizing are not pure-FOLD prerequisites; contradictions still block.",
       potEvidence: packet?.potEvidence ?? null,
       engineCalculations: packet?.engineCalculations ?? null,
     },

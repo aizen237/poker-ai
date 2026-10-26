@@ -375,6 +375,10 @@
     ];
     return Object.keys(raw).length === keys2.length && keys2.every((k) => Object.hasOwn(raw, k)) && integer2(raw.now) && integer2(raw.pre) && raw.now > raw.pre && integer2(raw.sNAA) && integer2(raw.sN) && raw.mR === 8 && raw.cHB === 5 && raw.mEV === 0 && raw.fV === "0.1.72" && raw.sNA === "NSAA" && raw.pITT === null && same(raw.pGS, {}) && same(raw.wBACPI, []) && same(raw.eventsData, []) && object4(raw.tB) && Object.keys(raw.tB).length === 1 && Object.values(raw.tB)[0] === 5 && same(raw.cRPI, Object.keys(raw.tB));
   }
+  function isObservedHjFacingTurnPatch(raw) {
+    const fields = ["now", "pre", "eventsData", "mEV", "fV", "sN", "cPI", "pITT", "sNA", "pASA", "sNAA"];
+    return object4(raw) && Object.keys(raw).length === fields.length && fields.every((k) => Object.hasOwn(raw, k)) && integer2(raw.now) && integer2(raw.pre) && raw.now > raw.pre && integer2(raw.sN) && raw.mEV === 0 && raw.fV === "0.1.72" && same(raw.eventsData, []) && typeof raw.cPI === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(raw.cPI) && raw.pITT === raw.cPI && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now;
+  }
 
   // src/flopWindow.ts
   var object5 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
@@ -456,6 +460,7 @@
   var token3 = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(v);
   var integer4 = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
   var same3 = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  var stackReset = (players) => object6(players) && Object.keys(players).length === 6 && Object.values(players).every((p) => object6(p) && Object.keys(p).length === 1 && Object.hasOwn(p, "stack") && integer4(p.stack));
   var equivalent = (a, b) => {
     if (a === b) return true;
     if (Array.isArray(a)) return Array.isArray(b) && a.length === b.length && a.every((v, i) => equivalent(v, b[i]));
@@ -509,6 +514,8 @@
       if (!Array.isArray(p) || p.length !== 2 || !["registered", "gC", "rup"].includes(p[0]) || !object6(p[1])) return null;
       const raw = p[0] === "registered" ? p[1].gameState : p[1];
       if (!object6(raw)) return null;
+      const resetFields = [...keys, "players", "pC", "sBS", "sNA", "pASA", "sNAA", "mAVTB", "wBACPI", "mEV", "sN"];
+      const handStartStackReset = p[0] === "gC" && same3(raw.gT, [1, 0]) && stackReset(raw.players) && Object.keys(raw).every((k) => resetFields.includes(k));
       if (Object.hasOwn(raw, "eventsData") && !same3(raw.eventsData, [])) return null;
       const heroId = p[0] === "registered" ? p[1].currentPlayer?.id : knownHero;
       const flopKind = p[0] === "gC" ? flopPatchKind(raw) : null;
@@ -536,11 +543,12 @@
         event: p[0],
         heroId: token3(heroId) ? heroId : null,
         frame,
+        ...handStartStackReset ? { handStartStackReset: true } : {},
         ...(p[0] === "registered" || p[0] === "gC" && same3(raw.gT, [1, 0])) && (Object.hasOwn(raw, "mR") || Object.hasOwn(raw, "cHB")) ? { flopBoundary: { mR: integer4(raw.mR) ? raw.mR : null, cHB: integer4(raw.cHB) ? raw.cHB : null } } : {},
         ...flopKind && flopKind !== "fold" && (flopKind !== "turn" || !Object.hasOwn(raw, "mAVTB")) ? { flopPatch: raw } : {},
         ...p[0] === "gC" && isFlopAccountingBoundary(raw) ? { flopAccountingBoundary: true } : {},
         ...p[0] === "gC" && isFlopAccountingBoundary(raw, "hand248") ? { flop248Boundary: true } : {},
-        ...p[0] === "gC" && (isObservedUtgOpenPatch(raw) || isObservedHjCallPatch(raw)) ? { bettingPatch: raw } : {},
+        ...p[0] === "gC" && (isObservedUtgOpenPatch(raw) || isObservedHjCallPatch(raw) || isObservedHjFacingTurnPatch(raw)) ? { bettingPatch: raw } : {},
         ...p[0] === "gC" && hjPatchKind(raw) ? { hjPatch: raw } : {}
       };
       return JSON.stringify(result).length <= 4e4 ? result : null;

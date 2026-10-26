@@ -1,7 +1,7 @@
 import { initializeUtgState, advanceUtgState } from "./firstUtgState.js";
 import { advanceHjWindow, hjPatchKind, type HjPending, type HjProof } from "./hjWindow.js";
 import { advanceCoWindow, advanceBtnWindow, advanceSbWindow, type CoPending, type CoProof, type BtnProof, type SbProof } from "./coWindow.js";
-import { isObservedUtgOpenPatch, isObservedHjCallPatch, advanceFacingOpenWindow, type FacingOpenPending, type FacingOpenProof, type CoFacingOpenProof } from "./bettingWindow.js";
+import { isObservedUtgOpenPatch, isObservedHjCallPatch, isObservedHjFacingTurnPatch, advanceFacingOpenWindow, type FacingOpenPending, type FacingOpenProof, type CoFacingOpenProof } from "./bettingWindow.js";
 import { flopPatchKind, advanceFlopWindow, matchesFlopCallContract, matchesFlop248Contract, isFlopAccountingBoundary, type FlopPending, type FlopObservationProof, type FlopAcceptanceProof } from "./flopWindow.js";
 
 /** Scoped first-UTG witness from consecutive bounded source state.
@@ -10,6 +10,10 @@ const object = (v: unknown): v is Record<string, any> => !!v && typeof v === "ob
 const token = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(v);
 const integer = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+// Hand261: a complete stack-only reset, never a partial player/identity patch.
+const stackReset = (players: unknown): players is Record<string, { stack: number }> => object(players) &&
+  Object.keys(players).length === 6 && Object.values(players).every(p => object(p) &&
+    Object.keys(p).length === 1 && Object.hasOwn(p, "stack") && integer(p.stack));
 // Object member order is not semantic; array order and absent/null are.
 const equivalent = (a: any, b: any): boolean => {
   if (a === b) return true;
@@ -27,9 +31,11 @@ const keys = ["id", "hI", "gN", "now", "pre", "r", "gT", "seats", "iHPI", "deale
   "tB", "pGS", "cPI", "pITT", "smallBlind", "bigBlind", "ante", "deadButton", "gM", "mode", "oTC", "gameResult",
   "aD", "aS", "cM", "cR", "cRPI", "rHP", "rHC", "eventsData", "version", "fV", "nR", "mTB", "rIT", "sPM"];
 export interface UtgProjection { event: "registered" | "gC" | "rup"; heroId: string | null; frame: Record<string, any>;
+  /** Closed raw hand261 stack-only reset; roster/amounts are checked below. */
+  handStartStackReset?: true;
   /** Only the two exact raw transition shapes; absent means no HJ/CO/BTN/SB permission. */
   hjPatch?: Record<string, any>;
-  /** Closed accepted UTG open / HJ call only; unknown raw mutations never disappear into a proof. */
+  /** Closed UTG open / HJ call / facing-open activation; unknown raw mutations never disappear into a proof. */
   bettingPatch?: Record<string, any>;
   /** Closed hand239/243/248 observations only; never action permission. */
   flopPatch?: Record<string, any>;
@@ -49,6 +55,11 @@ export function projectFirstUtgSource(data: unknown, knownHero: string | null): 
     if (!Array.isArray(p) || p.length !== 2 || !["registered", "gC", "rup"].includes(p[0]) || !object(p[1])) return null;
     const raw = p[0] === "registered" ? p[1].gameState : p[1];
     if (!object(raw)) return null;
+    // Validate before projection can discard unrelated player mutations. Keep
+    // the new reset shape bounded to the observed hand-start fields.
+    const resetFields = [...keys, "players", "pC", "sBS", "sNA", "pASA", "sNAA", "mAVTB", "wBACPI", "mEV", "sN"];
+    const handStartStackReset = p[0] === "gC" && same(raw.gT, [1, 0]) && stackReset(raw.players) &&
+      Object.keys(raw).every(k => resetFields.includes(k));
     // Unknown nested events/results stay in the opt-in raw capture, not the
     // automatic cross-world projection. This witness supports empty events only.
     if (Object.hasOwn(raw, "eventsData") && !same(raw.eventsData, [])) return null;
@@ -82,13 +93,14 @@ export function projectFirstUtgSource(data: unknown, knownHero: string | null): 
       }
     }
     const result = { event: p[0], heroId: token(heroId) ? heroId : null, frame,
+      ...(handStartStackReset ? { handStartStackReset: true as const } : {}),
       ...((p[0] === "registered" || p[0] === "gC" && same(raw.gT, [1, 0])) &&
         (Object.hasOwn(raw, "mR") || Object.hasOwn(raw, "cHB"))
         ? { flopBoundary: { mR: integer(raw.mR) ? raw.mR : null, cHB: integer(raw.cHB) ? raw.cHB : null } } : {}),
       ...(flopKind && flopKind !== "fold" && (flopKind !== "turn" || !Object.hasOwn(raw, "mAVTB")) ? { flopPatch: raw } : {}),
       ...(p[0] === "gC" && isFlopAccountingBoundary(raw) ? { flopAccountingBoundary: true as const } : {}),
       ...(p[0] === "gC" && isFlopAccountingBoundary(raw, "hand248") ? { flop248Boundary: true as const } : {}),
-      ...(p[0] === "gC" && (isObservedUtgOpenPatch(raw) || isObservedHjCallPatch(raw)) ? { bettingPatch: raw } : {}),
+      ...(p[0] === "gC" && (isObservedUtgOpenPatch(raw) || isObservedHjCallPatch(raw) || isObservedHjFacingTurnPatch(raw)) ? { bettingPatch: raw } : {}),
       ...(p[0] === "gC" && hjPatchKind(raw) ? { hjPatch: raw } : {}) };
     return JSON.stringify(result).length <= 40_000 ? result : null;
   } catch { return null; }
@@ -126,7 +138,8 @@ function firstUtg(reg: UtgProjection, next: UtgProjection, tableId: string, gene
       !integer(a.gN) || b.gN !== a.gN + 1 || !token(a.hI) || !token(b.hI) || a.hI === b.hI ||
       !same(a.gT, [1, 5]) || !same(b.gT, [1, 0]) || !same(b.oTC, { "1": [] }) || b.gameResult !== "<D>" ||
       b.cPI !== firstActor || b.pITT !== firstActor || !same(b.cRPI, []) || !same(b.eventsData, []) ||
-      !same(b.players, {}) || !same(b.rHP, []) || b.rHC !== null) return null;
+      (!same(b.players, {}) && (next.handStartStackReset !== true || !stackReset(b.players))) ||
+      !same(b.rHP, []) || b.rHC !== null) return null;
   // Match the observed normal, no-ante play-money Hold'em profile only. These
   // abbreviated flags are profile constraints, not guessed rule definitions.
   const profile = { smallBlind: 1, bigBlind: 2, ante: null, deadButton: false, gM: "th", mode: "4fun", aD: false, aS: false, cM: false, cR: false };
@@ -142,6 +155,8 @@ function firstUtg(reg: UtgProjection, next: UtgProjection, tableId: string, gene
   if (new Set(ids).size !== 6 || new Set(b.iHPI).size !== 6 || Object.keys(b.pC).length !== 6 ||
       !ids.every(id => b.iHPI.includes(id) && Object.hasOwn(b.pC, id)) || Object.keys(a.players).length !== 6 ||
       Object.keys(b.pGS).some(id => !ids.includes(id))) return null;
+  const reset = !same(b.players, {});
+  if (reset && !ids.every(id => Object.hasOwn(b.players, id))) return null;
   const dealer = rows.findIndex(([seat, id]) => seat === b.dealerSeat && id === b.dealerID);
   if (dealer < 0) return null;
   const cycle = [...rows.slice(dealer), ...rows.slice(0, dealer)];
@@ -152,11 +167,12 @@ function firstUtg(reg: UtgProjection, next: UtgProjection, tableId: string, gene
   const players: FirstUtgWitness["players"] = [];
   for (let i = 0; i < cycle.length; i++) {
     const [seat, playerId] = cycle[i]!, p = a.players[playerId], cards = b.pC[playerId]?.cards;
-    if (!object(p) || p.id !== playerId || !integer(p.stack) || p.stack < 202 || p.status !== "inGame" ||
+    const sourceStack = reset ? b.players[playerId].stack : p?.stack;
+    if (!object(p) || p.id !== playerId || !integer(p.stack) || !integer(sourceStack) || sourceStack < 202 || p.status !== "inGame" ||
         Object.hasOwn(p, "disconnectedSince") || (b.pGS[playerId] ?? a.pGS[playerId]) !== "inGame" ||
         !Array.isArray(cards) || cards.length !== 2 || cards.some(c => !object(c) || c.showing !== false ||
           (playerId === hero ? typeof c.value !== "string" || !/^[2-9TJQKA][shdc]$/.test(c.value) : c.value !== null))) return null;
-    players.push({ seat, playerId, position: roles[i]!, sourceStack: p.stack, contribution: i === 1 ? 1 : i === 2 ? 2 : 0 });
+    players.push({ seat, playerId, position: roles[i]!, sourceStack, contribution: i === 1 ? 1 : i === 2 ? 2 : 0 });
   }
   const heroCards: string[] = b.pC[hero].cards.map((c: any) => c.value);
   if (new Set(heroCards).size !== 2) return null;
