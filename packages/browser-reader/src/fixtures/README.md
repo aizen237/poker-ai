@@ -366,3 +366,12 @@ registration player/card metadata is bounded to reader fields. This is TWO
 dealt-in players, not a synthetic six-player completion. Audit positives retain
 it as observational only. Controlled mutations test rejection, not evidence of
 new PokerNow semantics. Raw local captures are not added to Git.
+## River hand406
+
+`pokernow-river-406.json` is derived from the private, user-provided 49-frame
+capture and diagnostic snapshot. Table/hand/player IDs and names are replaced;
+frame shapes, chip amounts, cards and receipt timing are preserved. No raw
+private file is tracked. The captured CALL receipt is 244ms beyond the original
+10-second source deadline. Fresh overlay cases explicitly simulate an earlier
+UI read; they are not additional live evidence. See `RIVER_HAND_406.md` at the
+repository root for the supported observation and accounting limits.

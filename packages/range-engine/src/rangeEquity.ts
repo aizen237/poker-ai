@@ -15,6 +15,24 @@ export interface RangeEquityOptions {
 
 const DEFAULT_ITERATIONS = 10_000;
 
+/** Complete-board heads-up equity: enumerate every legal weighted combo, including
+ * half of ties. Opt-in so existing Monte Carlo/preflop behavior is unchanged. */
+export function calculateExactRiverEquity(
+  heroCards: readonly Card[], opponentRange: EquityRange, board: readonly Card[],
+): RangeEquityResult {
+  if (heroCards.length !== 2 || board.length !== 5) throw new Error("Exact river equity requires two hero cards and five board cards");
+  validateSimulationInput([...heroCards, ...board], 5, 1);
+  const combos = expandEquityRange(opponentRange, [...heroCards, ...board]);
+  const mass = combos.reduce((sum, c) => sum + c.weight, 0);
+  if (!(mass > 0) || !Number.isFinite(mass)) throw new Error("Opponent range has no valid positive mass");
+  const hero = evaluateBest([...heroCards, ...board]).value;
+  const share = combos.reduce((sum, c) => {
+    const opponent = evaluateBest([...c.cards, ...board]).value;
+    return sum + c.weight * (hero > opponent ? 1 : hero === opponent ? 0.5 : 0);
+  }, 0);
+  return { equity: share / mass, iterations: combos.length };
+}
+
 function checkedRng(random: () => number): () => number {
   return () => {
     const value = random();

@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { parseHTML } from "linkedom";
+import { readCallControl } from "../../../apps/pokernow-extension/src/callControlRead.js";
 import { assessLiveState } from "./liveState.js";
 import type { RawTableInput } from "./gameState.js";
 import { buildLiveDecisionProofs, liveProofRevision, activationLabel } from "../../../apps/pokernow-extension/src/decisionProofs.js";
@@ -34,6 +36,59 @@ function sourceFixture() {
 }
 const assess = (read: LiveTableRead, source: ReturnType<typeof sourceFixture>["source"] | null = null) =>
   buildLiveDecisionProofs(read, assessLiveState(read.raw, read.context), source?.snapshot() ?? null, null, "local-epoch");
+
+describe("river pairwise live blockers (synthetic reads, no new source contract)", () => {
+  const river = () => {
+    const read = readFixture();
+    read.raw.boardCards.push({ valueText: "J", suitText: "h" }, { valueText: "K", suitText: "c" });
+    read.callControl = readCallControl(parseHTML('<button type="button">Call 4</button>').document, () => true);
+    return read;
+  };
+  it("does not promote matching display sums and CALL control into a contestable pot or river identity", () => {
+    const r = assess(river(), sourceFixture().source).riverCallFold!;
+    expect(r.status).toBe("abstained"); expect(r.liveAuthorized).toBe(false);
+    expect(r.reasons.join(" ")).toMatch(/contestability/);
+    expect(r.reasons.join(" ")).toContain("No validated river source activation");
+    for (const irrelevant of ["position", "actionWindow", "reopening", "raiseLegality", "rangeInput", "equity", "terminal"])
+      expect(r.requiredProofs).not.toContain(irrelevant);
+    expect(r.warning).toBe("RAISE not evaluated.");
+  });
+  it.each(["pot", "call", "duplicate", "multiway", "missing", "all-in", "actor"])("withholds %s", scenario => {
+    const read = river();
+    if (scenario === "pot") read.raw.potTotalValueText = "999";
+    if (scenario === "call") read.callControl!.amountChips = 5;
+    if (scenario === "duplicate") read.raw.boardCards[4] = { valueText: "Q", suitText: "h" };
+    if (scenario === "multiway") read.raw.seats.push({ ...read.raw.seats[1]!, seatNumber: 3 });
+    if (scenario === "missing") read.raw.seats[1]!.betValueText = null;
+    if (scenario === "all-in") read.raw.seats[1]!.stackText = "All In";
+    if (scenario === "actor") read.raw.seats[0]!.statusClasses = [];
+    const r = assess(read).riverCallFold!;
+    expect(r.liveAuthorized).toBe(false);
+    if (["pot", "call", "duplicate"].includes(scenario)) expect(r.unsafe).toBe(true);
+    const reason = { pot: /Pot displays contradict/, call: /CALL amount contradicts/, duplicate: /Contradictory visible cards/,
+      multiway: /multiway/, missing: /CALL amount/, "all-in": /All-ins/, actor: /Waiting for an active hero turn/ }[scenario]!;
+    expect(r.reasons.join(" ")).toMatch(reason);
+  });
+  it("rejects expired CALL observations without refreshing them from a matching DOM amount", () => {
+    const read = river(), observedAt = read.callControl!.observedAt;
+    const clock = vi.spyOn(Date, "now").mockReturnValue(observedAt + 10000);
+    try {
+      const r = assess(read).riverCallFold!;
+      expect(r.liveAuthorized).toBe(false);
+      expect(r.reasons.join(" ")).toContain("stale");
+      expect(read.callControl!.observedAt).toBe(observedAt);
+    } finally { clock.mockRestore(); }
+  });
+  it("keeps source contradictions/disconnects fatal with identical river DOM", () => {
+    const f = sourceFixture(), read = river();
+    f.metadata(f.wire("gC", { pre: 999, now: 120 }), 3);
+    expect(assess(read, f.source).riverCallFold!.unsafe).toBe(true);
+    f.source.accept({ channel: TIMELINE_CHANNEL, type: "identity", tableId: "table", sequence: 2, connected: false, identity: null });
+    const r = assess(read, f.source).riverCallFold!;
+    expect(r.liveAuthorized).toBe(false);
+    expect(r.reasons.join(" ")).toMatch(/connection|metadata gap/);
+  });
+});
 
 describe("live scoped proof projection", () => {
   it("reuses verified call-gap/stack/blind facts while keeping pot/window/eligibility unknown", () => {

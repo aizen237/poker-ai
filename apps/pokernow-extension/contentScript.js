@@ -150,10 +150,10 @@
         return obj[e];
       });
     };
-    util2.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object8) => {
+    util2.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object9) => {
       const keys = [];
-      for (const key in object8) {
-        if (Object.prototype.hasOwnProperty.call(object8, key)) {
+      for (const key in object9) {
+        if (Object.prototype.hasOwnProperty.call(object9, key)) {
           keys.push(key);
         }
       }
@@ -4843,6 +4843,21 @@
 
   // ../../packages/range-engine/dist/rangeEquity.js
   var DEFAULT_ITERATIONS2 = 1e4;
+  function calculateExactRiverEquity(heroCards2, opponentRange, board) {
+    if (heroCards2.length !== 2 || board.length !== 5)
+      throw new Error("Exact river equity requires two hero cards and five board cards");
+    validateSimulationInput([...heroCards2, ...board], 5, 1);
+    const combos = expandEquityRange(opponentRange, [...heroCards2, ...board]);
+    const mass = combos.reduce((sum, c) => sum + c.weight, 0);
+    if (!(mass > 0) || !Number.isFinite(mass))
+      throw new Error("Opponent range has no valid positive mass");
+    const hero = evaluateBest([...heroCards2, ...board]).value;
+    const share = combos.reduce((sum, c) => {
+      const opponent = evaluateBest([...c.cards, ...board]).value;
+      return sum + c.weight * (hero > opponent ? 1 : hero === opponent ? 0.5 : 0);
+    }, 0);
+    return { equity: share / mass, iterations: combos.length };
+  }
   function checkedRng(random) {
     return () => {
       const value = random();
@@ -4894,6 +4909,60 @@
         winShareSum += 0.5;
     }
     return { equity: winShareSum / iterations, iterations };
+  }
+
+  // ../../packages/range-engine/dist/riverBettingRange.js
+  function riverBettingAssumptions(hero, board) {
+    if (hero.length !== 2 || board.length !== 5)
+      throw new Error("River assumptions require two hero cards and five board cards");
+    validateSimulationInput([...hero, ...board], 5, 1);
+    const known2 = new Set([...hero, ...board].map(cardId));
+    const boardHand = evaluateBest(board);
+    const topRank = Math.max(...board.map((c) => c.rank));
+    const strong = [], thin = [], bluffs = [];
+    for (const pair of combinations(fullDeck().filter((c) => !known2.has(cardId(c))), 2)) {
+      const cards = pair;
+      const made = evaluateBest([...cards, ...board]);
+      const combo = { cards, weight: 1 };
+      const strongValue = made.category >= HandCategory.TwoPair && made.category > boardHand.category;
+      const topPair = made.category === HandCategory.Pair && (cards.some((c) => c.rank === topRank) || cards[0].rank === cards[1].rank && cards[0].rank > topRank);
+      if (strongValue)
+        strong.push(combo);
+      if (strongValue || topPair)
+        thin.push(combo);
+      if (made.category <= HandCategory.Pair && cards[0].rank !== cards[1].rank && cards.every((c) => board.every((b) => b.rank !== c.rank)))
+        bluffs.push(combo);
+    }
+    const profiles = [
+      {
+        label: "Strong value / 10% bluffs",
+        value: strong,
+        bluffShare: 0.1,
+        valueAssumption: "Two pair or better with a higher hand category than the board."
+      },
+      {
+        label: "Thin value / 30% bluffs",
+        value: thin,
+        bluffShare: 0.3,
+        valueAssumption: "The strong-value bucket plus top pair and overpairs."
+      }
+    ];
+    return profiles.map((p) => {
+      if (!p.value.length || !bluffs.length)
+        throw new Error(`${p.label}: no legal ${!p.value.length ? "value" : "bluff"} combinations; assumption cannot be evaluated`);
+      return {
+        label: p.label,
+        valueAssumption: p.valueAssumption,
+        bluffShare: p.bluffShare,
+        bluffAssumption: "Unpaired hole cards matching no board rank, with at most one pair in the best hand; uniform within each bucket.",
+        valueCombos: p.value.length,
+        bluffCombos: bluffs.length,
+        range: createComboRange([
+          ...p.value.map((c) => ({ ...c, weight: (1 - p.bluffShare) / p.value.length })),
+          ...bluffs.map((c) => ({ ...c, weight: p.bluffShare / bluffs.length }))
+        ])
+      };
+    });
   }
 
   // ../../packages/range-engine/dist/openingRanges.js
@@ -6809,6 +6878,70 @@
   }
   function lockedEngineRecommendation(policy) {
     return policy.status === "selected" && policy.activation?.allowed === true && policy.llmMayChoose === false && policy.chosenAction !== null ? engineExplanation(policy) : null;
+  }
+
+  // ../../packages/ai-core/dist/riverCallFold.js
+  var RIVER_PAIRWISE_WARNING = "RAISE not evaluated.";
+  function compareRiverCallFold(input) {
+    const base = {
+      liveAuthorized: false,
+      llmMayChoose: false,
+      warning: RIVER_PAIRWISE_WARNING,
+      foldEV: calculateFoldEV().ev
+    };
+    const abstain = (reason) => ({
+      ...base,
+      status: "abstained",
+      reason,
+      requiredEquity: null,
+      equityBounds: null,
+      callEVBounds: null,
+      assumptions: []
+    });
+    if (input.street !== "river" || input.board.length !== 5)
+      return abstain("Exactly five river board cards are required.");
+    if (input.activeOpponents !== 1)
+      return abstain("Exactly one active opponent is required.");
+    if (input.accounting !== "single_pot_no_rake")
+      return abstain("Single contestable pot, resolved returns and no rake/side pots are required.");
+    const { potBeforeCall: pot, amountToCall: call, heroStack, opponentStack } = input;
+    if (pot === null || call === null || heroStack === null || opponentStack === null || ![pot, call, heroStack, opponentStack, pot + call].every(Number.isFinite))
+      return abstain("Pot, CALL amount and both remaining stacks must be finite and known.");
+    if (pot <= 0 || call <= 0 || call > pot || call >= heroStack || opponentStack <= 0)
+      return abstain("A positive fully payable non-all-in CALL and consistent positive pot are required.");
+    try {
+      const assumptions = riverBettingAssumptions(input.heroCards, input.board).map(({ range, ...profile }) => {
+        const equity = calculateExactRiverEquity(input.heroCards, range, input.board).equity;
+        return { ...profile, equity, callEV: calculateCallEV(equity, pot, call).ev };
+      });
+      const requiredEquity = calculatePotOdds(pot, call).breakevenEquity;
+      const equityBounds = { low: Math.min(...assumptions.map((a) => a.equity)), high: Math.max(...assumptions.map((a) => a.equity)) };
+      const callEVBounds = { low: Math.min(...assumptions.map((a) => a.callEV)), high: Math.max(...assumptions.map((a) => a.callEV)) };
+      const status = equityBounds.low > requiredEquity + 1e-10 ? "call_preferred" : equityBounds.high < requiredEquity - 1e-10 ? "fold_preferred" : "uncertain";
+      return {
+        ...base,
+        status,
+        requiredEquity,
+        equityBounds,
+        callEVBounds,
+        assumptions,
+        reason: status === "call_preferred" ? "CALL preferred to FOLD under all supplied assumptions." : status === "fold_preferred" ? "FOLD preferred to CALL under all supplied assumptions." : "Range-dependent / uncertain."
+      };
+    } catch (error) {
+      return abstain(error instanceof Error ? error.message : "River range calculation failed.");
+    }
+  }
+  function riverCallFoldDisplay(result) {
+    if (result.status === "abstained")
+      return [`River CALL vs FOLD withheld: ${result.reason}`, result.warning];
+    return [
+      result.reason,
+      `Required equity: ${(100 * result.requiredEquity).toFixed(2)}% = CALL / (pot before hero call + CALL).`,
+      `Equity sensitivity: ${(100 * result.equityBounds.low).toFixed(2)}%\u2013${(100 * result.equityBounds.high).toFixed(2)}%; CALL EV ${result.callEVBounds.low.toFixed(3)} to ${result.callEVBounds.high.toFixed(3)}; FOLD EV 0 (input units).`,
+      ...result.assumptions.map((a) => `${a.label}: equity ${(100 * a.equity).toFixed(2)}%; CALL EV ${a.callEV.toFixed(3)}. ${a.valueAssumption} ${a.bluffAssumption} ${a.valueCombos} value / ${a.bluffCombos} bluff combos.`),
+      "Conditional heuristic assumptions; no observed tendencies, solver accuracy or statistical confidence. No live action authorization.",
+      result.warning
+    ];
   }
 
   // ../../packages/browser-reader/dist/cardParsing.js
@@ -9097,7 +9230,7 @@
   var common = ["now", "pre", "eventsData", "mEV", "fV", "sN"];
   function hjPatchKind(raw) {
     if (!object(raw) || !integer(raw.now) || !integer(raw.pre) || raw.now <= raw.pre || !integer(raw.sN) || raw.mEV !== 0 || raw.fV !== "0.1.72" || !Array.isArray(raw.eventsData) || raw.eventsData.length) return null;
-    const exact2 = (fields) => Object.keys(raw).length === fields.length && fields.every((k) => Object.hasOwn(raw, k));
+    const exact2 = (fields2) => Object.keys(raw).length === fields2.length && fields2.every((k) => Object.hasOwn(raw, k));
     if (exact2([...common, "pGS", "sNA", "pITT", "sNAA", "wBACPI"]) && object(raw.pGS) && Object.keys(raw.pGS).length === 1 && token(Object.keys(raw.pGS)[0]) && Object.values(raw.pGS)[0] === "fold" && raw.sNA === "NSAF" && raw.pITT === null && integer(raw.sNAA) && Array.isArray(raw.wBACPI) && raw.wBACPI.length === 1 && token(raw.wBACPI[0])) return "fold";
     if (exact2([...common, "cPI", "pITT", "sNA", "pASA", "sNAA", "mAVTB"]) && token(raw.cPI) && raw.pITT === raw.cPI && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now && integer(raw.mAVTB)) return "turn";
     return null;
@@ -9181,14 +9314,14 @@
     return Object.keys(raw).length === keys.length && keys.every((k) => Object.hasOwn(raw, k)) && integer2(raw.now) && integer2(raw.pre) && raw.now > raw.pre && integer2(raw.sNAA) && integer2(raw.sN) && raw.mR === 8 && raw.cHB === 5 && raw.mEV === 0 && raw.fV === "0.1.72" && raw.sNA === "NSAA" && raw.pITT === null && same(raw.pGS, {}) && same(raw.wBACPI, []) && same(raw.eventsData, []) && object2(raw.tB) && Object.keys(raw.tB).length === 1 && Object.values(raw.tB)[0] === 5 && same(raw.cRPI, Object.keys(raw.tB));
   }
   function isObservedHjFacingTurnPatch(raw) {
-    const fields = ["now", "pre", "eventsData", "mEV", "fV", "sN", "cPI", "pITT", "sNA", "pASA", "sNAA"];
-    return object2(raw) && Object.keys(raw).length === fields.length && fields.every((k) => Object.hasOwn(raw, k)) && integer2(raw.now) && integer2(raw.pre) && raw.now > raw.pre && integer2(raw.sN) && raw.mEV === 0 && raw.fV === "0.1.72" && same(raw.eventsData, []) && typeof raw.cPI === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(raw.cPI) && raw.pITT === raw.cPI && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now;
+    const fields2 = ["now", "pre", "eventsData", "mEV", "fV", "sN", "cPI", "pITT", "sNA", "pASA", "sNAA"];
+    return object2(raw) && Object.keys(raw).length === fields2.length && fields2.every((k) => Object.hasOwn(raw, k)) && integer2(raw.now) && integer2(raw.pre) && raw.now > raw.pre && integer2(raw.sN) && raw.mEV === 0 && raw.fV === "0.1.72" && same(raw.eventsData, []) && typeof raw.cPI === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(raw.cPI) && raw.pITT === raw.cPI && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now;
   }
   function validatedFacingTurnPatch(data, heroId) {
     const existing = validatedOpeningPatch(data, heroId);
     if (existing) return existing;
-    const raw = data.bettingPatch, fields = ["now", "pre", "eventsData", "fV", "pITT", "cPI"];
-    if (data.event !== "gC" || data.heroId !== heroId || !isObservedHjFacingTurnPatch(raw) || Object.keys(data.frame).length !== fields.length || !fields.every((k) => Object.hasOwn(data.frame, k) && same(data.frame[k], raw[k]))) return null;
+    const raw = data.bettingPatch, fields2 = ["now", "pre", "eventsData", "fV", "pITT", "cPI"];
+    if (data.event !== "gC" || data.heroId !== heroId || !isObservedHjFacingTurnPatch(raw) || Object.keys(data.frame).length !== fields2.length || !fields2.every((k) => Object.hasOwn(data.frame, k) && same(data.frame[k], raw[k]))) return null;
     return { raw, kind: "turn" };
   }
   function advanceFacingOpenWindow(pending, data, previous, next, sequence, at) {
@@ -9200,8 +9333,8 @@
       const totalsMatch = (state, called) => w.players.every((p) => (state.tB[p.playerId] ?? 0) === (p.playerId === utg.playerId || called && p.playerId === hj.playerId ? 5 : p.contribution));
       if (!pending.call) {
         const raw = data.bettingPatch;
-        const fields = ["tB", "now", "pGS", "cRPI", "pITT", "eventsData", "pre", "fV"];
-        if (!isObservedHjCallPatch(raw) || Object.keys(data.frame).length !== fields.length || !fields.every((k) => Object.hasOwn(data.frame, k) && same(data.frame[k], raw[k])) || sequence !== activation.sequence + 1 || raw.pre !== activation.sourcePatch.now || previous.pITT !== hj.playerId || hj.contribution !== 0 || Object.keys(raw.tB)[0] !== hj.playerId || !same(raw.cRPI, [utg.playerId, hj.playerId]) || !totalsMatch(previous, false) || !totalsMatch(next, true) || next.pITT !== null || next.cPI !== hj.playerId) return null;
+        const fields2 = ["tB", "now", "pGS", "cRPI", "pITT", "eventsData", "pre", "fV"];
+        if (!isObservedHjCallPatch(raw) || Object.keys(data.frame).length !== fields2.length || !fields2.every((k) => Object.hasOwn(data.frame, k) && same(data.frame[k], raw[k])) || sequence !== activation.sequence + 1 || raw.pre !== activation.sourcePatch.now || previous.pITT !== hj.playerId || hj.contribution !== 0 || Object.keys(raw.tB)[0] !== hj.playerId || !same(raw.cRPI, [utg.playerId, hj.playerId]) || !totalsMatch(previous, false) || !totalsMatch(next, true) || next.pITT !== null || next.cPI !== hj.playerId) return null;
         const call2 = {
           id: `${w.tableId}:${w.handId}:${w.generation}:${raw.now}:call`,
           tableId: w.tableId,
@@ -9278,8 +9411,8 @@
     if (previous.cPI !== utg.playerId) return null;
     if (!pending.transition) {
       const raw = data.bettingPatch;
-      const fields = ["tB", "now", "pGS", "cRPI", "pITT", "eventsData", "pre", "fV"];
-      if (!isObservedUtgOpenPatch(raw) || Object.keys(data.frame).length !== fields.length || !fields.every((k) => Object.hasOwn(data.frame, k) && same(data.frame[k], raw[k])) || sequence !== pending.anchor.sequence + 1 || raw.pre !== pending.anchor.cursor || previous.pITT !== utg.playerId || Object.keys(raw.tB)[0] !== utg.playerId || !w.players.every((p) => (previous.tB[p.playerId] ?? 0) === p.contribution) || utg.contribution !== 0 || next.tB[utg.playerId] !== 5 || next.pITT !== null || next.cPI !== utg.playerId) return null;
+      const fields2 = ["tB", "now", "pGS", "cRPI", "pITT", "eventsData", "pre", "fV"];
+      if (!isObservedUtgOpenPatch(raw) || Object.keys(data.frame).length !== fields2.length || !fields2.every((k) => Object.hasOwn(data.frame, k) && same(data.frame[k], raw[k])) || sequence !== pending.anchor.sequence + 1 || raw.pre !== pending.anchor.cursor || previous.pITT !== utg.playerId || Object.keys(raw.tB)[0] !== utg.playerId || !w.players.every((p) => (previous.tB[p.playerId] ?? 0) === p.contribution) || utg.contribution !== 0 || next.tB[utg.playerId] !== 5 || next.pITT !== null || next.cPI !== utg.playerId) return null;
       const transition = {
         id: `${w.tableId}:${w.handId}:${w.generation}:${raw.now}:raise`,
         tableId: w.tableId,
@@ -9791,6 +9924,71 @@
     };
   }
 
+  // src/riverIllustration.ts
+  var cached = null;
+  function riverIllustration(read, assessment, timeline, envelope) {
+    const w = timeline?.sourceStatus.riverObservation;
+    const empty = (reasons = [], unsafe = false) => ({ binding: null, calculation: null, lines: [], reasons, unsafe });
+    if (!w || !timeline || Date.now() < w.receivedAt || Date.now() >= w.expiresAt) return empty();
+    const source = timeline.sourceStatus, identity3 = source.identity, state = assessment.state;
+    const card = (c) => `${"23456789TJQKA"[c.rank - 2]}${c.suit}`;
+    const seats = state?.seats.filter((s) => s.isOccupied) ?? [], hero = seats.find((s) => s.isYou);
+    const same6 = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    const ui = assessCallControlReadiness(read.callControl ?? null, w.payableCall, w.receivedAt, Date.now());
+    if (!source.connected || identity3?.chainGap || identity3?.tableId !== w.tableId || identity3?.handId !== w.handId || identity3?.handNumber !== w.handNumber || identity3?.heroPlayerId !== w.heroId || timeline.current.handId !== `${w.tableId}:hand:${w.handId}` || source.sourceMetadata.socketContinuity.generation !== w.generation) return empty(["River source identity or connection contradicts the activation."], true);
+    if (!state || read.context.readErrors.length || ui.status !== "observed_matching") return empty(ui.reasons, ui.status === "contradicted");
+    if (state.street !== "river" || assessment.activeOpponents !== 1 || !hero?.isCurrentToAct || !same6(state.board.map(card), w.board) || !same6(hero.holeCards.map(card).sort(), [...w.heroCards].sort()) || assessment.amountToCall !== w.payableCall || seats.length !== w.players.length || new Set(seats.map((s) => s.seatNumber)).size !== seats.length || seats.filter((s) => s.isYou).length !== 1 || seats.filter((s) => s.isCurrentToAct).length !== 1 || timeline.current.seatMapping.status === "invalid" || timeline.current.seatMapping.entries.some((e) => !w.players.some((p) => p.seat === e.seat && p.playerId === e.playerId)) || !w.players.every((p) => {
+      const s = seats.find((s2) => s2.seatNumber === p.seat);
+      return !!s && s.isYou === (p.playerId === w.heroId) && s.isFolded === p.folded && !s.isAllIn && !s.isSettling && (p.folded || !s.isOffline) && !s.betReadError && s.stack === p.remainingStack && (s.currentBet !== null ? s.currentBet === p.contribution : p.contribution === 0 && (s.isChecking || p.folded));
+    })) return empty(["River DOM identity, board, opponent roster, contributions or remaining capacity contradicts the source window."], true);
+    if (assessment.pot.mainPot !== w.collectedPot || assessment.pot.displayedTotalPot !== w.grossPotBeforeCall || w.grossPotBeforeCall !== w.collectedPot + w.streetSubtotal) return empty(["River pot displays contradict collected pot plus current street contributions."], true);
+    if (timeline.current.events.some((e) => e.action === "uncalled_return") || timeline.current.accounting.adjustments.length)
+      return empty(["Observed returns/settlement adjustments are unresolved; illustrative pot calculation withheld."], true);
+    const contradictions = envelope.proofs.filter((p) => p.status === "contradicted").flatMap((p) => p.reasons);
+    if (contradictions.length) return empty(contradictions, true);
+    const needed = ["decisionState", "connection", "stack", "callCost"];
+    const missing = envelope.proofs.filter((p) => needed.includes(p.scope) && p.status !== "proven");
+    if (missing.length) return empty(missing.flatMap((p) => p.reasons));
+    const opponent = seats.find((s) => !s.isYou && !s.isFolded);
+    const input = {
+      street: "river",
+      heroCards: hero.holeCards,
+      board: state.board,
+      activeOpponents: 1,
+      potBeforeCall: w.grossPotBeforeCall,
+      amountToCall: w.payableCall,
+      heroStack: hero.stack,
+      opponentStack: opponent.stack,
+      accounting: "single_pot_no_rake"
+    };
+    const key = JSON.stringify(input);
+    if (cached?.key !== key) cached = { key, result: compareRiverCallFold(input) };
+    const calculation = cached.result;
+    if (calculation.status === "abstained") return empty([calculation.reason]);
+    return {
+      binding: {
+        tableId: w.tableId,
+        handId: w.handId,
+        heroId: w.heroId,
+        generation: w.generation,
+        cursor: w.cursor,
+        sequence: w.sequence,
+        receivedAt: w.receivedAt,
+        expiresAt: w.expiresAt,
+        decisionEpoch: envelope.decisionEpoch
+      },
+      calculation,
+      reasons: [],
+      unsafe: false,
+      lines: [
+        "ILLUSTRATIVE ONLY \u2014 not verified; no action authorization.",
+        `Assumes all ${w.grossPotBeforeCall} chips are hero-contestable in one pot, no unresolved returns and zero rake/drop. These assumptions are unproven.`,
+        `Collected ${w.collectedPot} + current bet ${w.streetSubtotal} = ${w.grossPotBeforeCall} chips before CALL; payable CALL ${w.payableCall}. The bet is included once.`,
+        ...riverCallFoldDisplay(calculation)
+      ]
+    };
+  }
+
   // src/decisionProofs.ts
   function buildLiveDecisionProofs(read, assessment, timeline, preflop, epoch, packet = null) {
     const proofs = PROOF_SCOPES.map((scope) => ({
@@ -10022,6 +10220,7 @@
       activation,
       unopened,
       openingSize: opening.size,
+      riverCallFold: riverCallFoldReadiness(read, assessment, envelope, timeline),
       responseWindow,
       responseStrategy,
       responseExecution,
@@ -10048,6 +10247,42 @@
       } : null
     };
   }
+  function riverCallFoldReadiness(read, assessment, envelope, timeline) {
+    const state = assessment.state;
+    if (state?.street !== "river") return null;
+    const relevant = ["decisionState", "connection", "stack", "callCost", "pot", "eligibility", "accounting"];
+    const reasons = envelope.proofs.filter((p) => relevant.includes(p.scope) && p.status !== "proven").flatMap((p) => p.reasons);
+    const hero = state.seats.find((s) => s.isYou);
+    const call = assessment.amountToCall;
+    if (state.board.length !== 5) reasons.push("Exactly five river board cards are required.");
+    if (assessment.activeOpponents !== 1) reasons.push("Exactly one active opponent is required; multiway is unsupported.");
+    if (call === null || call <= 0) reasons.push("A positive independently verified CALL amount is required.");
+    if (hero?.stack == null || call !== null && call >= hero.stack || state.seats.some((s) => s.isOccupied && s.isAllIn))
+      reasons.push("All-ins and short calls are outside the river comparison.");
+    const ui = call !== null && call > 0 ? assessCallControlReadiness(
+      read.callControl ?? null,
+      call,
+      0,
+      Date.now(),
+      "Visible CALL amount contradicts the current contribution gap."
+    ) : null;
+    if (ui?.status !== "observed_matching") reasons.push(...ui?.reasons ?? ["No decision-local CALL-control cross-check is available."]);
+    const illustration = riverIllustration(read, assessment, timeline, envelope);
+    if (!illustration.binding) reasons.push("No validated river source activation binds the current hand, hero, five board cards, payable CALL and original expiry. A matching DOM label or connected socket is insufficient.");
+    reasons.push(...illustration.reasons);
+    const contradictions = envelope.proofs.filter((p) => p.status === "contradicted").flatMap((p) => p.reasons);
+    return {
+      status: "abstained",
+      liveAuthorized: false,
+      unsafe: contradictions.length > 0 || ui?.status === "contradicted" || illustration.unsafe,
+      illustration: illustration.calculation,
+      binding: illustration.binding,
+      illustrationLines: illustration.lines,
+      requiredProofs: relevant,
+      reasons: [.../* @__PURE__ */ new Set([...contradictions, ...reasons])],
+      warning: RIVER_PAIRWISE_WARNING
+    };
+  }
   function liveProofRevision(timeline) {
     const s = timeline.sourceStatus;
     return JSON.stringify({
@@ -10055,6 +10290,7 @@
       identity: s.identity,
       handId: timeline.current.handId,
       firstUtg: s.firstUtgProof ?? null,
+      river: s.riverObservation ?? null,
       ...s.hjProof ? { hj: s.hjProof } : {},
       ...s.coProof ? { co: s.coProof } : {},
       ...s.btnProof ? { btn: s.btnProof } : {},
@@ -10310,7 +10546,7 @@
     if (!object5(value) || typeof value.event !== "string" || !["registered", "rup", "gC"].includes(value.event) || !Number.isSafeInteger(value.wrapperLength) || Number(value.wrapperLength) < 2 || !Array.isArray(value.extraWrapperItems) || value.extraWrapperItems.length > 2) return null;
     const inventory = (raw) => {
       if (!object5(raw) || !Array.isArray(raw.fields) || raw.fields.length > FIELD_LIMIT || typeof raw.truncated !== "boolean") return null;
-      const fields = [];
+      const fields2 = [];
       for (const entry of raw.fields) {
         if (!object5(entry) || typeof entry.path !== "string" || entry.path.length > 200 || typeof entry.type !== "string" || !["null", "array", "string", "number", "boolean", "object", "undefined"].includes(entry.type)) return null;
         const field = { path: entry.path, type: entry.type };
@@ -10318,9 +10554,9 @@
           if (!allowedPath(entry.path) || !scalar(entry.value) || kind(entry.value) !== entry.type) return null;
           field.value = entry.value;
         }
-        fields.push(field);
+        fields2.push(field);
       }
-      return { fields, truncated: raw.truncated };
+      return { fields: fields2, truncated: raw.truncated };
     };
     const envelope = inventory(value.envelope), frame = inventory(value.frame);
     const extras = value.extraWrapperItems.map(inventory);
@@ -10466,23 +10702,23 @@
         if (socket.length > SOCKET_METADATA_LIMIT) socket.shift();
       },
       response(headers, httpStatus, handId, handNumber, at) {
-        const fields = [];
+        const fields2 = [];
         let truncated = false;
         headers.forEach((value, name) => {
-          if (fields.length === FIELD_LIMIT) {
+          if (fields2.length === FIELD_LIMIT) {
             truncated = true;
             return;
           }
           const field = { path: name, type: "string" };
           if (headerValues.has(name) && value.length <= VALUE_LIMIT) field.value = value;
-          fields.push(field);
+          fields2.push(field);
         });
         const entry = {
           requestedHandId: handId,
           requestedHandNumber: handNumber,
           observedAt: at,
           httpStatus,
-          headers: fields,
+          headers: fields2,
           headersTruncated: truncated,
           payloadKind: "not_inspected",
           envelope: { fields: [], truncated: false },
@@ -11249,6 +11485,106 @@
     };
   }
 
+  // src/riverObservation.ts
+  var object8 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+  var same4 = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  var chips4 = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+  var common3 = "now pre eventsData mEV fV sN".split(" ");
+  var turn = [...common3, "cPI", "sNA", "pASA", "pITT", "sNAA", "mAVTB"];
+  var fields = new Set("id hI gN now pre r gT seats iHPI dealerID dealerSeat sBPI bBPI tB pGS cPI pITT smallBlind bigBlind ante deadButton gM mode oTC gameResult aD aS cM cR cRPI rHP rHC eventsData version fV nR mTB rIT sPM players pC sBS sNA pASA sNAA mAVTB wBACPI mEV sN mR cHB pot uP aGC aVC dSB gDM pTB sG lE lSPI pASA dLTWTB dLTWoTB ownerID status bigBlindCheck directToNexTurn recordChatForReplay allowStandaloneRebuy rH sPI tHC".split(" "));
+  function createRiverObservation(tableId, now) {
+    let state = null, heroId = null;
+    let sequence = 0, generation = 0, at = -1, pot = null;
+    let pending = null;
+    let observation = null;
+    let reason = "Waiting for a continuous river source window.";
+    const reset = () => {
+      state = null;
+      heroId = null;
+      pot = null;
+      pending = null;
+      observation = null;
+      reason = "River observation invalidated; fresh registration is required.";
+    };
+    return {
+      reset,
+      accept(input, seq, gen, received) {
+        observation = null;
+        try {
+          if (!object8(input) || !chips4(seq) || !chips4(gen) || !chips4(received) || received > now() || received < at || now() - received >= 1e4 || !object8(input.source)) throw new Error("Invalid receipt");
+          const p = input, s = p.source;
+          if (!s.heroId || s.event !== "registered" && (seq !== sequence + 1 || gen !== generation || s.heroId !== heroId || !state) || s.event === "registered" && gen <= generation) throw new Error("Discontinuous river source");
+          const previous = state;
+          state = s.event === "registered" ? initializeUtgState(s.frame, tableId, s.heroId) : advanceUtgState(state, s.frame, tableId, s.heroId);
+          heroId = s.heroId;
+          sequence = seq;
+          generation = gen;
+          at = received;
+          reason = "Continuous observations; waiting for a supported river check/bet/activation window.";
+          if (p.pot !== void 0) {
+            if (!chips4(p.pot)) throw new Error("Invalid pot");
+            pot = p.pot;
+          }
+          if (s.event === "registered" || previous?.hI !== state.hI) pending = null;
+          if (p.kind === "river") {
+            const active = state.iHPI.filter((id) => state.pGS[id] === "inGame");
+            const board = state.oTC?.["1"], cards = state.pC[heroId]?.cards.map((c) => c.value);
+            if (!previous || !same4(previous.gT, [1, 2]) || !same4(state.gT, [1, 3]) || state.cPI !== heroId || state.pITT !== heroId || state.gM !== "th" || state.version !== "0.1.72" || state.rIT !== "no" || state.sPM !== false || !same4(state.rHP, []) || !Array.isArray(board) || board.length !== 5 || !same4(previous.oTC?.["1"], board.slice(0, 4)) || !Array.isArray(cards) || cards.length !== 2 || cards.some((c) => typeof c !== "string") || (/* @__PURE__ */ new Set([...board, ...cards])).size !== 7 || active.length !== 2 || !active.includes(heroId) || pot === null || pot <= 0 || Object.keys(state.tB).length !== 0 || state.iHPI.length !== state.seats.length || state.iHPI.some((id) => !state.seats.some((r) => r[1] === id) || !["inGame", "fold"].includes(state.pGS[id])) || active.some((id) => state.players[id].stack <= 0 || state.players[id].disconnectedSince !== void 0)) throw new Error("Unsupported river boundary");
+            pending = { step: 0, villain: active.find((id) => id !== heroId), base: structuredClone(state), pot, bet: 0 };
+            return;
+          }
+          if (!pending) return;
+          const w = pending;
+          if (state.hI !== w.base.hI || pot !== w.pot || !same4(state.seats, w.base.seats) || !same4(state.pGS, w.base.pGS) || !same4(state.pC, w.base.pC) || !same4(state.players, w.base.players) || !same4(state.oTC, w.base.oTC) || !same4(state.gT, [1, 3])) throw new Error("River window changed");
+          if (w.step === 0 && p.kind === "check" && p.actor === heroId && previous?.cPI === heroId) w.step++;
+          else if (w.step === 1 && p.kind === "turn" && p.actor === w.villain) w.step++;
+          else if (w.step === 2 && p.kind === "bet" && p.actor === w.villain && previous?.pITT === w.villain && chips4(p.amount) && p.amount > 0 && p.amount < state.players[w.villain].stack && p.amount < state.players[heroId].stack) {
+            w.bet = p.amount;
+            w.step++;
+          } else if (w.step === 3 && p.kind === "turn" && p.actor === heroId && state.tB[heroId] === 0 && state.tB[w.villain] === w.bet) {
+            observation = {
+              tableId,
+              handId: state.hI,
+              handNumber: state.gN,
+              heroId,
+              heroCards: state.pC[heroId].cards.map((c) => c.value),
+              board: [...state.oTC["1"]],
+              generation,
+              sequence,
+              cursor: state.now,
+              receivedAt: received,
+              expiresAt: received + 1e4,
+              collectedPot: pot,
+              streetSubtotal: w.bet,
+              grossPotBeforeCall: pot + w.bet,
+              payableCall: w.bet,
+              players: state.seats.map(([seat, playerId]) => ({
+                seat,
+                playerId,
+                folded: state.pGS[playerId] === "fold",
+                contribution: state.tB[playerId] ?? 0,
+                remainingStack: state.players[playerId].stack - (state.tB[playerId] ?? 0)
+              })),
+              historyComplete: false,
+              liveAuthorized: false
+            };
+            pending = null;
+            reason = "Matched river source window; gross arithmetic only, no contestable-pot or action authorization.";
+          } else throw new Error("Incomplete river window");
+        } catch (error) {
+          reset();
+          reason = error instanceof Error ? error.message : "River observation rejected.";
+        }
+      },
+      snapshot() {
+        return observation && now() >= observation.receivedAt && now() < observation.expiresAt ? structuredClone(observation) : null;
+      },
+      diagnostic() {
+        return { reason: observation && (now() < observation.receivedAt || now() >= observation.expiresAt) ? "River observation expired at its original activation deadline." : reason, sequence, generation };
+      }
+    };
+  }
+
   // src/liveTimeline.ts
   function createTimelineRuntime(options) {
     const fallback = createSnapshotTimeline(options.sessionId);
@@ -11257,6 +11593,7 @@
     const pendingFinal = /* @__PURE__ */ new Set();
     const sourceMetadata = createSourceMetadataAudit();
     const firstUtgSource = createFirstUtgSource(options.tableId, options.now);
+    const riverSource = createRiverObservation(options.tableId, options.now);
     let identity3 = null;
     let current = null;
     let connected = false, busy = false, nextFetch = 0, failures = 0, sequence = -1;
@@ -11268,6 +11605,7 @@
         if (!message || typeof message !== "object") return;
         const m = message;
         if (m.channel === TIMELINE_CHANNEL && m.type === "source_metadata" && m.tableId === options.tableId) {
+          riverSource.accept(m.riverSource, m.sequence, m.generation, m.observedAt);
           let bootstrap;
           try {
             bootstrap = firstUtgSource.accept(m.utgSource, m.sequence, m.generation, m.observedAt);
@@ -11281,6 +11619,7 @@
         sequence = Number(m.sequence);
         connected = m.connected;
         if (!connected || !m.identity) {
+          riverSource.reset();
           firstUtgSource.reset();
           status = "Source disconnected or no validated hand metadata; no new log requests.";
           if (current) {
@@ -11343,6 +11682,7 @@
         fallback.observe(assessment.state, { bigBlind: assessment.bigBlind, dealerSeatNumber: read.context.dealerSeatNumber }, read.context.readErrors, options.now());
       },
       gap(reason) {
+        riverSource.reset();
         firstUtgSource.reset();
         fallback.observe(null, {}, [reason], options.now());
         if (current) timelineReason(current, reason);
@@ -11350,6 +11690,7 @@
       stop(reason) {
         connected = false;
         firstUtgSource.reset();
+        riverSource.reset();
         status = reason;
         if (current) timelineReason(current, reason);
       },
@@ -11411,6 +11752,8 @@
             identity: identity3,
             sourceMetadata: sourceMetadata.snapshot(),
             firstUtgProof,
+            riverObservation: connected ? riverSource.snapshot() : null,
+            riverObservationDiagnostic: riverSource.diagnostic(),
             hjProof: connected ? firstUtgSource.hjProof() : null,
             coProof: connected ? firstUtgSource.coProof() : null,
             btnProof: connected ? firstUtgSource.btnProof() : null,
@@ -11558,8 +11901,8 @@
     if (!epochBefore.decisionEpoch || epochBefore.stateJson === null || JSON.stringify(epochBefore) !== JSON.stringify(epochAfter) || epochBefore.stateJson !== stateJson(first) || epochAfter.stateJson !== stateJson(last))
       reasons.push("Current read/source does not match the existing decision epoch; wait for an ordinary poll, never mint a capture epoch.");
     if (JSON.stringify(before) !== JSON.stringify(after) || tableUrl !== d.tableUrl()) reasons.push("Source or table changed across the read.");
-    const state = before.sourceState, fields = state?.fields;
-    if (!binding || !state || state.generation !== binding.generation || state.localBridgeSequence !== before.proof?.continuity.throughSequence || fields?.now !== binding.cursor || fields?.hI !== binding.handId || fields?.gN !== binding.handNumber || fields?.cPI !== binding.heroId || fields?.pITT !== binding.heroId || JSON.stringify(fields?.gT) !== "[1,1]")
+    const state = before.sourceState, fields2 = state?.fields;
+    if (!binding || !state || state.generation !== binding.generation || state.localBridgeSequence !== before.proof?.continuity.throughSequence || fields2?.now !== binding.cursor || fields2?.hI !== binding.handId || fields2?.gN !== binding.handNumber || fields2?.cPI !== binding.heroId || fields2?.pITT !== binding.heroId || JSON.stringify(fields2?.gT) !== "[1,1]")
       reasons.push("Carried source hand/actor/street/generation/cursor does not match the original opportunity.");
     const observedAt = read.callControl?.observedAt;
     if (![startedAt, completedAt, observedAt].every(Number.isSafeInteger) || observedAt < startedAt || observedAt > completedAt || completedAt < startedAt || !binding || startedAt < binding.receivedAt || completedAt >= binding.expiresAt || binding.expiresAt !== binding.receivedAt + 1e4)
@@ -11588,7 +11931,7 @@
   }
 
   // src/postflopObservationCapture.ts
-  var same4 = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  var same5 = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   function capturePostflopObservation(d) {
     const copySource = (s) => {
       const source = s.sourceStatus, evidence = source.firstUtgEvidence;
@@ -11636,7 +11979,7 @@
     const state = assessment.state, seats = state?.seats.filter((s) => s.isOccupied) ?? [];
     const hero = seats.find((s) => s.isYou), call = read.callControl;
     const cards = state?.board.map((c) => `${"23456789TJQKA"[c.rank - 2]}${c.suit}`) ?? null;
-    if (!same4(before, after) || tableUrl !== d.tableUrl()) reasons.push("Source or table changed across the read.");
+    if (!same5(before, after) || tableUrl !== d.tableUrl()) reasons.push("Source or table changed across the read.");
     if (!before.connected || !head || before.identity?.chainGap || before.continuity.chainGap || before.continuity.status !== "observed_continuous" || before.coverageIssues.some((i) => i.code === "metadata_gap" || i.code === "identity_conflict"))
       reasons.push("Source disconnected, missing, or has an unresolved continuity gap.");
     if (head && head.generation !== 1) limitations.push("Reconnect generation: no continuity with the previous connection is claimed.");
@@ -11646,7 +11989,7 @@
       decisionFingerprint(tableUrl, read.raw, read.context, read.raiseControl),
       liveProofRevision(s)
     ]);
-    const epochStatus = !epochBefore.decisionEpoch || epochBefore.stateJson === null ? "unavailable" : same4(epochBefore, epochAfter) && epochBefore.stateJson === polled(first) && epochAfter.stateJson === polled(last) ? "observed_matching" : "mismatched";
+    const epochStatus = !epochBefore.decisionEpoch || epochBefore.stateJson === null ? "unavailable" : same5(epochBefore, epochAfter) && epochBefore.stateJson === polled(first) && epochAfter.stateJson === polled(last) ? "observed_matching" : "mismatched";
     if (epochStatus !== "observed_matching") reasons.push("Existing decision epoch unavailable or mismatched; capture does not create one.");
     if (!state || state.street !== "flop" || seats.filter((s) => s.isYou).length !== 1 || seats.filter((s) => s.isCurrentToAct).length !== 1 || !hero?.isCurrentToAct || read.context.readErrors.length)
       reasons.push("UI does not provide one readable hero flop decision.");
@@ -11654,9 +11997,9 @@
     else {
       if (!head || before.carried.sequence !== head.sequence || before.carried.generation !== head.generation || frame.now !== head.cursor)
         reasons.push("Carried source is stale or differs from the latest source head.");
-      if (frame.hI !== before.identity?.handId || frame.gN !== before.identity?.handNumber || frame.id !== before.identity?.tableId || before.carried.heroId !== before.identity?.heroPlayerId || frame.cPI !== before.carried.heroId || frame.pITT !== before.carried.heroId || !same4(frame.gT, [1, 1]))
+      if (frame.hI !== before.identity?.handId || frame.gN !== before.identity?.handNumber || frame.id !== before.identity?.tableId || before.carried.heroId !== before.identity?.heroPlayerId || frame.cPI !== before.carried.heroId || frame.pITT !== before.carried.heroId || !same5(frame.gT, [1, 1]))
         reasons.push("Source hand, hero actor or flop street is missing or contradictory.");
-      if (!same4(frame.oTC?.["1"], cards)) reasons.push("Source and UI board observations differ or are missing.");
+      if (!same5(frame.oTC?.["1"], cards)) reasons.push("Source and UI board observations differ or are missing.");
       const sourceSeats = frame.seats;
       if (!sourceSeats?.some(([seat, id]) => seat === hero?.seatNumber && id === before.carried.heroId))
         reasons.push("Source and UI hero seats differ.");
@@ -11728,6 +12071,13 @@
     aiWarnings: []
   };
   var OVERLAY_ID = "poker-ai-reader-overlay";
+  var riverDisplay = null;
+  var riverExpiryTimer;
+  function clearRiverDisplay() {
+    riverDisplay = null;
+    if (riverExpiryTimer !== void 0) window.clearTimeout(riverExpiryTimer);
+    riverExpiryTimer = void 0;
+  }
   function ensureOverlay() {
     const existing = document.getElementById(OVERLAY_ID);
     if (existing) return existing;
@@ -11788,6 +12138,7 @@
       `<div style="color:${AI_STATUS_COLORS[s.aiStatus]}; font-weight:600;">${escapeHtml(s.aiStatus === "received" ? "RECOMMENDATION AVAILABLE" : s.aiStatus.replaceAll("_", " ").toUpperCase())}</div>`
     );
     if (s.policyLine) parts.push(`<div>${escapeHtml(s.policyLine)}</div>`);
+    if (riverDisplay) parts.push(`<div data-river-illustration style="margin-top:8px; padding:6px; border:1px solid #888;">${riverDisplay.lines.map(escapeHtml).join("<br/>")}</div>`);
     if (s.aiResult && displayLifetime) parts.push(`<div data-proof-countdown>Evidence expires in ${Math.max(0, (displayLifetime.expiresAt - Date.now()) / 1e3).toFixed(1)}s</div>`);
     if (s.aiResult) {
       parts.push(`<div style="font-size:16px; font-weight:700; margin:4px 0;">${escapeHtml(s.aiResult.action)}</div>`);
@@ -12087,6 +12438,22 @@
     }
   }
   function refreshFreshnessDisplay() {
+    if (riverDisplay) {
+      try {
+        const read = readLiveTable(), timeline = handTimeline.snapshot();
+        const river = buildLiveDecisionProofs(read, assessLiveState(read.raw, read.context), timeline, null, "display-refresh").riverCallFold;
+        if (Date.now() >= riverDisplay.expiresAt || liveProofRevision(timeline) !== riverDisplay.source || !river?.illustration) {
+          clearRiverDisplay();
+          overlayState.aiStatus = river?.unsafe ? "unsafe" : "waiting_for_proof";
+          overlayState.aiWarnings = river?.reasons ?? ["River illustration expired or inputs changed; fresh matching evidence is required."];
+        }
+      } catch {
+        clearRiverDisplay();
+        handTimeline.gap("River display read failed.");
+        overlayState.aiStatus = "blocked";
+      }
+      renderOverlay();
+    }
     if (!displayLifetime) return;
     try {
       const read = readLiveTable();
@@ -12118,7 +12485,15 @@
       void handTimeline.tick();
       const domStateJson = decisionFingerprint(location.origin + location.pathname, read.raw, read.context, read.raiseControl);
       const timelineSnapshot = handTimeline.snapshot();
-      const stateJson = JSON.stringify([domStateJson, liveProofRevision(timelineSnapshot)]);
+      const { observedAt: callObservedAt, ...callObservation } = read.callControl ?? {};
+      const stateJson = JSON.stringify([
+        domStateJson,
+        liveProofRevision(timelineSnapshot),
+        ...assessment.state?.street === "river" ? [{
+          callObservation,
+          callFresh: callObservedAt !== void 0 && callObservedAt <= Date.now() && Date.now() - callObservedAt < 1e4
+        }] : []
+      ]);
       if (stateJson !== lastStateJson) currentDiagnosticPacket = null;
       if (domStateJson !== lastDomStateJson) {
         lastDomStateJson = domStateJson;
@@ -12141,6 +12516,7 @@
       const preflop = buildLivePreflopContext(assessment, actionHistory, timelineSnapshot, read);
       logLiveDiagnostics(read, assessment, actionHistory, preflop, currentDiagnosticPacket, handTimeline.snapshot());
       if (stateJson !== lastStateJson) {
+        clearRiverDisplay();
         currentDiagnosticPacket = null;
         lastStateJson = stateJson;
         lastRecommendationRequestKey = null;
@@ -12176,6 +12552,21 @@
           renderOverlay();
         }
         const scoped = buildLiveDecisionProofs(read, assessment, timelineSnapshot, preflop, String(requestSequence));
+        if (scoped.riverCallFold) {
+          overlayState.aiStatus = scoped.riverCallFold.unsafe ? "unsafe" : "waiting_for_proof";
+          overlayState.policyLine = "River CALL vs FOLD withheld. " + scoped.riverCallFold.warning;
+          overlayState.aiWarnings = scoped.riverCallFold.reasons;
+          if (scoped.riverCallFold.illustration && scoped.riverCallFold.binding) {
+            riverDisplay = {
+              lines: scoped.riverCallFold.illustrationLines,
+              source: liveProofRevision(timelineSnapshot),
+              expiresAt: scoped.riverCallFold.binding.expiresAt
+            };
+            riverExpiryTimer = window.setTimeout(refreshFreshnessDisplay, Math.max(0, riverDisplay.expiresAt - Date.now()));
+          }
+          renderOverlay();
+          return;
+        }
         overlayState.aiStatus = scoped.activation.state === "proof_ready" ? "idle" : scoped.activation.state;
         overlayState.policyLine = activationLabel(scoped.activation.state) + " (" + scoped.activation.supportedDecisionType + ")";
         overlayState.aiWarnings = [.../* @__PURE__ */ new Set([...scoped.activation.reasons, ...state.street === "preflop" ? [] : confidence.reasons])];
@@ -12336,6 +12727,7 @@
       overlayState.aiStatus = "blocked";
       clearDisplayLifetime();
       overlayState.street = "unreadable";
+      clearRiverDisplay();
       overlayState.opponentStatsLine = null;
       overlayState.policyLine = null;
       overlayState.equityLine = null;

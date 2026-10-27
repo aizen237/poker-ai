@@ -3,6 +3,7 @@ import type { LiveTableRead } from "./tableRead.js";
 import { tableIdFromPath, TIMELINE_CHANNEL, validHandIdentity, type HandIdentityEvidence } from "./pokerNowTransport.js";
 import { createSourceMetadataAudit } from "./sourceMetadata.js";
 import { createFirstUtgSource } from "./firstUtgSource.js";
+import { createRiverObservation } from "./riverObservation.js";
 
 export interface TimelineRuntimeOptions {
   tableId: string;
@@ -19,6 +20,7 @@ export function createTimelineRuntime(options: TimelineRuntimeOptions) {
   const pendingFinal = new Set<string>();
   const sourceMetadata = createSourceMetadataAudit();
   const firstUtgSource = createFirstUtgSource(options.tableId, options.now);
+  const riverSource = createRiverObservation(options.tableId, options.now);
   let identity: HandIdentityEvidence | null = null;
   let current: HandTimeline | null = null;
   let connected = false, busy = false, nextFetch = 0, failures = 0, sequence = -1;
@@ -30,6 +32,7 @@ export function createTimelineRuntime(options: TimelineRuntimeOptions) {
       if (!message || typeof message !== "object") return;
       const m = message as Record<string, unknown>;
       if (m.channel === TIMELINE_CHANNEL && m.type === "source_metadata" && m.tableId === options.tableId) {
+        riverSource.accept(m.riverSource, m.sequence, m.generation, m.observedAt);
         let bootstrap: ReturnType<typeof firstUtgSource.accept>;
         try { bootstrap = firstUtgSource.accept(m.utgSource, m.sequence, m.generation, m.observedAt); } catch { firstUtgSource.reset(); }
         sourceMetadata.socket(m.metadata, m.sequence, m.generation, options.now(), bootstrap);
@@ -40,6 +43,7 @@ export function createTimelineRuntime(options: TimelineRuntimeOptions) {
           (m.identity !== null && !validHandIdentity(m.identity, options.tableId))) return;
       sequence = Number(m.sequence); connected = m.connected;
       if (!connected || !m.identity) {
+        riverSource.reset();
         firstUtgSource.reset();
         status = "Source disconnected or no validated hand metadata; no new log requests.";
         if (current) {
@@ -94,11 +98,12 @@ export function createTimelineRuntime(options: TimelineRuntimeOptions) {
       // claiming a render observed near a socket message belongs to that hand.
     },
     gap(reason: string) {
+      riverSource.reset();
       firstUtgSource.reset();
       fallback.observe(null, {}, [reason], options.now());
       if (current) timelineReason(current, reason);
     },
-    stop(reason: string) { connected = false; firstUtgSource.reset(); status = reason; if (current) timelineReason(current, reason); },
+    stop(reason: string) { connected = false; firstUtgSource.reset(); riverSource.reset(); status = reason; if (current) timelineReason(current, reason); },
     async tick() {
       if (busy || !connected || !current || options.now() < nextFetch) return;
       const finalKey = pendingFinal.values().next().value;
@@ -142,6 +147,8 @@ export function createTimelineRuntime(options: TimelineRuntimeOptions) {
         sourceStatus: { status, connected, busy, lastSuccess, identity,
           sourceMetadata: sourceMetadata.snapshot(),
           firstUtgProof,
+          riverObservation: connected ? riverSource.snapshot() : null,
+          riverObservationDiagnostic: riverSource.diagnostic(),
           hjProof: connected ? firstUtgSource.hjProof() : null,
           coProof: connected ? firstUtgSource.coProof() : null,
           btnProof: connected ? firstUtgSource.btnProof() : null,

@@ -143,36 +143,36 @@
     }
     return text.length;
   }
-  function members(object7) {
+  function members(object8) {
     const result = [];
     let i = 1;
-    while (i < object7.length) {
-      while (/\s|,/.test(object7[i] ?? "") && i < object7.length) i++;
-      if (object7[i] === "}") break;
+    while (i < object8.length) {
+      while (/\s|,/.test(object8[i] ?? "") && i < object8.length) i++;
+      if (object8[i] === "}") break;
       const keyStart = i++;
-      while (i < object7.length) {
-        if (object7[i] === "\\") i += 2;
-        else if (object7[i++] === '"') break;
+      while (i < object8.length) {
+        if (object8[i] === "\\") i += 2;
+        else if (object8[i++] === '"') break;
       }
-      const key = JSON.parse(object7.slice(keyStart, i));
-      while (object7[i] !== ":" && i < object7.length) i++;
+      const key = JSON.parse(object8.slice(keyStart, i));
+      while (object8[i] !== ":" && i < object8.length) i++;
       i++;
-      const end = endOfValue(object7, i);
-      result.push({ key, raw: object7.slice(i, end).trim() });
+      const end = endOfValue(object8, i);
+      result.push({ key, raw: object8.slice(i, end).trim() });
       i = end;
     }
     return result;
   }
   function registrationProjection(payload) {
-    const fields = [];
+    const fields2 = [];
     for (const { key, raw } of members(payload)) {
-      if (key === "gameState") fields.push(`"gameState":${raw}`);
+      if (key === "gameState") fields2.push(`"gameState":${raw}`);
       if (key === "currentPlayer") {
         const selected = raw.startsWith("{") ? `{${members(raw).filter((field) => field.key === "id").map((field) => `"id":${field.raw}`).join(",")}}` : raw;
-        fields.push(`"currentPlayer":${selected}`);
+        fields2.push(`"currentPlayer":${selected}`);
       }
     }
-    return `{${fields.join(",")}}`;
+    return `{${fields2.join(",")}}`;
   }
   var RawSocketCapture = class {
     constructor(enabled2, limits = { frames: MAX_FRAMES, characters: MAX_CHARACTERS }) {
@@ -262,7 +262,7 @@
      * No patch reducer, zero filling, source semantics or decision authority. */
     postflopObservations() {
       const generation = this.frames.at(-1)?.connectionGeneration;
-      const fields = {};
+      const fields2 = {};
       const contributionPatches = [];
       let truncated = false, boundaryObserved = false;
       for (const entry of [...this.frames].reverse()) {
@@ -276,10 +276,10 @@
           localReceiveSequence: entry.localReceiveSequence,
           connectionGeneration: entry.connectionGeneration
         });
-        if (entry.event === "registered" && !fields.heroId && payload.currentPlayer?.id) fields.heroId = sample(payload.currentPlayer.id);
+        if (entry.event === "registered" && !fields2.heroId && payload.currentPlayer?.id) fields2.heroId = sample(payload.currentPlayer.id);
         if (!boundaryObserved) {
           for (const key of ["id", "hI", "gN", "cPI", "pITT", "gT", "oTC"])
-            if (!Object.hasOwn(fields, key) && Object.hasOwn(frame, key)) fields[key] = sample(frame[key]);
+            if (!Object.hasOwn(fields2, key) && Object.hasOwn(frame, key)) fields2[key] = sample(frame[key]);
           if (Object.hasOwn(frame, "tB")) {
             if (contributionPatches.length < 24) contributionPatches.push(sample(frame.tB));
             else truncated = true;
@@ -289,7 +289,7 @@
       }
       return {
         status: "unverified_raw_field_observations",
-        fields,
+        fields: fields2,
         contributionPatches: contributionPatches.reverse(),
         contributionSamplesTruncated: truncated,
         handIdentityFieldObserved: boundaryObserved,
@@ -339,9 +339,9 @@
   var common = ["now", "pre", "eventsData", "mEV", "fV", "sN"];
   function hjPatchKind(raw) {
     if (!object3(raw) || !integer(raw.now) || !integer(raw.pre) || raw.now <= raw.pre || !integer(raw.sN) || raw.mEV !== 0 || raw.fV !== "0.1.72" || !Array.isArray(raw.eventsData) || raw.eventsData.length) return null;
-    const exact2 = (fields) => Object.keys(raw).length === fields.length && fields.every((k) => Object.hasOwn(raw, k));
-    if (exact2([...common, "pGS", "sNA", "pITT", "sNAA", "wBACPI"]) && object3(raw.pGS) && Object.keys(raw.pGS).length === 1 && token2(Object.keys(raw.pGS)[0]) && Object.values(raw.pGS)[0] === "fold" && raw.sNA === "NSAF" && raw.pITT === null && integer(raw.sNAA) && Array.isArray(raw.wBACPI) && raw.wBACPI.length === 1 && token2(raw.wBACPI[0])) return "fold";
-    if (exact2([...common, "cPI", "pITT", "sNA", "pASA", "sNAA", "mAVTB"]) && token2(raw.cPI) && raw.pITT === raw.cPI && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now && integer(raw.mAVTB)) return "turn";
+    const exact3 = (fields2) => Object.keys(raw).length === fields2.length && fields2.every((k) => Object.hasOwn(raw, k));
+    if (exact3([...common, "pGS", "sNA", "pITT", "sNAA", "wBACPI"]) && object3(raw.pGS) && Object.keys(raw.pGS).length === 1 && token2(Object.keys(raw.pGS)[0]) && Object.values(raw.pGS)[0] === "fold" && raw.sNA === "NSAF" && raw.pITT === null && integer(raw.sNAA) && Array.isArray(raw.wBACPI) && raw.wBACPI.length === 1 && token2(raw.wBACPI[0])) return "fold";
+    if (exact3([...common, "cPI", "pITT", "sNA", "pASA", "sNAA", "mAVTB"]) && token2(raw.cPI) && raw.pITT === raw.cPI && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now && integer(raw.mAVTB)) return "turn";
     return null;
   }
 
@@ -376,8 +376,8 @@
     return Object.keys(raw).length === keys2.length && keys2.every((k) => Object.hasOwn(raw, k)) && integer2(raw.now) && integer2(raw.pre) && raw.now > raw.pre && integer2(raw.sNAA) && integer2(raw.sN) && raw.mR === 8 && raw.cHB === 5 && raw.mEV === 0 && raw.fV === "0.1.72" && raw.sNA === "NSAA" && raw.pITT === null && same(raw.pGS, {}) && same(raw.wBACPI, []) && same(raw.eventsData, []) && object4(raw.tB) && Object.keys(raw.tB).length === 1 && Object.values(raw.tB)[0] === 5 && same(raw.cRPI, Object.keys(raw.tB));
   }
   function isObservedHjFacingTurnPatch(raw) {
-    const fields = ["now", "pre", "eventsData", "mEV", "fV", "sN", "cPI", "pITT", "sNA", "pASA", "sNAA"];
-    return object4(raw) && Object.keys(raw).length === fields.length && fields.every((k) => Object.hasOwn(raw, k)) && integer2(raw.now) && integer2(raw.pre) && raw.now > raw.pre && integer2(raw.sN) && raw.mEV === 0 && raw.fV === "0.1.72" && same(raw.eventsData, []) && typeof raw.cPI === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(raw.cPI) && raw.pITT === raw.cPI && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now;
+    const fields2 = ["now", "pre", "eventsData", "mEV", "fV", "sN", "cPI", "pITT", "sNA", "pASA", "sNAA"];
+    return object4(raw) && Object.keys(raw).length === fields2.length && fields2.every((k) => Object.hasOwn(raw, k)) && integer2(raw.now) && integer2(raw.pre) && raw.now > raw.pre && integer2(raw.sN) && raw.mEV === 0 && raw.fV === "0.1.72" && same(raw.eventsData, []) && typeof raw.cPI === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(raw.cPI) && raw.pITT === raw.cPI && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now;
   }
 
   // src/flopWindow.ts
@@ -552,6 +552,66 @@
         ...p[0] === "gC" && hjPatchKind(raw) ? { hjPatch: raw } : {}
       };
       return JSON.stringify(result).length <= 4e4 ? result : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // src/riverObservation.ts
+  var object7 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+  var same4 = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  var chips = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+  var exact2 = (v, keys2) => Object.keys(v).length === keys2.length && keys2.every((k) => Object.hasOwn(v, k));
+  var common3 = "now pre eventsData mEV fV sN".split(" ");
+  var turn = [...common3, "cPI", "sNA", "pASA", "pITT", "sNAA", "mAVTB"];
+  var fields = new Set("id hI gN now pre r gT seats iHPI dealerID dealerSeat sBPI bBPI tB pGS cPI pITT smallBlind bigBlind ante deadButton gM mode oTC gameResult aD aS cM cR cRPI rHP rHC eventsData version fV nR mTB rIT sPM players pC sBS sNA pASA sNAA mAVTB wBACPI mEV sN mR cHB pot uP aGC aVC dSB gDM pTB sG lE lSPI pASA dLTWTB dLTWoTB ownerID status bigBlindCheck directToNexTurn recordChatForReplay allowStandaloneRebuy rH sPI tHC".split(" "));
+  function projectRiverObservation(data, knownHero) {
+    if (typeof data !== "string" || data.length > 2e6 || !data.startsWith("42[")) return null;
+    try {
+      const [event, payload] = JSON.parse(data.slice(2));
+      if (!["registered", "gC"].includes(event) || !object7(payload)) return null;
+      const raw = event === "registered" ? payload.gameState : payload;
+      if (!object7(raw) || Object.keys(raw).some((k) => !fields.has(k)) || !same4(raw.eventsData, []) || raw.fV !== "0.1.72" || raw.mEV !== 0 || !chips(raw.now) || !chips(raw.sN) || Object.hasOwn(raw, "pot") && !chips(raw.pot)) return null;
+      const normalized = structuredClone(raw);
+      if (object7(raw.pC)) {
+        normalized.pC = {};
+        for (const [id, hand] of Object.entries(raw.pC)) {
+          if (!object7(hand) || Object.keys(hand).some((k) => !["cards", "name1", "name2", "name1RH", "name2RH", "prob1"].includes(k))) return null;
+          if (Object.hasOwn(hand, "cards")) normalized.pC[id] = hand;
+          else if (Object.values(hand).some((v) => v !== null && (typeof v !== "string" || v.length > 32))) return null;
+        }
+      }
+      if (object7(raw.players) && Object.values(raw.players).some((p) => !object7(p) || Object.keys(p).some((k) => !["id", "stack", "status", "disconnectedSince", "dAC", "name", "avatarID", "winCount", "quitCount", "isNetworkPlayer"].includes(k)))) return null;
+      if (object7(raw.tB)) normalized.tB = Object.fromEntries(Object.entries(raw.tB).map(([id, n]) => [id, n === "check" ? 0 : n]));
+      const source = projectFirstUtgSource("42" + JSON.stringify([event, event === "registered" ? { currentPlayer: payload.currentPlayer, gameState: normalized } : normalized]), knownHero);
+      if (!source) return null;
+      const result = {
+        source: { event: source.event, heroId: source.heroId, frame: source.frame },
+        ...Object.hasOwn(raw, "pot") ? { pot: raw.pot } : {},
+        kind: "other",
+        actor: null,
+        amount: null
+      };
+      const active = raw.cPI === raw.pITT && typeof raw.cPI === "string" && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now;
+      if (exact2(raw, turn) && active && chips(raw.mAVTB)) {
+        result.kind = "turn";
+        result.actor = raw.cPI;
+      }
+      if (exact2(raw, [...turn, "gT", "pC", "tB", "oTC", "cRPI", "players"]) && active && same4(raw.gT, [1, 3]) && same4(raw.cRPI, []) && same4(raw.players, {}) && object7(raw.tB) && Object.values(raw.tB).every((v) => v === "<D>")) result.kind = "river";
+      const action = raw.sNA === "NSAA" && raw.pITT === null && chips(raw.sNAA);
+      if (action && object7(raw.tB) && Object.keys(raw.tB).length === 1) {
+        const [actor, amount] = Object.entries(raw.tB)[0];
+        if (amount === "check" && exact2(raw, [...common3, "tB", "sNA", "cRPI", "pITT", "sNAA"]) && same4(raw.cRPI, [actor])) {
+          result.kind = "check";
+          result.actor = actor;
+        }
+        if (chips(amount) && amount > 0 && raw.cHB === amount && same4(raw.pGS, {}) && same4(raw.cRPI, [actor]) && same4(raw.wBACPI, []) && exact2(raw, [...common3, "mR", "tB", "cHB", "pGS", "sNA", "cRPI", "pITT", "sNAA", "wBACPI"])) {
+          result.kind = "bet";
+          result.actor = actor;
+          result.amount = amount;
+        }
+      }
+      return result;
     } catch {
       return null;
     }
@@ -790,10 +850,10 @@
             reasons.push("Raw recorder missing, changed, rejected frames, or mismatched source cursor/generation.");
           if (tableUrl !== this.d.tableUrl() || pair?.tableUrl !== tableUrl || tableIdFromPath(new URL(tableUrl).pathname) !== pair?.before.identity?.tableId) reasons.push("Table URL mismatch.");
           const rawSourceObservations = this.d.raw.postflopObservations();
-          const fields2 = rawSourceObservations.fields;
-          if (!fields2.heroId || fields2.cPI?.value !== fields2.heroId.value || fields2.pITT?.value !== fields2.heroId.value || JSON.stringify(fields2.gT?.value) !== "[1,1]" || fields2.hI?.value !== pair?.before.identity?.handId)
+          const fields3 = rawSourceObservations.fields;
+          if (!fields3.heroId || fields3.cPI?.value !== fields3.heroId.value || fields3.pITT?.value !== fields3.heroId.value || JSON.stringify(fields3.gT?.value) !== "[1,1]" || fields3.hI?.value !== pair?.before.identity?.handId)
             reasons.push("Raw source hero/actor/hand/flop observations missing or contradictory.");
-          if (JSON.stringify(fields2.oTC?.value?.["1"]) !== JSON.stringify(pair?.unverifiedObservations.board)) reasons.push("Raw source/UI board observations missing or contradictory.");
+          if (JSON.stringify(fields3.oTC?.value?.["1"]) !== JSON.stringify(pair?.unverifiedObservations.board)) reasons.push("Raw source/UI board observations missing or contradictory.");
           const observationPaired = reasons.length === 0;
           const saved2 = this.retain({
             label,
@@ -882,8 +942,8 @@
         if (bb && display && dom.selected.selectedRaiseToChips !== null && Math.abs(Number(display[1]) * bb - dom.selected.selectedRaiseToChips) > 1e-8) {
           contradictions.push("Selected chips and displayed BB disagree under the copied source-proof big blind.");
         }
-        const fields = source?.sourceState?.fields;
-        if (fields && Object.hasOwn(fields, "cPI") && Object.hasOwn(fields, "pITT") && fields.cPI !== fields.pITT) contradictions.push("Source cPI/pITT differ; do not infer a single current actor.");
+        const fields2 = source?.sourceState?.fields;
+        if (fields2 && Object.hasOwn(fields2, "cPI") && Object.hasOwn(fields2, "pITT") && fields2.cPI !== fields2.pITT) contradictions.push("Source cPI/pITT differ; do not infer a single current actor.");
         const binding = JSON.stringify([tableUrl, source?.identity, source?.sourceState]);
         if (this.priorBinding !== null && this.priorBinding !== binding) contradictions.push("Source/table/actor binding differs from previous checkpoint; records are separate observations, not merged proof.");
         const record = {
@@ -1040,6 +1100,7 @@
                   utgSource: metadata ? projectFirstUtgSource(event.data, identity?.heroPlayerId ?? null) : null,
                   observedAt: Date.now()
                 };
+                lastMetadata.riverSource = metadata ? projectRiverObservation(event.data, identity?.heroPlayerId ?? null) : null;
                 firstMetadata ??= lastMetadata;
                 window.postMessage(lastMetadata, location.origin);
               }

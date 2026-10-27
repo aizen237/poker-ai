@@ -66,6 +66,13 @@ const overlayState: OverlayState = {
 };
 
 const OVERLAY_ID = "poker-ai-reader-overlay";
+let riverDisplay: { lines: string[]; source: string; expiresAt: number } | null = null;
+let riverExpiryTimer: number | undefined;
+function clearRiverDisplay() {
+  riverDisplay = null;
+  if (riverExpiryTimer !== undefined) window.clearTimeout(riverExpiryTimer);
+  riverExpiryTimer = undefined;
+}
 
 function ensureOverlay(): HTMLElement {
   const existing = document.getElementById(OVERLAY_ID);
@@ -131,6 +138,7 @@ function renderOverlay() {
     `<div style="color:${AI_STATUS_COLORS[s.aiStatus]}; font-weight:600;">${escapeHtml(s.aiStatus === "received" ? "RECOMMENDATION AVAILABLE" : s.aiStatus.replaceAll("_", " ").toUpperCase())}</div>`,
   );
   if (s.policyLine) parts.push(`<div>${escapeHtml(s.policyLine)}</div>`);
+  if (riverDisplay) parts.push(`<div data-river-illustration style="margin-top:8px; padding:6px; border:1px solid #888;">${riverDisplay.lines.map(escapeHtml).join("<br/>")}</div>`);
   if (s.aiResult && displayLifetime) parts.push(`<div data-proof-countdown>Evidence expires in ${Math.max(0, (displayLifetime.expiresAt - Date.now()) / 1000).toFixed(1)}s</div>`);
   if (s.aiResult) {
     parts.push(`<div style="font-size:16px; font-weight:700; margin:4px 0;">${escapeHtml(s.aiResult.action)}</div>`);
@@ -495,6 +503,22 @@ function refreshDisplayLifetime() {
   }
 }
 function refreshFreshnessDisplay() {
+  if (riverDisplay) {
+    try {
+      const read = readLiveTable(), timeline = handTimeline.snapshot();
+      const river = buildLiveDecisionProofs(read, assessLiveState(read.raw, read.context), timeline, null, "display-refresh").riverCallFold;
+      if (Date.now() >= riverDisplay.expiresAt || liveProofRevision(timeline) !== riverDisplay.source || !river?.illustration) {
+        clearRiverDisplay();
+        overlayState.aiStatus = river?.unsafe ? "unsafe" : "waiting_for_proof";
+        overlayState.aiWarnings = river?.reasons ?? ["River illustration expired or inputs changed; fresh matching evidence is required."];
+      }
+    } catch {
+      clearRiverDisplay();
+      handTimeline.gap("River display read failed.");
+      overlayState.aiStatus = "blocked";
+    }
+    renderOverlay();
+  }
   if (!displayLifetime) return;
   // Also catch changed cards/actor between ordinary polls. This read can
   // invalidate a display, but cannot issue or extend a certificate.
@@ -533,7 +557,12 @@ setInterval(() => {
   // Include blinds, dealer, and extraction failures in the identity of a read.
   const domStateJson = decisionFingerprint(location.origin + location.pathname, read.raw, read.context, read.raiseControl);
   const timelineSnapshot = handTimeline.snapshot();
-  const stateJson = JSON.stringify([domStateJson, liveProofRevision(timelineSnapshot)]);
+  // River diagnostics must notice CALL-only changes and observation expiry as
+  // well. Omit the receipt timestamp itself so a fresh identical poll is stable.
+  const { observedAt: callObservedAt, ...callObservation } = read.callControl ?? {};
+  const stateJson = JSON.stringify([domStateJson, liveProofRevision(timelineSnapshot),
+    ...(assessment.state?.street === "river" ? [{ callObservation,
+      callFresh: callObservedAt !== undefined && callObservedAt <= Date.now() && Date.now() - callObservedAt < 10_000 }] : [])]);
   if (stateJson !== lastStateJson) currentDiagnosticPacket = null;
   if (domStateJson !== lastDomStateJson) {
     lastDomStateJson = domStateJson;
@@ -556,6 +585,7 @@ setInterval(() => {
   const preflop = buildLivePreflopContext(assessment, actionHistory, timelineSnapshot, read);
   logLiveDiagnostics(read, assessment, actionHistory, preflop, currentDiagnosticPacket, handTimeline.snapshot());
   if (stateJson !== lastStateJson) {
+    clearRiverDisplay();
     currentDiagnosticPacket = null;
     lastStateJson = stateJson;
     // Invalidate in-flight results on every changed or failed read, including
@@ -593,6 +623,19 @@ setInterval(() => {
       renderOverlay();
     }
     const scoped = buildLiveDecisionProofs(read, assessment, timelineSnapshot, preflop, String(requestSequence));
+    if (scoped.riverCallFold) {
+      // Separate assumption-based illustration; never an action/LLM pathway.
+      overlayState.aiStatus = scoped.riverCallFold.unsafe ? "unsafe" : "waiting_for_proof";
+      overlayState.policyLine = "River CALL vs FOLD withheld. " + scoped.riverCallFold.warning;
+      overlayState.aiWarnings = scoped.riverCallFold.reasons;
+      if (scoped.riverCallFold.illustration && scoped.riverCallFold.binding) {
+        riverDisplay = { lines: scoped.riverCallFold.illustrationLines, source: liveProofRevision(timelineSnapshot),
+          expiresAt: scoped.riverCallFold.binding.expiresAt };
+        riverExpiryTimer = window.setTimeout(refreshFreshnessDisplay, Math.max(0, riverDisplay.expiresAt - Date.now()));
+      }
+      renderOverlay();
+      return;
+    }
     overlayState.aiStatus = scoped.activation.state === "proof_ready" ? "idle" : scoped.activation.state;
     overlayState.policyLine = activationLabel(scoped.activation.state) + " (" + scoped.activation.supportedDecisionType + ")";
     overlayState.aiWarnings = [...new Set([...scoped.activation.reasons, ...(state.street === "preflop" ? [] : confidence.reasons)])];
@@ -749,6 +792,7 @@ setInterval(() => {
     overlayState.aiStatus = "blocked";
     clearDisplayLifetime();
     overlayState.street = "unreadable";
+    clearRiverDisplay();
     overlayState.opponentStatsLine = null;
     overlayState.policyLine = null;
     overlayState.equityLine = null;
