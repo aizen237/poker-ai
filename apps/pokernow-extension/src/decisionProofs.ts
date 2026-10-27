@@ -1,4 +1,4 @@
-import { assessDecisionProofs, assessPacketDecisionProofs, decisionProofBinding, PROOF_SCOPES, RIVER_PAIRWISE_WARNING,
+import { assessDecisionProofs, assessPacketDecisionProofs, decisionProofBinding, PROOF_SCOPES, RIVER_PAIRWISE_WARNING, TURN_CHECKDOWN_WARNING,
   unopenedChartAction, inspectLiveHjResponseStrategy, isReviewedHjFold, type DecisionPacket, type PreflopContext, type ScopedProof, type ProofScope, type DecisionProofs } from "@poker-ai/ai-core";
 import type { LiveStateAssessment } from "@poker-ai/browser-reader";
 import type { LiveTableRead } from "./tableRead.js";
@@ -187,7 +187,8 @@ export function buildLiveDecisionProofs(read: LiveTableRead, assessment: LiveSta
     activation.reasons.push("CO facing UTG open plus HJ caller: no reviewed response strategy or independent CO action permission. Unsupported CALL/3-BET must never substitute FOLD.");
   }
   return { evidence: envelope, activation, unopened, openingSize: opening.size,
-    riverCallFold: riverCallFoldReadiness(read, assessment, envelope, timeline),
+    riverCallFold: state?.street === "river" ? riverCallFoldReadiness(read, assessment, envelope, timeline) : null,
+    turnCallFold: state?.street === "turn" ? riverCallFoldReadiness(read, assessment, envelope, timeline) : null,
     responseWindow, responseStrategy, responseExecution, callLegality,
     // Separate diagnostic; never promotes a general decision scope or permission.
     postflopCall: flopCallEvidence(read, assessment, timeline, epoch),
@@ -203,24 +204,26 @@ export function buildLiveDecisionProofs(read: LiveTableRead, assessment: LiveSta
  * observation. It cannot promote assumptions into any decision proof scope. */
 function riverCallFoldReadiness(read: LiveTableRead, assessment: LiveStateAssessment, envelope: DecisionProofs, timeline: LiveTimelineDiagnostic | null) {
   const state = assessment.state;
-  if (state?.street !== "river") return null;
+  if (state?.street !== "river" && state?.street !== "turn") return null;
+  const turn = state.street === "turn", street = state.street, cardCount = turn ? "four" : "five";
   const relevant: ProofScope[] = ["decisionState", "connection", "stack", "callCost", "pot", "eligibility", "accounting"];
   const reasons = envelope.proofs.filter(p => relevant.includes(p.scope) && p.status !== "proven")
     .flatMap(p => p.reasons);
+  if (turn) reasons.push(TURN_CHECKDOWN_WARNING);
   const hero = state.seats.find(s => s.isYou);
   const call = assessment.amountToCall;
-  if (state.board.length !== 5) reasons.push("Exactly five river board cards are required.");
+  if (state.board.length !== (turn ? 4 : 5)) reasons.push(`Exactly ${cardCount} ${street} board cards are required.`);
   if (assessment.activeOpponents !== 1) reasons.push("Exactly one active opponent is required; multiway is unsupported.");
   if (call === null || call <= 0) reasons.push("A positive independently verified CALL amount is required.");
   if (hero?.stack == null || call !== null && call >= hero.stack || state.seats.some(s => s.isOccupied && s.isAllIn))
-    reasons.push("All-ins and short calls are outside the river comparison.");
+    reasons.push(`All-ins and short calls are outside the ${street} comparison.`);
   // Baseline diagnostics also run without a source window. The illustration
   // separately binds this observation to the original source activation time.
   const ui = call !== null && call > 0 ? assessCallControlReadiness(read.callControl ?? null, call, 0, Date.now(),
     "Visible CALL amount contradicts the current contribution gap.") : null;
   if (ui?.status !== "observed_matching") reasons.push(...(ui?.reasons ?? ["No decision-local CALL-control cross-check is available."]));
   const illustration = riverIllustration(read, assessment, timeline, envelope);
-  if (!illustration.binding) reasons.push("No validated river source activation binds the current hand, hero, five board cards, payable CALL and original expiry. A matching DOM label or connected socket is insufficient.");
+  if (!illustration.binding) reasons.push(`No validated ${street} source activation binds the current hand, hero, ${cardCount} board cards, payable CALL and original expiry. A matching DOM label or connected socket is insufficient.`);
   reasons.push(...illustration.reasons);
   // Contradictions remain fatal even in scopes not needed to price a pairwise
   // comparison. Unknown raise rights/position/range confidence are not blockers.
@@ -228,7 +231,7 @@ function riverCallFoldReadiness(read: LiveTableRead, assessment: LiveStateAssess
   return { status: "abstained" as const, liveAuthorized: false as const,
     unsafe: contradictions.length > 0 || ui?.status === "contradicted" || illustration.unsafe,
     illustration: illustration.calculation, binding: illustration.binding, illustrationLines: illustration.lines,
-    requiredProofs: relevant, reasons: [...new Set([...contradictions, ...reasons])], warning: RIVER_PAIRWISE_WARNING };
+    requiredProofs: relevant, reasons: [...new Set([...contradictions, ...reasons])], warning: turn ? TURN_CHECKDOWN_WARNING : RIVER_PAIRWISE_WARNING };
 }
 
 /** Proof refreshes must invalidate pending recommendations even if DOM values did not change. */

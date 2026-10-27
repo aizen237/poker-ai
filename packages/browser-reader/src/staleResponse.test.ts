@@ -1,11 +1,12 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { parseHTML } from "linkedom";
-const mocks = vi.hoisted(() => ({ read: vi.fn(), assess: vi.fn(), revision: "source-1" }));
+const mocks = vi.hoisted(() => ({ read: vi.fn(), assess: vi.fn(), revision: "source-1", turn: false }));
 // Isolate delivery validation behind an independently authorized decision fixture.
 // Actual proof production and source revisions are exercised in decisionProofRuntime.test.ts.
 vi.mock("../../../apps/pokernow-extension/src/decisionProofs.js", () => ({
   buildLiveDecisionProofs: () => ({ evidence: { version: 1, binding: "synthetic boundary fixture", decisionEpoch: "1", handId: "hand", connectionGeneration: 1, proofs: [] },
-    activation: { allowed: true, state: "proof_ready", supportedDecisionType: "heads_up_call_fold", failedProofs: [], reasons: [] } }),
+    activation: { allowed: true, state: "proof_ready", supportedDecisionType: "heads_up_call_fold", failedProofs: [], reasons: [] },
+    turnCallFold: mocks.turn ? { unsafe: false, illustration: null, binding: null, reasons: ["Future river betting is unmodeled."], warning: "No action authorization." } : null }),
   liveProofRevision: () => mocks.revision,
   activationLabel: () => "Inputs proven; evaluating supported policy",
 }));
@@ -14,9 +15,10 @@ vi.mock("../../../apps/pokernow-extension/src/tableRead.js", () => ({ readLiveTa
 vi.mock("@poker-ai/browser-reader", async importOriginal => ({ ...await importOriginal<object>(), assessLiveState: mocks.assess }));
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
-it.each(["changed DOM", "changed source proof", "malformed result", "consensus array", "HTTP error"])("withholds %s at the live response boundary", async scenario => {
+it.each(["changed DOM", "changed source proof", "turn advisory", "malformed result", "consensus array", "HTTP error"])("withholds %s at the live response boundary", async scenario => {
   vi.resetModules();
   mocks.revision = "source-1";
+  mocks.turn = false;
   const { document } = parseHTML("<html><body></body></html>");
   const location = { origin: "https://pokernow.com", pathname: "/games/test", href: "https://pokernow.com/games/test" };
   vi.stubGlobal("document", document); vi.stubGlobal("location", location); vi.stubGlobal("window", { location });
@@ -48,8 +50,20 @@ it.each(["changed DOM", "changed source proof", "malformed result", "consensus a
   expect(fetchMock).toHaveBeenCalledOnce();
   if (scenario === "changed DOM") observedStack = 20; // No second poll: re-read at delivery.
   if (scenario === "changed source proof") mocks.revision = "source-2"; // Identical DOM; no second poll.
+  if (scenario === "turn advisory") {
+    mocks.turn = true;
+    observedStack = 20;
+    const assessment = mocks.assess.mock.results.at(-1)!.value;
+    assessment.state.street = "turn";
+    assessment.state.board.push({ rank: 11, suit: "c" });
+    poll();
+    expect(fetchMock).toHaveBeenCalledOnce(); // No new turn action request.
+  }
   const result = scenario === "consensus array" ? [] : { action: scenario === "malformed result" ? "INVALID" : "CALL", confidence: 0.99, reasoning: "stale recommendation" };
   complete({ ok: scenario !== "HTTP error", json: async () => ({ ok: true, result }) });
-  await vi.waitFor(() => expect(document.getElementById("poker-ai-reader-overlay")!.textContent).toContain(scenario.startsWith("changed") ? "Table changed" : "invalid response"));
+  if (scenario === "turn advisory") {
+    await vi.waitFor(() => expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("Discarding stale AI response")));
+    expect(document.getElementById("poker-ai-reader-overlay")!.textContent).toContain("Turn unconditional CALL/FOLD recommendation withheld.");
+  } else await vi.waitFor(() => expect(document.getElementById("poker-ai-reader-overlay")!.textContent).toContain(scenario.startsWith("changed") ? "Table changed" : "invalid response"));
   expect(document.getElementById("poker-ai-reader-overlay")!.textContent).not.toContain("stale recommendation");
 });

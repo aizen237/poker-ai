@@ -1,4 +1,4 @@
-import { Deck, validateSimulationInput, type Card } from "@poker-ai/shared";
+import { Deck, cardId, fullDeck, validateSimulationInput, type Card } from "@poker-ai/shared";
 import { evaluateBest } from "@poker-ai/poker-engine";
 import type { WeightedCombo } from "./range.js";
 import { expandEquityRange, type EquityRange } from "./comboRange.js";
@@ -31,6 +31,37 @@ export function calculateExactRiverEquity(
     return sum + c.weight * (hero > opponent ? 1 : hero === opponent ? 0.5 : 0);
   }, 0);
   return { equity: share / mass, iterations: combos.length };
+}
+
+/** Heads-up checkdown equity: freeze the supplied TURN range, then enumerate
+ * all 44 legal rivers per opponent combo. No river action/range conditioning.
+ * The existing evaluator, range weights, removal and half-tie convention apply. */
+export function calculateExactTurnEquity(
+  heroCards: readonly Card[], opponentRange: EquityRange, board: readonly Card[],
+): RangeEquityResult {
+  if (heroCards.length !== 2 || board.length !== 4) throw new Error("Exact turn equity requires two hero cards and four board cards");
+  validateSimulationInput([...heroCards, ...board], 4, 1);
+  const combos = expandEquityRange(opponentRange, [...heroCards, ...board]);
+  const mass = combos.reduce((sum, c) => sum + c.weight, 0);
+  if (!(mass > 0) || !Number.isFinite(mass)) throw new Error("Opponent range has no valid positive mass");
+  const known = new Set([...heroCards, ...board].map(cardId));
+  const rivers = fullDeck().filter(c => !known.has(cardId(c))).map(card => ({
+    card, id: cardId(card), hero: evaluateBest([...heroCards, ...board, card]).value,
+  }));
+  let share = 0, iterations = 0;
+  for (const combo of combos) {
+    const blocked = new Set(combo.cards.map(cardId));
+    let wins = 0, count = 0;
+    for (const river of rivers) {
+      if (blocked.has(river.id)) continue;
+      const opponent = evaluateBest([...combo.cards, ...board, river.card]).value;
+      wins += river.hero > opponent ? 1 : river.hero === opponent ? 0.5 : 0;
+      count++;
+    }
+    share += combo.weight * wins / count;
+    iterations += count;
+  }
+  return { equity: share / mass, iterations };
 }
 
 function checkedRng(random: () => number): () => number {

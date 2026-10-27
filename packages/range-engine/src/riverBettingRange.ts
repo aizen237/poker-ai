@@ -7,9 +7,26 @@ import { createComboRange, type ComboWeight } from "./comboRange.js";
  * not per-combo frequencies. Known hero cards affect removal, not classification. */
 export function riverBettingAssumptions(hero: readonly Card[], board: readonly Card[]) {
   if (hero.length !== 2 || board.length !== 5) throw new Error("River assumptions require two hero cards and five board cards");
-  validateSimulationInput([...hero, ...board], 5, 1);
+  return bettingAssumptions(hero, board);
+}
+
+/** Same explicit value/weak-hand mixture on the turn. Weak hands may include
+ * semi-bluffs/draws; no action frequencies or observed tendencies are inferred. */
+export function turnBettingAssumptions(hero: readonly Card[], board: readonly Card[]) {
+  if (hero.length !== 2 || board.length !== 4) throw new Error("Turn assumptions require two hero cards and four board cards");
+  return bettingAssumptions(hero, board);
+}
+
+function bettingAssumptions(hero: readonly Card[], board: readonly Card[]) {
+  validateSimulationInput([...hero, ...board], board.length, 1);
   const known = new Set([...hero, ...board].map(cardId));
-  const boardHand = evaluateBest(board);
+  // Four cards cannot form a five-card hand. Only rank multiplicity can make
+  // a board-only category at this point (no straight/flush yet).
+  const counts = [...new Set(board.map(c => c.rank))].map(r => board.filter(c => c.rank === r).length);
+  const boardCategory = board.length === 5 ? evaluateBest(board).category
+    : counts.includes(4) ? HandCategory.FourOfAKind : counts.includes(3) ? HandCategory.ThreeOfAKind
+    : counts.filter(n => n === 2).length === 2 ? HandCategory.TwoPair
+    : counts.includes(2) ? HandCategory.Pair : HandCategory.HighCard;
   const topRank = Math.max(...board.map(c => c.rank));
   const strong: ComboWeight[] = [], thin: ComboWeight[] = [], bluffs: ComboWeight[] = [];
   for (const pair of combinations(fullDeck().filter(c => !known.has(cardId(c))), 2)) {
@@ -17,7 +34,7 @@ export function riverBettingAssumptions(hero: readonly Card[], board: readonly C
     const made = evaluateBest([...cards, ...board]);
     const combo = { cards, weight: 1 };
     // Exclude merely playing the board, including board-only two pair/trips.
-    const strongValue = made.category >= HandCategory.TwoPair && made.category > boardHand.category;
+    const strongValue = made.category >= HandCategory.TwoPair && made.category > boardCategory;
     const topPair = made.category === HandCategory.Pair &&
       (cards.some(c => c.rank === topRank) || cards[0].rank === cards[1].rank && cards[0].rank > topRank);
     if (strongValue) strong.push(combo);
@@ -37,7 +54,8 @@ export function riverBettingAssumptions(hero: readonly Card[], board: readonly C
     if (!p.value.length || !bluffs.length) throw new Error(`${p.label}: no legal ${!p.value.length ? "value" : "bluff"} combinations; assumption cannot be evaluated`);
     return {
       label: p.label, valueAssumption: p.valueAssumption, bluffShare: p.bluffShare,
-      bluffAssumption: "Unpaired hole cards matching no board rank, with at most one pair in the best hand; uniform within each bucket.",
+      bluffAssumption: "Unpaired hole cards matching no board rank, with at most one pair in the best hand; uniform within each bucket." +
+        (board.length === 4 ? " Includes available draws/semi-bluffs and air; frozen turn range, no river betting model." : ""),
       valueCombos: p.value.length, bluffCombos: bluffs.length,
       range: createComboRange([
         ...p.value.map(c => ({ ...c, weight: (1 - p.bluffShare) / p.value.length })),

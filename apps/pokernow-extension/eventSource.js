@@ -597,7 +597,7 @@
         result.kind = "turn";
         result.actor = raw.cPI;
       }
-      if (exact2(raw, [...turn, "gT", "pC", "tB", "oTC", "cRPI", "players"]) && active && same4(raw.gT, [1, 3]) && same4(raw.cRPI, []) && same4(raw.players, {}) && object7(raw.tB) && Object.values(raw.tB).every((v) => v === "<D>")) result.kind = "river";
+      if (exact2(raw, [...turn, "gT", "pC", "tB", "oTC", "cRPI", "players"]) && active && (same4(raw.gT, [1, 3]) || same4(raw.gT, [1, 2])) && same4(raw.cRPI, []) && same4(raw.players, {}) && object7(raw.tB) && Object.values(raw.tB).every((v) => v === "<D>")) result.kind = same4(raw.gT, [1, 3]) ? "river" : "turn_board";
       const action = raw.sNA === "NSAA" && raw.pITT === null && chips(raw.sNAA);
       if (action && object7(raw.tB) && Object.keys(raw.tB).length === 1) {
         const [actor, amount] = Object.entries(raw.tB)[0];

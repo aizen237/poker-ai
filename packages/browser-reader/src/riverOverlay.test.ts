@@ -20,9 +20,10 @@ vi.mock("../../../apps/pokernow-extension/src/opponentStats.js", () => ({
 }));
 afterEach(() => { mocks.timeline = null; vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
-it.each(["expiry", "disconnect", "call", "board", "read failure"])("hand406 numbers reach the overlay and disappear on %s without a relay request", async invalidation => {
+it.each(["river", "turn"].flatMap(street => ["expiry", "disconnect", "call", "board", "read failure", "source change"]
+  .map(invalidation => ({ street, invalidation }))))("$street numbers reach the overlay and disappear on $invalidation without a relay request", async ({ street, invalidation }) => {
   vi.resetModules();
-  const fixture = JSON.parse(readFileSync(new URL("./fixtures/pokernow-river-406.json", import.meta.url), "utf8"));
+  const fixture = JSON.parse(readFileSync(new URL(street === "river" ? "./fixtures/pokernow-river-406.json" : "./fixtures/pokernow-turn-synthetic.json", import.meta.url), "utf8"));
   let now = fixture.frames[0].localReceivedAt;
   vi.spyOn(Date, "now").mockImplementation(() => now);
   const runtime = createTimelineRuntime({ tableId: "river-table", sessionId: "overlay", now: () => now, fetchLog: vi.fn() });
@@ -62,10 +63,23 @@ it.each(["expiry", "disconnect", "call", "board", "read failure"])("hand406 numb
   expect(overlay()).toContain("unproven");
   expect(overlay()).not.toContain("RECOMMENDATION AVAILABLE");
   expect(overlay()).not.toContain("Confidence:");
+  if (street === "turn") {
+    expect(overlay()).toContain("Checkdown-only CALL EV");
+    expect(overlay()).toContain("Future river betting is unmodeled");
+    expect(overlay()).toContain("Unconditional CALL/FOLD recommendation withheld");
+  }
   if (invalidation === "expiry") { now = runtime.snapshot().sourceStatus.riverObservation!.expiresAt; deadline(); }
   if (invalidation === "disconnect") runtime.stop("disconnect");
   if (invalidation === "call") read.callControl!.amountChips = 13;
-  if (invalidation === "board") read.raw.boardCards[4]!.valueText = "7";
+  if (invalidation === "board") read.raw.boardCards.at(-1)!.valueText = "7";
+  if (invalidation === "source change") {
+    const last = fixture.frames.at(-1);
+    const wire = "42" + JSON.stringify(["gC", { pre: last.payload.now, now: last.payload.now + 1,
+      fV: "0.1.72", mEV: 0, sN: last.payload.now + 1, eventsData: [] }]);
+    runtime.accept({ channel: TIMELINE_CHANNEL, type: "source_metadata", tableId: "river-table", sequence: last.localReceiveSequence + 1,
+      generation: 1, observedAt: now, metadata: inspectSocketMetadata(wire),
+      riverSource: projectRiverObservation(wire, identity?.heroPlayerId ?? null) });
+  }
   if (invalidation === "read failure") mocks.read.mockImplementation(() => { throw new Error("DOM failed"); });
   intervals.get(250)!();
   expect(overlay()).not.toContain("Required equity:");
@@ -73,7 +87,7 @@ it.each(["expiry", "disconnect", "call", "board", "read failure"])("hand406 numb
   intervals.get(1000)!();
   expect(overlay()).not.toContain("Required equity:");
   expect(fetchMock).not.toHaveBeenCalled();
-});
+}, 20000);
 
 it("shows precise river abstention in the actual overlay, detects CALL-only changes, and never asks the relay for an action", async () => {
   vi.resetModules();

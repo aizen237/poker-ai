@@ -506,15 +506,16 @@ function refreshFreshnessDisplay() {
   if (riverDisplay) {
     try {
       const read = readLiveTable(), timeline = handTimeline.snapshot();
-      const river = buildLiveDecisionProofs(read, assessLiveState(read.raw, read.context), timeline, null, "display-refresh").riverCallFold;
+      const scoped = buildLiveDecisionProofs(read, assessLiveState(read.raw, read.context), timeline, null, "display-refresh");
+      const river = scoped.turnCallFold ?? scoped.riverCallFold;
       if (Date.now() >= riverDisplay.expiresAt || liveProofRevision(timeline) !== riverDisplay.source || !river?.illustration) {
         clearRiverDisplay();
         overlayState.aiStatus = river?.unsafe ? "unsafe" : "waiting_for_proof";
-        overlayState.aiWarnings = river?.reasons ?? ["River illustration expired or inputs changed; fresh matching evidence is required."];
+        overlayState.aiWarnings = river?.reasons ?? ["Turn/river illustration expired or inputs changed; fresh matching evidence is required."];
       }
     } catch {
       clearRiverDisplay();
-      handTimeline.gap("River display read failed.");
+      handTimeline.gap("Turn/river display read failed.");
       overlayState.aiStatus = "blocked";
     }
     renderOverlay();
@@ -557,11 +558,11 @@ setInterval(() => {
   // Include blinds, dealer, and extraction failures in the identity of a read.
   const domStateJson = decisionFingerprint(location.origin + location.pathname, read.raw, read.context, read.raiseControl);
   const timelineSnapshot = handTimeline.snapshot();
-  // River diagnostics must notice CALL-only changes and observation expiry as
+  // Turn/river diagnostics must notice CALL-only changes and observation expiry as
   // well. Omit the receipt timestamp itself so a fresh identical poll is stable.
   const { observedAt: callObservedAt, ...callObservation } = read.callControl ?? {};
   const stateJson = JSON.stringify([domStateJson, liveProofRevision(timelineSnapshot),
-    ...(assessment.state?.street === "river" ? [{ callObservation,
+    ...(assessment.state?.street === "river" || assessment.state?.street === "turn" ? [{ callObservation,
       callFresh: callObservedAt !== undefined && callObservedAt <= Date.now() && Date.now() - callObservedAt < 10_000 }] : [])]);
   if (stateJson !== lastStateJson) currentDiagnosticPacket = null;
   if (domStateJson !== lastDomStateJson) {
@@ -623,14 +624,15 @@ setInterval(() => {
       renderOverlay();
     }
     const scoped = buildLiveDecisionProofs(read, assessment, timelineSnapshot, preflop, String(requestSequence));
-    if (scoped.riverCallFold) {
+    const comparison = scoped.turnCallFold ?? scoped.riverCallFold;
+    if (comparison) {
       // Separate assumption-based illustration; never an action/LLM pathway.
-      overlayState.aiStatus = scoped.riverCallFold.unsafe ? "unsafe" : "waiting_for_proof";
-      overlayState.policyLine = "River CALL vs FOLD withheld. " + scoped.riverCallFold.warning;
-      overlayState.aiWarnings = scoped.riverCallFold.reasons;
-      if (scoped.riverCallFold.illustration && scoped.riverCallFold.binding) {
-        riverDisplay = { lines: scoped.riverCallFold.illustrationLines, source: liveProofRevision(timelineSnapshot),
-          expiresAt: scoped.riverCallFold.binding.expiresAt };
+      overlayState.aiStatus = comparison.unsafe ? "unsafe" : "waiting_for_proof";
+      overlayState.policyLine = (state.street === "turn" ? "Turn unconditional CALL/FOLD recommendation withheld. " : "River CALL vs FOLD withheld. ") + comparison.warning;
+      overlayState.aiWarnings = comparison.reasons;
+      if (comparison.illustration && comparison.binding) {
+        riverDisplay = { lines: comparison.illustrationLines, source: liveProofRevision(timelineSnapshot),
+          expiresAt: comparison.binding.expiresAt };
         riverExpiryTimer = window.setTimeout(refreshFreshnessDisplay, Math.max(0, riverDisplay.expiresAt - Date.now()));
       }
       renderOverlay();
