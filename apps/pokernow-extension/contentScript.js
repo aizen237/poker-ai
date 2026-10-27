@@ -4283,6 +4283,16 @@
   }
 
   // ../../packages/shared/dist/deck.js
+  function mulberry32(seed) {
+    let a = seed >>> 0;
+    return function() {
+      a |= 0;
+      a = a + 1831565813 | 0;
+      let t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
   function fullDeck() {
     const cards = [];
     for (const suit of SUITS) {
@@ -4708,6 +4718,56 @@
     return effectiveStack / currentPot;
   }
 
+  // ../../packages/poker-engine/dist/draws.js
+  function detectFlushDraw(holeCards, board) {
+    const all = [...holeCards, ...board];
+    const suitCounts = /* @__PURE__ */ new Map();
+    for (const c of all) {
+      suitCounts.set(c.suit, (suitCounts.get(c.suit) ?? 0) + 1);
+    }
+    for (const [suit, count] of suitCounts) {
+      if (count === 4) {
+        return { hasFlushDraw: true, suit, cardsOfSuit: count, outs: 13 - count };
+      }
+    }
+    return { hasFlushDraw: false, suit: null, cardsOfSuit: 0, outs: 0 };
+  }
+  var STRAIGHT_WINDOWS = [
+    [14, 2, 3, 4, 5],
+    [2, 3, 4, 5, 6],
+    [3, 4, 5, 6, 7],
+    [4, 5, 6, 7, 8],
+    [5, 6, 7, 8, 9],
+    [6, 7, 8, 9, 10],
+    [7, 8, 9, 10, 11],
+    [8, 9, 10, 11, 12],
+    [9, 10, 11, 12, 13],
+    [10, 11, 12, 13, 14]
+  ];
+  function detectStraightDraw(holeCards, board) {
+    const all = [...holeCards, ...board];
+    const heroRanks = new Set(all.map((c) => c.rank));
+    const missingRanks = /* @__PURE__ */ new Set();
+    for (const window2 of STRAIGHT_WINDOWS) {
+      const haveCount = window2.filter((r) => heroRanks.has(r)).length;
+      if (haveCount === 5) {
+        return { kind: "none", outs: 0, completingRanks: [] };
+      }
+      if (haveCount === 4) {
+        const missing = window2.find((r) => !heroRanks.has(r));
+        missingRanks.add(missing);
+      }
+    }
+    if (missingRanks.size === 0) {
+      return { kind: "none", outs: 0, completingRanks: [] };
+    }
+    const completingRanks = [...missingRanks];
+    if (missingRanks.size === 1) {
+      return { kind: "gutshot", outs: 4, completingRanks };
+    }
+    return { kind: "open_ended", outs: 4 * completingRanks.length, completingRanks };
+  }
+
   // ../../packages/poker-engine/dist/outs.js
   function calculateOuts(holeCards, board) {
     if (holeCards.length !== 2) {
@@ -4952,6 +5012,11 @@
       throw new Error("Turn assumptions require two hero cards and four board cards");
     return bettingAssumptions(hero, board);
   }
+  function flopBettingAssumptions(hero, board) {
+    if (hero.length !== 2 || board.length !== 3)
+      throw new Error("Flop assumptions require two hero cards and three board cards");
+    return bettingAssumptions(hero, board);
+  }
   function bettingAssumptions(hero, board) {
     validateSimulationInput([...hero, ...board], board.length, 1);
     const known2 = new Set([...hero, ...board].map(cardId));
@@ -4993,7 +5058,7 @@
         label: p.label,
         valueAssumption: p.valueAssumption,
         bluffShare: p.bluffShare,
-        bluffAssumption: "Unpaired hole cards matching no board rank, with at most one pair in the best hand; uniform within each bucket." + (board.length === 4 ? " Includes available draws/semi-bluffs and air; frozen turn range, no river betting model." : ""),
+        bluffAssumption: "Unpaired hole cards matching no board rank, with at most one pair in the best hand; uniform within each bucket." + (board.length === 4 ? " Includes available draws/semi-bluffs and air; frozen turn range, no river betting model." : board.length === 3 ? " Includes available draws/semi-bluffs and air; frozen flop range, no turn/river betting model." : ""),
         valueCombos: p.value.length,
         bluffCombos: bluffs.length,
         range: createComboRange([
@@ -6985,13 +7050,22 @@
 
   // ../../packages/ai-core/dist/turnCallFold.js
   var TURN_CHECKDOWN_WARNING = "Future river betting is unmodeled. Unconditional CALL/FOLD recommendation withheld. RAISE not evaluated.";
+  var FLOP_CHECKDOWN_WARNING = "Future turn/river betting and equity realization are not modeled. Unconditional CALL/FOLD recommendation withheld. RAISE not evaluated.";
+  function compareFlopCallFold(input) {
+    return compareCheckdownCallFold(input, "flop");
+  }
   function compareTurnCallFold(input) {
+    return compareCheckdownCallFold(input, "turn");
+  }
+  function compareCheckdownCallFold(input, street) {
+    const flop = street === "flop", count = flop ? 3 : 4;
     const base = {
       liveAuthorized: false,
       llmMayChoose: false,
       chosenAction: null,
+      street,
       assumption: "checkdown",
-      warning: TURN_CHECKDOWN_WARNING,
+      warning: flop ? FLOP_CHECKDOWN_WARNING : TURN_CHECKDOWN_WARNING,
       foldEV: calculateFoldEV().ev
     };
     const abstain = (reason) => ({
@@ -7001,10 +7075,11 @@
       requiredEquity: null,
       equityBounds: null,
       callEVBounds: null,
-      assumptions: []
+      assumptions: [],
+      handLines: []
     });
-    if (input.street !== "turn" || input.board.length !== 4)
-      return abstain("Exactly four turn board cards are required.");
+    if (input.street !== street || input.board.length !== count)
+      return abstain(`Exactly ${flop ? "three flop" : "four turn"} board cards are required.`);
     if (input.activeOpponents !== 1)
       return abstain("Exactly one active opponent is required.");
     if (input.accounting !== "single_pot_no_rake")
@@ -7015,33 +7090,50 @@
     if (pot <= 0 || call <= 0 || call > pot || call >= heroStack || opponentStack <= 0)
       return abstain("A positive fully payable non-all-in CALL and consistent positive pot are required.");
     try {
-      const assumptions = turnBettingAssumptions(input.heroCards, input.board).map(({ range, ...profile }) => {
-        const equity = calculateExactTurnEquity(input.heroCards, range, input.board).equity;
+      const assumptions = (flop ? flopBettingAssumptions : turnBettingAssumptions)(input.heroCards, input.board).map(({ range, ...profile }) => {
+        const equity = (flop ? calculateEquityVsRange(input.heroCards, range, input.board, { iterations: 1e4, rng: mulberry32(61711) }) : calculateExactTurnEquity(input.heroCards, range, input.board)).equity;
         return { ...profile, equity, callEV: calculateCallEV(equity, pot, call).ev };
       });
+      const handLines = [];
+      if (flop) {
+        const hand = evaluateBest([...input.heroCards, ...input.board]);
+        const flush = detectFlushDraw(input.heroCards, input.board), straight = detectStraightDraw(input.heroCards, input.board);
+        const texture = classifyBoardTexture(input.board);
+        handLines.push(`Current hand: ${HAND_CATEGORY_NAMES[hand.category]}.`, `Draws: ${flush.hasFlushDraw ? `flush draw (${flush.suit})` : "no direct flush draw"}; ${straight.kind === "none" ? "no direct straight draw" : straight.kind.replaceAll("_", " ") + " straight draw"}.`, `Board texture: ${texture.overall}, ${texture.suitTexture}, ${texture.pairTexture}, ${texture.connectivity}.`, "Draw labels are structural, not guaranteed winning outs; backdoor draws are included in sampled runouts but not separately labeled.");
+      }
       return {
         ...base,
         status: "conditional",
         reason: "Conditional CALL versus FOLD only: assumes no further betting and showdown on the river.",
+        handLines,
         requiredEquity: calculatePotOdds(pot, call).breakevenEquity,
         equityBounds: { low: Math.min(...assumptions.map((a) => a.equity)), high: Math.max(...assumptions.map((a) => a.equity)) },
         callEVBounds: { low: Math.min(...assumptions.map((a) => a.callEV)), high: Math.max(...assumptions.map((a) => a.callEV)) },
         assumptions
       };
     } catch (error) {
-      return abstain(error instanceof Error ? error.message : "Turn range calculation failed.");
+      return abstain(error instanceof Error ? error.message : `${street} range calculation failed.`);
     }
   }
   function turnCallFoldDisplay(result) {
+    return checkdownCallFoldDisplay(result);
+  }
+  function flopCallFoldDisplay(result) {
+    return checkdownCallFoldDisplay(result);
+  }
+  function checkdownCallFoldDisplay(result) {
+    const flop = result.street === "flop";
     if (result.status === "abstained")
-      return [`Turn checkdown calculation withheld: ${result.reason}`, result.warning];
+      return [`${flop ? "Flop" : "Turn"} checkdown calculation withheld: ${result.reason}`, result.warning];
     return [
+      ...flop ? ["ILLUSTRATIVE ONLY \u2014 conditional checkdown estimate; no action recommendation."] : [],
+      ...result.handLines,
       result.reason,
       `Required equity: ${(100 * result.requiredEquity).toFixed(2)}% = CALL / (pot before hero call + CALL).`,
-      `Estimated turn equity under supplied ranges: ${(100 * result.equityBounds.low).toFixed(2)}%\u2013${(100 * result.equityBounds.high).toFixed(2)}%.`,
+      `Estimated ${result.street} equity under supplied ranges: ${(100 * result.equityBounds.low).toFixed(2)}%\u2013${(100 * result.equityBounds.high).toFixed(2)}%.`,
       `Checkdown-only CALL EV ${result.callEVBounds.low.toFixed(3)} to ${result.callEVBounds.high.toFixed(3)}; FOLD EV 0 (input units; prior contributions sunk).`,
       ...result.assumptions.map((a) => `${a.label}: checkdown equity ${(100 * a.equity).toFixed(2)}%; conditional CALL EV ${a.callEV.toFixed(3)}. ${a.valueAssumption} ${a.bluffAssumption} ${a.valueCombos} value / ${a.bluffCombos} bluff combos.`),
-      "All legal river cards evaluated, with card removal and half of ties. Range sensitivity is not a confidence interval. Possible river bets, folds and additional costs can change realized EV.",
+      flop ? "10,000 seeded Monte Carlo turn/river runouts per range; weighted opponent combos, card removal and half of ties. Sampling error remains; range sensitivity is not a confidence interval. Both remaining streets must check down for this EV." : "All legal river cards evaluated, with card removal and half of ties. Range sensitivity is not a confidence interval. Possible river bets, folds and additional costs can change realized EV.",
       "Conditional heuristic assumptions; no observed tendencies, solver accuracy or statistical confidence. No live action authorization.",
       result.warning
     ];
@@ -10030,6 +10122,7 @@
   // src/riverIllustration.ts
   var cached = null;
   var cachedTurn = null;
+  var cachedFlop = null;
   function riverIllustration(read, assessment, timeline, envelope) {
     const w = timeline?.sourceStatus.riverObservation;
     const empty = (reasons = [], unsafe = false) => ({ binding: null, calculation: null, lines: [], reasons, unsafe });
@@ -10037,20 +10130,21 @@
     const source = timeline.sourceStatus, identity3 = source.identity, state = assessment.state;
     const card = (c) => `${"23456789TJQKA"[c.rank - 2]}${c.suit}`;
     const seats = state?.seats.filter((s) => s.isOccupied) ?? [], hero = seats.find((s) => s.isYou);
+    const sourceZero = w.street === "flop" && w.heroChecked === false && hero?.currentBet === null && !hero.isChecking && !hero.betReadError && w.players.find((p) => p.playerId === w.heroId)?.contribution === 0;
     const same6 = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     const ui = assessCallControlReadiness(read.callControl ?? null, w.payableCall, w.receivedAt, Date.now());
     if (!source.connected || identity3?.chainGap || identity3?.tableId !== w.tableId || identity3?.handId !== w.handId || identity3?.handNumber !== w.handNumber || identity3?.heroPlayerId !== w.heroId || timeline.current.handId !== `${w.tableId}:hand:${w.handId}` || source.sourceMetadata.socketContinuity.generation !== w.generation) return empty([`${w.street} source identity or connection contradicts the activation.`], true);
     if (!state || read.context.readErrors.length || ui.status !== "observed_matching") return empty(ui.reasons, ui.status === "contradicted");
-    if (state.street !== w.street || assessment.activeOpponents !== 1 || !hero?.isCurrentToAct || !same6(state.board.map(card), w.board) || !same6(hero.holeCards.map(card).sort(), [...w.heroCards].sort()) || assessment.amountToCall !== w.payableCall || seats.length !== w.players.length || new Set(seats.map((s) => s.seatNumber)).size !== seats.length || seats.filter((s) => s.isYou).length !== 1 || seats.filter((s) => s.isCurrentToAct).length !== 1 || timeline.current.seatMapping.status === "invalid" || timeline.current.seatMapping.entries.some((e) => !w.players.some((p) => p.seat === e.seat && p.playerId === e.playerId)) || !w.players.every((p) => {
+    if (state.street !== w.street || assessment.activeOpponents !== 1 || !hero?.isCurrentToAct || !same6(state.board.map(card), w.board) || !same6(hero.holeCards.map(card).sort(), [...w.heroCards].sort()) || assessment.amountToCall !== w.payableCall && !(sourceZero && assessment.amountToCall === null) || seats.length !== w.players.length || new Set(seats.map((s) => s.seatNumber)).size !== seats.length || seats.filter((s) => s.isYou).length !== 1 || seats.filter((s) => s.isCurrentToAct).length !== 1 || timeline.current.seatMapping.status === "invalid" || timeline.current.seatMapping.entries.some((e) => !w.players.some((p) => p.seat === e.seat && p.playerId === e.playerId)) || !w.players.every((p) => {
       const s = seats.find((s2) => s2.seatNumber === p.seat);
-      return !!s && s.isYou === (p.playerId === w.heroId) && s.isFolded === p.folded && !s.isAllIn && !s.isSettling && (p.folded || !s.isOffline) && !s.betReadError && s.stack === p.remainingStack && (s.currentBet !== null ? s.currentBet === p.contribution : p.contribution === 0 && (s.isChecking || p.folded));
+      return !!s && s.isYou === (p.playerId === w.heroId) && s.isFolded === p.folded && !s.isAllIn && !s.isSettling && (p.folded || !s.isOffline) && !s.betReadError && s.stack === p.remainingStack && (s.currentBet !== null ? s.currentBet === p.contribution : p.contribution === 0 && (s.isChecking || p.folded || s.isYou && sourceZero));
     })) return empty([`${w.street} DOM identity, board, opponent roster, contributions or remaining capacity contradicts the source window.`], true);
     if (assessment.pot.mainPot !== w.collectedPot || assessment.pot.displayedTotalPot !== w.grossPotBeforeCall || w.grossPotBeforeCall !== w.collectedPot + w.streetSubtotal) return empty([`${w.street} pot displays contradict collected pot plus current street contributions.`], true);
     if (timeline.current.events.some((e) => e.action === "uncalled_return") || timeline.current.accounting.adjustments.length)
       return empty(["Observed returns/settlement adjustments are unresolved; illustrative pot calculation withheld."], true);
     const contradictions = envelope.proofs.filter((p) => p.status === "contradicted").flatMap((p) => p.reasons);
     if (contradictions.length) return empty(contradictions, true);
-    const needed = ["decisionState", "connection", "stack", "callCost"];
+    const needed = ["decisionState", "connection", "stack", ...sourceZero ? [] : ["callCost"]];
     const missing = envelope.proofs.filter((p) => needed.includes(p.scope) && p.status !== "proven");
     if (missing.length) return empty(missing.flatMap((p) => p.reasons));
     const opponent = seats.find((s) => !s.isYou && !s.isFolded);
@@ -10066,10 +10160,12 @@
       accounting: "single_pot_no_rake"
     };
     const key = JSON.stringify(input);
-    if (w.street === "turn") {
+    if (w.street === "flop") {
+      if (cachedFlop?.key !== key) cachedFlop = { key, result: compareFlopCallFold(input) };
+    } else if (w.street === "turn") {
       if (cachedTurn?.key !== key) cachedTurn = { key, result: compareTurnCallFold(input) };
     } else if (cached?.key !== key) cached = { key, result: compareRiverCallFold(input) };
-    const calculation = w.street === "turn" ? cachedTurn.result : cached.result;
+    const calculation = w.street === "flop" ? cachedFlop.result : w.street === "turn" ? cachedTurn.result : cached.result;
     if (calculation.status === "abstained") return empty([calculation.reason]);
     if (Date.now() < w.receivedAt || Date.now() >= w.expiresAt || assessCallControlReadiness(read.callControl ?? null, w.payableCall, w.receivedAt, Date.now()).status !== "observed_matching") return empty();
     return {
@@ -10091,7 +10187,8 @@
         "ILLUSTRATIVE ONLY \u2014 not verified; no action authorization.",
         `Assumes all ${w.grossPotBeforeCall} chips are hero-contestable in one pot, no unresolved returns and zero rake/drop. These assumptions are unproven.`,
         `Collected ${w.collectedPot} + current bet ${w.streetSubtotal} = ${w.grossPotBeforeCall} chips before CALL; payable CALL ${w.payableCall}. The bet is included once.`,
-        ...w.street === "turn" ? turnCallFoldDisplay(cachedTurn.result) : riverCallFoldDisplay(cached.result)
+        ...sourceZero ? ["Hero has not acted: zero contribution established by the continuous flop source window; native CALL independently matched."] : [],
+        ...w.street === "flop" ? flopCallFoldDisplay(cachedFlop.result) : w.street === "turn" ? turnCallFoldDisplay(cachedTurn.result) : riverCallFoldDisplay(cached.result)
       ]
     };
   }
@@ -10329,6 +10426,7 @@
       openingSize: opening.size,
       riverCallFold: state?.street === "river" ? riverCallFoldReadiness(read, assessment, envelope, timeline) : null,
       turnCallFold: state?.street === "turn" ? riverCallFoldReadiness(read, assessment, envelope, timeline) : null,
+      flopCallFold: state?.street === "flop" ? riverCallFoldReadiness(read, assessment, envelope, timeline) : null,
       responseWindow,
       responseStrategy,
       responseExecution,
@@ -10357,14 +10455,15 @@
   }
   function riverCallFoldReadiness(read, assessment, envelope, timeline) {
     const state = assessment.state;
-    if (state?.street !== "river" && state?.street !== "turn") return null;
-    const turn2 = state.street === "turn", street = state.street, cardCount = turn2 ? "four" : "five";
+    if (state?.street !== "river" && state?.street !== "turn" && state?.street !== "flop") return null;
+    const turn2 = state.street === "turn", flop = state.street === "flop", street = state.street, cardCount = flop ? "three" : turn2 ? "four" : "five";
     const relevant = ["decisionState", "connection", "stack", "callCost", "pot", "eligibility", "accounting"];
     const reasons = envelope.proofs.filter((p) => relevant.includes(p.scope) && p.status !== "proven").flatMap((p) => p.reasons);
     if (turn2) reasons.push(TURN_CHECKDOWN_WARNING);
+    if (flop) reasons.push(FLOP_CHECKDOWN_WARNING);
     const hero = state.seats.find((s) => s.isYou);
     const call = assessment.amountToCall;
-    if (state.board.length !== (turn2 ? 4 : 5)) reasons.push(`Exactly ${cardCount} ${street} board cards are required.`);
+    if (state.board.length !== (flop ? 3 : turn2 ? 4 : 5)) reasons.push(`Exactly ${cardCount} ${street} board cards are required.`);
     if (assessment.activeOpponents !== 1) reasons.push("Exactly one active opponent is required; multiway is unsupported.");
     if (call === null || call <= 0) reasons.push("A positive independently verified CALL amount is required.");
     if (hero?.stack == null || call !== null && call >= hero.stack || state.seats.some((s) => s.isOccupied && s.isAllIn))
@@ -10390,7 +10489,7 @@
       illustrationLines: illustration.lines,
       requiredProofs: relevant,
       reasons: [.../* @__PURE__ */ new Set([...contradictions, ...reasons])],
-      warning: turn2 ? TURN_CHECKDOWN_WARNING : RIVER_PAIRWISE_WARNING
+      warning: flop ? FLOP_CHECKDOWN_WARNING : turn2 ? TURN_CHECKDOWN_WARNING : RIVER_PAIRWISE_WARNING
     };
   }
   function liveProofRevision(timeline) {
@@ -11607,14 +11706,14 @@
     let sequence = 0, generation = 0, at = -1, pot = null;
     let pending = null;
     let observation = null;
-    let reason = "Waiting for a continuous turn/river source window.";
+    let reason = "Waiting for a continuous postflop source window.";
     const reset = () => {
       state = null;
       heroId = null;
       pot = null;
       pending = null;
       observation = null;
-      reason = "Turn/river observation invalidated; fresh registration is required.";
+      reason = "Postflop observation invalidated; fresh registration is required.";
     };
     return {
       reset,
@@ -11630,7 +11729,7 @@
           sequence = seq;
           generation = gen;
           at = received;
-          reason = "Continuous observations; waiting for a supported turn/river check/bet/activation window.";
+          reason = "Continuous observations; waiting for a supported postflop check/bet/activation window.";
           if (s.event === "registered" || previous?.hI !== state.hI) {
             pending = null;
             pot = null;
@@ -11639,15 +11738,16 @@
             if (!chips4(p.pot)) throw new Error("Invalid pot");
             pot = p.pot;
           }
-          if (p.kind === "river" || p.kind === "turn_board") {
-            const street = p.kind === "river" ? "river" : "turn", streetIndex = street === "river" ? 3 : 2;
-            const boardCount = street === "river" ? 5 : 4;
+          if (p.kind === "river" || p.kind === "turn_board" || p.kind === "flop_board") {
+            const street = p.kind === "river" ? "river" : p.kind === "turn_board" ? "turn" : "flop";
+            const streetIndex = street === "river" ? 3 : street === "turn" ? 2 : 1;
+            const boardCount = streetIndex + 2, previousBoardCount = street === "flop" ? 0 : boardCount - 1;
             const active = state.iHPI.filter((id) => state.pGS[id] === "inGame");
             const board = state.oTC?.["1"], cards = state.pC[heroId]?.cards.map((c) => c.value);
-            if (!previous || !same4(previous.gT, [1, streetIndex - 1]) || !same4(state.gT, [1, streetIndex]) || (street === "river" ? state.cPI !== heroId : !active.includes(state.cPI)) || state.pITT !== state.cPI || state.gM !== "th" || state.version !== "0.1.72" || state.rIT !== "no" || state.sPM !== false || !same4(state.rHP, []) || !Array.isArray(board) || board.length !== boardCount || !same4(previous.oTC?.["1"], board.slice(0, boardCount - 1)) || !Array.isArray(cards) || cards.length !== 2 || cards.some((c) => typeof c !== "string") || (/* @__PURE__ */ new Set([...board, ...cards])).size !== boardCount + 2 || active.length !== 2 || !active.includes(heroId) || pot === null || pot <= 0 || Object.keys(state.tB).length !== 0 || state.iHPI.length !== state.seats.length || state.iHPI.some((id) => !state.seats.some((r) => r[1] === id) || !["inGame", "fold"].includes(state.pGS[id])) || active.some((id) => state.players[id].stack <= 0 || state.players[id].disconnectedSince !== void 0)) {
-              if (street === "turn") {
+            if (!previous || !same4(previous.gT, [1, streetIndex - 1]) || !same4(state.gT, [1, streetIndex]) || (street === "river" ? state.cPI !== heroId : !active.includes(state.cPI)) || state.pITT !== state.cPI || state.gM !== "th" || state.version !== "0.1.72" || state.rIT !== "no" || state.sPM !== false || !same4(state.rHP, []) || !Array.isArray(board) || board.length !== boardCount || !same4(previous.oTC?.["1"], board.slice(0, previousBoardCount)) || !Array.isArray(cards) || cards.length !== 2 || cards.some((c) => typeof c !== "string") || (/* @__PURE__ */ new Set([...board, ...cards])).size !== boardCount + 2 || active.length !== 2 || !active.includes(heroId) || pot === null || pot <= 0 || Object.keys(state.tB).length !== 0 || state.iHPI.length !== state.seats.length || state.iHPI.some((id) => !state.seats.some((r) => r[1] === id) || !["inGame", "fold"].includes(state.pGS[id])) || active.some((id) => state.players[id].stack <= 0 || state.players[id].disconnectedSince !== void 0)) {
+              if (street !== "river") {
                 pending = null;
-                reason = "Unsupported turn boundary.";
+                reason = `Unsupported ${street} boundary.`;
                 return;
               }
               throw new Error("Unsupported river boundary");
@@ -11658,9 +11758,9 @@
           if (!pending) return;
           const w = pending;
           if (state.hI !== w.base.hI || pot !== w.pot || !same4(state.seats, w.base.seats) || !same4(state.pGS, w.base.pGS) || !same4(state.pC, w.base.pC) || !same4(state.players, w.base.players) || !same4(state.oTC, w.base.oTC) || !same4(state.gT, w.base.gT)) {
-            if (w.street === "turn") {
+            if (w.street !== "river") {
               pending = null;
-              reason = "Turn window changed; illustration withheld.";
+              reason = `${w.street} window changed; illustration withheld.`;
               return;
             }
             throw new Error("River window changed");
@@ -11670,7 +11770,7 @@
           else if (w.step === 2 && p.kind === "bet" && p.actor === w.villain && previous?.pITT === w.villain && chips4(p.amount) && p.amount > 0 && p.amount < state.players[w.villain].stack && p.amount < state.players[heroId].stack) {
             w.bet = p.amount;
             w.step++;
-          } else if (w.step === 3 && p.kind === "turn" && p.actor === heroId && (state.tB[heroId] === 0 || w.street === "turn" && state.tB[heroId] === void 0) && state.tB[w.villain] === w.bet) {
+          } else if (w.step === 3 && p.kind === "turn" && p.actor === heroId && (state.tB[heroId] === 0 || w.street !== "river" && state.tB[heroId] === void 0) && state.tB[w.villain] === w.bet) {
             observation = {
               street: w.street,
               tableId,
@@ -11688,6 +11788,7 @@
               streetSubtotal: w.bet,
               grossPotBeforeCall: pot + w.bet,
               payableCall: w.bet,
+              heroChecked: w.base.cPI === heroId,
               players: state.seats.map(([seat, playerId]) => ({
                 seat,
                 playerId,
@@ -11700,9 +11801,9 @@
             };
             pending = null;
             reason = `Matched ${w.street} source window; gross arithmetic only, no contestable-pot or action authorization.`;
-          } else if (w.street === "turn") {
+          } else if (w.street !== "river") {
             pending = null;
-            reason = "Unsupported turn action sequence; illustration withheld.";
+            reason = `Unsupported ${w.street} action sequence; illustration withheld.`;
           } else throw new Error("Incomplete river window");
         } catch (error) {
           reset();
@@ -11713,7 +11814,7 @@
         return observation && now() >= observation.receivedAt && now() < observation.expiresAt ? structuredClone(observation) : null;
       },
       diagnostic() {
-        return { reason: observation && (now() < observation.receivedAt || now() >= observation.expiresAt) ? "Turn/river observation expired at its original activation deadline." : reason, sequence, generation };
+        return { reason: observation && (now() < observation.receivedAt || now() >= observation.expiresAt) ? "Postflop observation expired at its original activation deadline." : reason, sequence, generation };
       }
     };
   }
@@ -12040,6 +12141,11 @@
     const observedAt = read.callControl?.observedAt;
     if (![startedAt, completedAt, observedAt].every(Number.isSafeInteger) || observedAt < startedAt || observedAt > completedAt || completedAt < startedAt || !binding || startedAt < binding.receivedAt || completedAt >= binding.expiresAt || binding.expiresAt !== binding.receivedAt + 1e4)
       reasons.push("Read is stale, unbracketed, clock-inconsistent or outside the original ten-second window.");
+    const epochObservation = (epoch, snapshot) => ({
+      decisionEpoch: epoch.decisionEpoch,
+      stateAvailable: epoch.stateJson !== null,
+      matchesRead: epoch.stateJson !== null && epoch.stateJson === stateJson(snapshot)
+    });
     return {
       version: 1,
       developmentOnly: true,
@@ -12052,8 +12158,8 @@
       startedAt,
       completedAt,
       tableUrl,
-      epochBefore,
-      epochAfter,
+      epochBefore: epochObservation(epochBefore, first),
+      epochAfter: epochObservation(epochAfter, last),
       binding,
       before,
       after,
@@ -12575,15 +12681,15 @@
       try {
         const read = readLiveTable(), timeline = handTimeline.snapshot();
         const scoped = buildLiveDecisionProofs(read, assessLiveState(read.raw, read.context), timeline, null, "display-refresh");
-        const river = scoped.turnCallFold ?? scoped.riverCallFold;
+        const river = scoped.flopCallFold ?? scoped.turnCallFold ?? scoped.riverCallFold;
         if (Date.now() >= riverDisplay.expiresAt || liveProofRevision(timeline) !== riverDisplay.source || !river?.illustration) {
           clearRiverDisplay();
           overlayState.aiStatus = river?.unsafe ? "unsafe" : "waiting_for_proof";
-          overlayState.aiWarnings = river?.reasons ?? ["Turn/river illustration expired or inputs changed; fresh matching evidence is required."];
+          overlayState.aiWarnings = river?.reasons ?? ["Postflop illustration expired or inputs changed; fresh matching evidence is required."];
         }
       } catch {
         clearRiverDisplay();
-        handTimeline.gap("Turn/river display read failed.");
+        handTimeline.gap("Postflop display read failed.");
         overlayState.aiStatus = "blocked";
       }
       renderOverlay();
@@ -12686,10 +12792,10 @@
           renderOverlay();
         }
         const scoped = buildLiveDecisionProofs(read, assessment, timelineSnapshot, preflop, String(requestSequence));
-        const comparison = scoped.turnCallFold ?? scoped.riverCallFold;
+        const comparison = scoped.flopCallFold ?? scoped.turnCallFold ?? scoped.riverCallFold;
         if (comparison) {
           overlayState.aiStatus = comparison.unsafe ? "unsafe" : "waiting_for_proof";
-          overlayState.policyLine = (state.street === "turn" ? "Turn unconditional CALL/FOLD recommendation withheld. " : "River CALL vs FOLD withheld. ") + comparison.warning;
+          overlayState.policyLine = (state.street === "flop" ? "Flop unconditional CALL/FOLD recommendation withheld. " : state.street === "turn" ? "Turn unconditional CALL/FOLD recommendation withheld. " : "River CALL vs FOLD withheld. ") + comparison.warning;
           overlayState.aiWarnings = comparison.reasons;
           if (comparison.illustration && comparison.binding) {
             riverDisplay = {

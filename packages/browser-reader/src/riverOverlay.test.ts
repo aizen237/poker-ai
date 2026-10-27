@@ -20,10 +20,19 @@ vi.mock("../../../apps/pokernow-extension/src/opponentStats.js", () => ({
 }));
 afterEach(() => { mocks.timeline = null; vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
-it.each(["river", "turn"].flatMap(street => ["expiry", "disconnect", "call", "board", "read failure", "source change"]
-  .map(invalidation => ({ street, invalidation }))))("$street numbers reach the overlay and disappear on $invalidation without a relay request", async ({ street, invalidation }) => {
+it.each(["river", "turn", "flop"].flatMap(street => ["expiry", "disconnect", "call", "board", "read failure", "source change"]
+  .map(invalidation => ({ street, invalidation, opponentFirst: false })))
+  .concat([{ street: "flop", invalidation: "disconnect", opponentFirst: true }]))("$street numbers reach the overlay and disappear on $invalidation (opponent-first: $opponentFirst) without a relay request", async ({ street, invalidation, opponentFirst }) => {
   vi.resetModules();
-  const fixture = JSON.parse(readFileSync(new URL(street === "river" ? "./fixtures/pokernow-river-406.json" : "./fixtures/pokernow-turn-synthetic.json", import.meta.url), "utf8"));
+  const fixture = JSON.parse(readFileSync(new URL(street === "river" ? "./fixtures/pokernow-river-406.json" : `./fixtures/pokernow-${street}-synthetic.json`, import.meta.url), "utf8"));
+  if (opponentFirst) {
+    const frames = fixture.frames;
+    frames[1].payload.cPI = "player4"; frames[1].payload.pITT = "player4";
+    frames.splice(2, 2);
+    frames[2].payload.pre = frames[1].payload.now;
+    frames.forEach((frame: any, i: number) => { frame.localReceiveSequence = i + 1; });
+    fixture.read.raw.seats[0].betValueText = null;
+  }
   let now = fixture.frames[0].localReceivedAt;
   vi.spyOn(Date, "now").mockImplementation(() => now);
   const runtime = createTimelineRuntime({ tableId: "river-table", sessionId: "overlay", now: () => now, fetchLog: vi.fn() });
@@ -63,10 +72,17 @@ it.each(["river", "turn"].flatMap(street => ["expiry", "disconnect", "call", "bo
   expect(overlay()).toContain("unproven");
   expect(overlay()).not.toContain("RECOMMENDATION AVAILABLE");
   expect(overlay()).not.toContain("Confidence:");
-  if (street === "turn") {
+  if (opponentFirst) expect(overlay()).toContain("zero contribution established by the continuous flop source window");
+  if (street !== "river") {
     expect(overlay()).toContain("Checkdown-only CALL EV");
-    expect(overlay()).toContain("Future river betting is unmodeled");
+    expect(overlay()).toContain(street === "flop" ? "Future turn/river betting and equity realization are not modeled" : "Future river betting is unmodeled");
     expect(overlay()).toContain("Unconditional CALL/FOLD recommendation withheld");
+  }
+  if (street === "flop") {
+    expect(overlay()).toContain("Current hand: High Card");
+    expect(overlay()).toContain("Board texture:");
+    expect(overlay()).toContain("Estimated flop equity");
+    expect(overlay()).toContain("10,000 seeded Monte Carlo");
   }
   if (invalidation === "expiry") { now = runtime.snapshot().sourceStatus.riverObservation!.expiresAt; deadline(); }
   if (invalidation === "disconnect") runtime.stop("disconnect");

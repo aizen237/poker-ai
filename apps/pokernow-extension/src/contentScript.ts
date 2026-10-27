@@ -507,15 +507,15 @@ function refreshFreshnessDisplay() {
     try {
       const read = readLiveTable(), timeline = handTimeline.snapshot();
       const scoped = buildLiveDecisionProofs(read, assessLiveState(read.raw, read.context), timeline, null, "display-refresh");
-      const river = scoped.turnCallFold ?? scoped.riverCallFold;
+      const river = scoped.flopCallFold ?? scoped.turnCallFold ?? scoped.riverCallFold;
       if (Date.now() >= riverDisplay.expiresAt || liveProofRevision(timeline) !== riverDisplay.source || !river?.illustration) {
         clearRiverDisplay();
         overlayState.aiStatus = river?.unsafe ? "unsafe" : "waiting_for_proof";
-        overlayState.aiWarnings = river?.reasons ?? ["Turn/river illustration expired or inputs changed; fresh matching evidence is required."];
+        overlayState.aiWarnings = river?.reasons ?? ["Postflop illustration expired or inputs changed; fresh matching evidence is required."];
       }
     } catch {
       clearRiverDisplay();
-      handTimeline.gap("Turn/river display read failed.");
+      handTimeline.gap("Postflop display read failed.");
       overlayState.aiStatus = "blocked";
     }
     renderOverlay();
@@ -624,11 +624,12 @@ setInterval(() => {
       renderOverlay();
     }
     const scoped = buildLiveDecisionProofs(read, assessment, timelineSnapshot, preflop, String(requestSequence));
-    const comparison = scoped.turnCallFold ?? scoped.riverCallFold;
+    const comparison = scoped.flopCallFold ?? scoped.turnCallFold ?? scoped.riverCallFold;
     if (comparison) {
       // Separate assumption-based illustration; never an action/LLM pathway.
       overlayState.aiStatus = comparison.unsafe ? "unsafe" : "waiting_for_proof";
-      overlayState.policyLine = (state.street === "turn" ? "Turn unconditional CALL/FOLD recommendation withheld. " : "River CALL vs FOLD withheld. ") + comparison.warning;
+      overlayState.policyLine = (state.street === "flop" ? "Flop unconditional CALL/FOLD recommendation withheld. " :
+        state.street === "turn" ? "Turn unconditional CALL/FOLD recommendation withheld. " : "River CALL vs FOLD withheld. ") + comparison.warning;
       overlayState.aiWarnings = comparison.reasons;
       if (comparison.illustration && comparison.binding) {
         riverDisplay = { lines: comparison.illustrationLines, source: liveProofRevision(timelineSnapshot),

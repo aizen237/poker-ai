@@ -45,9 +45,16 @@ export function capturePostflopReadiness(d: Dependencies) {
       !binding || startedAt < binding.receivedAt || completedAt >= binding.expiresAt ||
       binding.expiresAt !== binding.receivedAt + 10_000)
     reasons.push("Read is stale, unbracketed, clock-inconsistent or outside the original ten-second window.");
+  // As in capturePostflopObservation, compare the complete fingerprints above
+  // but avoid two escaped copies of the source revision in the 32KiB bridge.
+  const epochObservation = (epoch: Epoch, snapshot: LiveTimelineDiagnostic) => ({
+    decisionEpoch: epoch.decisionEpoch, stateAvailable: epoch.stateJson !== null,
+    matchesRead: epoch.stateJson !== null && epoch.stateJson === stateJson(snapshot),
+  });
   return { version: 1 as const, developmentOnly: true, authoritative: false, legalityCertified: false,
     historyComplete: false, contestablePotCertified: false, liveRecommendationsAllowed: false,
-    readinessMatched: reasons.length === 0, startedAt, completedAt, tableUrl, epochBefore, epochAfter,
+    readinessMatched: reasons.length === 0, startedAt, completedAt, tableUrl,
+    epochBefore: epochObservation(epochBefore, first), epochAfter: epochObservation(epochAfter, last),
     binding, before, after, read: structuredClone(read), evidence, reasons };
 }
 export type PostflopReadinessCapture = ReturnType<typeof capturePostflopReadiness>;

@@ -15,11 +15,12 @@ Global `historyComplete` remains false. Other positions, facing-action pots
 and generic postflop/EV activation remain unsupported.
 This is not a completed solver or an unrestricted live recommendation system.
 
-Heads-up turn and river numerical diagnostics are available in a separate
-illustrative overlay. [Turn advisory integration](TURN_ADVISORY.md) is tested
-in automation; actual live numerical display is not independently confirmed.
-Future river betting is unmodeled, so a verified unconditional turn
-recommendation remains unsupported. No additional flop functionality is included.
+Heads-up flop, turn and river numerical diagnostics use the existing overlay's
+illustrative panel. [Flop advisory integration](FLOP_ADVISORY.md) and
+[turn advisory integration](TURN_ADVISORY.md) are tested in automation;
+actual live numerical display is not independently confirmed. Future betting
+and equity realization are unmodeled: flop/turn checkdown EV never selects
+an unconditional CALL or FOLD.
 
 ## Local setup
 
@@ -45,6 +46,7 @@ refresh the PokerNow tab. Source changes alone are not enough.
 
 ## Documentation
 
+- [Flop advisory scope, sampling and conditional EV](FLOP_ADVISORY.md)
 - [Turn advisory scope, illustrative calculations and verification status](TURN_ADVISORY.md)
 - [River advisory integration and verification limits](RIVER_HAND_406.md)
 - [Scoped decision proofs, exact blockers and readiness](SCOPED_DECISION_PROOFS.md)

@@ -1,4 +1,4 @@
-import { assessDecisionProofs, assessPacketDecisionProofs, decisionProofBinding, PROOF_SCOPES, RIVER_PAIRWISE_WARNING, TURN_CHECKDOWN_WARNING,
+import { assessDecisionProofs, assessPacketDecisionProofs, decisionProofBinding, PROOF_SCOPES, RIVER_PAIRWISE_WARNING, TURN_CHECKDOWN_WARNING, FLOP_CHECKDOWN_WARNING,
   unopenedChartAction, inspectLiveHjResponseStrategy, isReviewedHjFold, type DecisionPacket, type PreflopContext, type ScopedProof, type ProofScope, type DecisionProofs } from "@poker-ai/ai-core";
 import type { LiveStateAssessment } from "@poker-ai/browser-reader";
 import type { LiveTableRead } from "./tableRead.js";
@@ -189,6 +189,7 @@ export function buildLiveDecisionProofs(read: LiveTableRead, assessment: LiveSta
   return { evidence: envelope, activation, unopened, openingSize: opening.size,
     riverCallFold: state?.street === "river" ? riverCallFoldReadiness(read, assessment, envelope, timeline) : null,
     turnCallFold: state?.street === "turn" ? riverCallFoldReadiness(read, assessment, envelope, timeline) : null,
+    flopCallFold: state?.street === "flop" ? riverCallFoldReadiness(read, assessment, envelope, timeline) : null,
     responseWindow, responseStrategy, responseExecution, callLegality,
     // Separate diagnostic; never promotes a general decision scope or permission.
     postflopCall: flopCallEvidence(read, assessment, timeline, epoch),
@@ -204,15 +205,16 @@ export function buildLiveDecisionProofs(read: LiveTableRead, assessment: LiveSta
  * observation. It cannot promote assumptions into any decision proof scope. */
 function riverCallFoldReadiness(read: LiveTableRead, assessment: LiveStateAssessment, envelope: DecisionProofs, timeline: LiveTimelineDiagnostic | null) {
   const state = assessment.state;
-  if (state?.street !== "river" && state?.street !== "turn") return null;
-  const turn = state.street === "turn", street = state.street, cardCount = turn ? "four" : "five";
+  if (state?.street !== "river" && state?.street !== "turn" && state?.street !== "flop") return null;
+  const turn = state.street === "turn", flop = state.street === "flop", street = state.street, cardCount = flop ? "three" : turn ? "four" : "five";
   const relevant: ProofScope[] = ["decisionState", "connection", "stack", "callCost", "pot", "eligibility", "accounting"];
   const reasons = envelope.proofs.filter(p => relevant.includes(p.scope) && p.status !== "proven")
     .flatMap(p => p.reasons);
   if (turn) reasons.push(TURN_CHECKDOWN_WARNING);
+  if (flop) reasons.push(FLOP_CHECKDOWN_WARNING);
   const hero = state.seats.find(s => s.isYou);
   const call = assessment.amountToCall;
-  if (state.board.length !== (turn ? 4 : 5)) reasons.push(`Exactly ${cardCount} ${street} board cards are required.`);
+  if (state.board.length !== (flop ? 3 : turn ? 4 : 5)) reasons.push(`Exactly ${cardCount} ${street} board cards are required.`);
   if (assessment.activeOpponents !== 1) reasons.push("Exactly one active opponent is required; multiway is unsupported.");
   if (call === null || call <= 0) reasons.push("A positive independently verified CALL amount is required.");
   if (hero?.stack == null || call !== null && call >= hero.stack || state.seats.some(s => s.isOccupied && s.isAllIn))
@@ -231,7 +233,7 @@ function riverCallFoldReadiness(read: LiveTableRead, assessment: LiveStateAssess
   return { status: "abstained" as const, liveAuthorized: false as const,
     unsafe: contradictions.length > 0 || ui?.status === "contradicted" || illustration.unsafe,
     illustration: illustration.calculation, binding: illustration.binding, illustrationLines: illustration.lines,
-    requiredProofs: relevant, reasons: [...new Set([...contradictions, ...reasons])], warning: turn ? TURN_CHECKDOWN_WARNING : RIVER_PAIRWISE_WARNING };
+    requiredProofs: relevant, reasons: [...new Set([...contradictions, ...reasons])], warning: flop ? FLOP_CHECKDOWN_WARNING : turn ? TURN_CHECKDOWN_WARNING : RIVER_PAIRWISE_WARNING };
 }
 
 /** Proof refreshes must invalidate pending recommendations even if DOM values did not change. */

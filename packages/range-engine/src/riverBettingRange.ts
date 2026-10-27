@@ -17,6 +17,12 @@ export function turnBettingAssumptions(hero: readonly Card[], board: readonly Ca
   return bettingAssumptions(hero, board);
 }
 
+/** Frozen flop hypotheses, including available draws and air in the weak bucket. */
+export function flopBettingAssumptions(hero: readonly Card[], board: readonly Card[]) {
+  if (hero.length !== 2 || board.length !== 3) throw new Error("Flop assumptions require two hero cards and three board cards");
+  return bettingAssumptions(hero, board);
+}
+
 function bettingAssumptions(hero: readonly Card[], board: readonly Card[]) {
   validateSimulationInput([...hero, ...board], board.length, 1);
   const known = new Set([...hero, ...board].map(cardId));
@@ -55,7 +61,8 @@ function bettingAssumptions(hero: readonly Card[], board: readonly Card[]) {
     return {
       label: p.label, valueAssumption: p.valueAssumption, bluffShare: p.bluffShare,
       bluffAssumption: "Unpaired hole cards matching no board rank, with at most one pair in the best hand; uniform within each bucket." +
-        (board.length === 4 ? " Includes available draws/semi-bluffs and air; frozen turn range, no river betting model." : ""),
+        (board.length === 4 ? " Includes available draws/semi-bluffs and air; frozen turn range, no river betting model." :
+          board.length === 3 ? " Includes available draws/semi-bluffs and air; frozen flop range, no turn/river betting model." : ""),
       valueCombos: p.value.length, bluffCombos: bluffs.length,
       range: createComboRange([
         ...p.value.map(c => ({ ...c, weight: (1 - p.bluffShare) / p.value.length })),

@@ -1,4 +1,5 @@
-import { compareRiverCallFold, riverCallFoldDisplay, compareTurnCallFold, turnCallFoldDisplay, type DecisionProofs } from "@poker-ai/ai-core";
+import { compareRiverCallFold, riverCallFoldDisplay, compareTurnCallFold, turnCallFoldDisplay,
+  compareFlopCallFold, flopCallFoldDisplay, type DecisionProofs } from "@poker-ai/ai-core";
 import type { LiveStateAssessment } from "@poker-ai/browser-reader";
 import type { LiveTableRead } from "./tableRead.js";
 import type { LiveTimelineDiagnostic } from "./liveTimeline.js";
@@ -6,6 +7,7 @@ import { assessCallControlReadiness } from "./callControlRead.js";
 
 let cached: { key: string; result: ReturnType<typeof compareRiverCallFold> } | null = null;
 let cachedTurn: { key: string; result: ReturnType<typeof compareTurnCallFold> } | null = null;
+let cachedFlop: { key: string; result: ReturnType<typeof compareFlopCallFold> } | null = null;
 
 /** Keep illustrative accounting assumptions separate from live proof scopes.
  * Nothing here can set a pot/eligibility/accounting/permission scope to proven. */
@@ -17,6 +19,12 @@ export function riverIllustration(read: LiveTableRead, assessment: LiveStateAsse
   const source = timeline.sourceStatus, identity = source.identity, state = assessment.state;
   const card = (c: { rank: number; suit: string }) => `${"23456789TJQKA"[c.rank - 2]}${c.suit}`;
   const seats = state?.seats.filter(s => s.isOccupied) ?? [], hero = seats.find(s => s.isYou);
+  // In an opponent-first flop window, the linked deal cleared every wager and
+  // only the opponent has acted. That source proves hero's zero contribution;
+  // a missing DOM wager alone never does. Do not synthesize a hero check.
+  const sourceZero = w.street === "flop" && w.heroChecked === false &&
+    hero?.currentBet === null && !hero.isChecking && !hero.betReadError &&
+    w.players.find(p => p.playerId === w.heroId)?.contribution === 0;
   const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
   const ui = assessCallControlReadiness(read.callControl ?? null, w.payableCall, w.receivedAt, Date.now());
   if (!source.connected || identity?.chainGap || identity?.tableId !== w.tableId || identity?.handId !== w.handId ||
@@ -26,7 +34,7 @@ export function riverIllustration(read: LiveTableRead, assessment: LiveStateAsse
   if (!state || read.context.readErrors.length || ui.status !== "observed_matching") return empty(ui.reasons, ui.status === "contradicted");
   if (state.street !== w.street || assessment.activeOpponents !== 1 || !hero?.isCurrentToAct ||
       !same(state.board.map(card), w.board) || !same(hero.holeCards.map(card).sort(), [...w.heroCards].sort()) ||
-      assessment.amountToCall !== w.payableCall || seats.length !== w.players.length ||
+      (assessment.amountToCall !== w.payableCall && !(sourceZero && assessment.amountToCall === null)) || seats.length !== w.players.length ||
       new Set(seats.map(s => s.seatNumber)).size !== seats.length ||
       seats.filter(s => s.isYou).length !== 1 || seats.filter(s => s.isCurrentToAct).length !== 1 ||
       timeline.current.seatMapping.status === "invalid" || timeline.current.seatMapping.entries.some(e => !w.players.some(p => p.seat === e.seat && p.playerId === e.playerId)) ||
@@ -34,7 +42,7 @@ export function riverIllustration(read: LiveTableRead, assessment: LiveStateAsse
         const s = seats.find(s => s.seatNumber === p.seat);
         return !!s && s.isYou === (p.playerId === w.heroId) && s.isFolded === p.folded && !s.isAllIn && !s.isSettling &&
           (p.folded || !s.isOffline) && !s.betReadError && s.stack === p.remainingStack &&
-          (s.currentBet !== null ? s.currentBet === p.contribution : p.contribution === 0 && (s.isChecking || p.folded));
+          (s.currentBet !== null ? s.currentBet === p.contribution : p.contribution === 0 && (s.isChecking || p.folded || s.isYou && sourceZero));
       })) return empty([`${w.street} DOM identity, board, opponent roster, contributions or remaining capacity contradicts the source window.`], true);
   if (assessment.pot.mainPot !== w.collectedPot || assessment.pot.displayedTotalPot !== w.grossPotBeforeCall ||
       w.grossPotBeforeCall !== w.collectedPot + w.streetSubtotal) return empty([`${w.street} pot displays contradict collected pot plus current street contributions.`], true);
@@ -43,7 +51,7 @@ export function riverIllustration(read: LiveTableRead, assessment: LiveStateAsse
   // Preserve existing contradiction handling; unknown RAISE legality is irrelevant.
   const contradictions = envelope.proofs.filter(p => p.status === "contradicted").flatMap(p => p.reasons);
   if (contradictions.length) return empty(contradictions, true);
-  const needed = ["decisionState", "connection", "stack", "callCost"];
+  const needed = ["decisionState", "connection", "stack", ...(sourceZero ? [] : ["callCost"])];
   const missing = envelope.proofs.filter(p => needed.includes(p.scope) && p.status !== "proven");
   if (missing.length) return empty(missing.flatMap(p => p.reasons));
   const opponent = seats.find(s => !s.isYou && !s.isFolded)!;
@@ -51,10 +59,12 @@ export function riverIllustration(read: LiveTableRead, assessment: LiveStateAsse
     potBeforeCall: w.grossPotBeforeCall, amountToCall: w.payableCall, heroStack: hero.stack,
     opponentStack: opponent.stack, accounting: "single_pot_no_rake" as const };
   const key = JSON.stringify(input);
-  if (w.street === "turn") {
+  if (w.street === "flop") {
+    if (cachedFlop?.key !== key) cachedFlop = { key, result: compareFlopCallFold(input) };
+  } else if (w.street === "turn") {
     if (cachedTurn?.key !== key) cachedTurn = { key, result: compareTurnCallFold(input) };
   } else if (cached?.key !== key) cached = { key, result: compareRiverCallFold(input) };
-  const calculation = w.street === "turn" ? cachedTurn!.result : cached!.result;
+  const calculation = w.street === "flop" ? cachedFlop!.result : w.street === "turn" ? cachedTurn!.result : cached!.result;
   if (calculation.status === "abstained") return empty([calculation.reason]);
   // Enumeration may take time; it never renews the source/control deadline.
   if (Date.now() < w.receivedAt || Date.now() >= w.expiresAt ||
@@ -65,5 +75,7 @@ export function riverIllustration(read: LiveTableRead, assessment: LiveStateAsse
     lines: ["ILLUSTRATIVE ONLY — not verified; no action authorization.",
       `Assumes all ${w.grossPotBeforeCall} chips are hero-contestable in one pot, no unresolved returns and zero rake/drop. These assumptions are unproven.`,
       `Collected ${w.collectedPot} + current bet ${w.streetSubtotal} = ${w.grossPotBeforeCall} chips before CALL; payable CALL ${w.payableCall}. The bet is included once.`,
-      ...(w.street === "turn" ? turnCallFoldDisplay(cachedTurn!.result) : riverCallFoldDisplay(cached!.result))] };
+      ...(sourceZero ? ["Hero has not acted: zero contribution established by the continuous flop source window; native CALL independently matched."] : []),
+      ...(w.street === "flop" ? flopCallFoldDisplay(cachedFlop!.result) :
+        w.street === "turn" ? turnCallFoldDisplay(cachedTurn!.result) : riverCallFoldDisplay(cached!.result))] };
 }
