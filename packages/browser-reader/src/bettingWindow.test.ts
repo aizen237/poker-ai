@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseHTML } from "linkedom";
 import { allHandTypes, formatHandType } from "@poker-ai/range-engine";
+import { hjResponseSource } from "../../ai-core/src/data/hjResponseSource.js";
 import { createFirstUtgSource, projectFirstUtgSource } from "../../../apps/pokernow-extension/src/firstUtgSource.js";
 import { isObservedUtgOpenPatch } from "../../../apps/pokernow-extension/src/bettingWindow.js";
 import { callLegalityEvidence } from "../../../apps/pokernow-extension/src/callLegalityEvidence.js";
@@ -500,6 +501,10 @@ describe("169-category illustrative HJ overlay through automated source replay",
       reference: { provenance: { kind: "illustrative" } } });
     expect(["pure", "mixed"]).toContain(r.status);
     expect(referenceText(f)).toContain(`${hand}: HJ vs UTG 2.5BB`);
+    expect(referenceText(f)).toContain(`Current cards: ${[`${hand[0]}h`, `${hand[1]}${hand.endsWith("s") ? "h" : "c"}`].sort().join(" ")}`);
+    const sourceFrequency = hjResponseSource["3BetHJvsLJ"][hand as keyof typeof hjResponseSource["3BetHJvsLJ"]];
+    expect(referenceText(f)).toContain(`FOLD ${Number(((1 - sourceFrequency) * 100).toFixed(9))}%`);
+    expect(referenceText(f)).toContain(`THREE_BET to 7.5BB ${Number((sourceFrequency * 100).toFixed(9))}%`);
     expect(referenceText(f)).toContain("ILLUSTRATIVE PREFLOP REFERENCE");
     expect(referenceText(f)).toContain("not a verified live recommendation");
     expect(referenceText(f)).toContain("CALL 0%");
@@ -525,11 +530,15 @@ describe("169-category illustrative HJ overlay through automated source replay",
     f.atAge(10000); f.refresh(); expect(referenceText(f)).toBeNull();
     expect(f.text()).toContain("EVIDENCE EXPIRED");
   });
-  it.each(["disconnect", "source-update", "cards", "actor", "clock-regression", "pot", "call", "read-error"])(
+  it.each(["disconnect", "source-update", "hand", "fold", "cards", "actor", "clock-regression", "pot", "call", "read-error"])(
     "removes source-only THREE_BET information on %s between polls", async variant => {
       const f = await live((fs, read) => foldCards(fs, read, ["Ah", "Ac"]), false, undefined, '<button type="button">Call 5</button>');
       expect(referenceText(f)).toContain("THREE_BET to 7.5BB 100%");
       if (variant === "disconnect") f.socket.dispatchEvent(new Event("close"));
+      if (variant === "hand") f.incoming({ ...f.turn, localReceiveSequence: 68,
+        localReceivedAt: f.turn.localReceivedAt + 2000,
+        payload: { pre: f.turn.payload.now, now: f.turn.payload.now + 1, hI: "NEXT_HAND", eventsData: [], fV: "0.1.72" } });
+      if (variant === "fold") f.read.raw.seats.find((s: any) => s.isYou).statusClasses.push("fold");
       if (variant === "source-update") f.incoming({ ...f.turn, localReceiveSequence: 68,
         localReceivedAt: f.turn.localReceivedAt + 2000,
         payload: { pre: f.turn.payload.now, now: f.turn.payload.now + 1, eventsData: [], fV: "0.1.72" } });
@@ -573,6 +582,51 @@ describe("169-category illustrative HJ overlay through automated source replay",
     f.atAge(10000); f.refresh();
     await f.respond({ ok: true, decisionSource: "engine_policy", result: { action: "RAISE", sizingBB: 7.5, confidence: 1, reasoning: "Override" } });
     expect(referenceText(f)).toBeNull(); expect(f.action()).toBeNull();
+  });
+  it("keeps the reader's scroll during refreshes and returns to the current decision on a new source window", async () => {
+    const f = await live(foldCards);
+    const overlay = f.document.getElementById("poker-ai-reader-overlay")!;
+    overlay.scrollTop = 200;
+    f.refresh(); f.poll();
+    expect(overlay.scrollTop).toBe(200);
+    f.socket.dispatchEvent(new Event("close")); f.refresh();
+    expect(referenceText(f)).toBeNull(); expect(f.action()).toBeNull();
+    // Reuse the recorded public sequence in a new generation with synthetic
+    // private cards, new hand IDs and shifted clocks, not another live capture.
+    const next = frames(true);
+    foldCards(next, f.read, ["Ah", "Qc"]);
+    for (const frame of next) {
+      const payload = frame.payload.gameState ?? frame.payload;
+      if (payload.hI) payload.hI += "_NEXT";
+      if (payload.gN) payload.gN += 1000;
+      f.incoming({ ...frame, connectionGeneration: frame.connectionGeneration + 2,
+        localReceivedAt: frame.localReceivedAt + 10_000_000 });
+    }
+    f.poll();
+    expect(overlay.scrollTop).toBe(0);
+    expect(referenceText(f), f.text()).toContain("Current cards: Ah Qc");
+    expect(referenceText(f)).toContain("THREE_BET to 7.5BB 53.8056204%");
+    expect(referenceText(f)).not.toContain("72o:");
+    expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(1);
+    await f.respond({ ok: true, decisionSource: "engine_policy", result: { action: "FOLD", confidence: 1, reasoning: "Previous decision" } });
+    expect(f.action()).toBeNull(); expect(referenceText(f)).toContain("AQo:");
+  });
+  it("updates the reference when the current CALL cross-check changes without renewing the source deadline", async () => {
+    const f = await live((fs, read) => foldCards(fs, read, ["Ah", "Ac"]), false, undefined, '<button type="button">Call 6</button>');
+    expect(referenceText(f)).toBeNull();
+    f.document.querySelector("button")!.textContent = "Call 5";
+    f.poll();
+    expect(referenceText(f)).toContain("AA: HJ vs UTG 2.5BB");
+    f.document.querySelector("button")!.textContent = "Call 6";
+    f.refresh(); f.poll();
+    expect(referenceText(f)).toBeNull();
+    f.atAge(9000);
+    f.document.querySelector("button")!.textContent = "Call 5";
+    f.poll();
+    expect(referenceText(f)).toContain("AA: HJ vs UTG 2.5BB");
+    f.atAge(10000); f.refresh(); f.poll();
+    expect(referenceText(f)).toBeNull();
+    expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
   });
 });
 

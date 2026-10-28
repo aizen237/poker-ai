@@ -34,9 +34,9 @@ console.log("[Poker AI Reader] Content script loaded on:", window.location.href)
 // On-page overlay: replaces "go check devtools" with a small visible
 // panel on the table itself. Deliberately minimal -- one fixed-position
 // box, re-rendered in full from a single state object each time
-// anything changes, rather than hand-patched DOM nodes. pointer-events
-// is off on the container so it never blocks clicks on the real table
-// underneath it.
+// anything changes, rather than hand-patched DOM nodes. The panel accepts
+// pointer input so clipped reference text can be scrolled and selected.
+// It has no poker action controls; clicks inside it stay on the panel.
 // ---------------------------------------------------------------------
 
 type AIStatus = "idle" | "waiting" | "received" | "blocked" | "error" | "waiting_for_proof" | "unsupported" | "unsafe" | "evidence_expired";
@@ -126,7 +126,8 @@ function ensureOverlay(): HTMLElement {
     border-radius: 8px;
     padding: 10px 12px;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
-    pointer-events: none;
+    pointer-events: auto;
+    overscroll-behavior: contain;
   `.trim();
   document.body.appendChild(el);
   return el;
@@ -157,7 +158,6 @@ function renderOverlay() {
   parts.push(`<div>Street: <b>${escapeHtml(s.street)}</b></div>`);
   if (s.equityLine) parts.push(`<div>${escapeHtml(s.equityLine)}</div>`);
   if (s.potOddsLine) parts.push(`<div>${escapeHtml(s.potOddsLine)}</div>`);
-  if (s.opponentStatsLine) parts.push(`<div>${escapeHtml(s.opponentStatsLine)}</div>`);
   if (s.preflopLine) {
     parts.push(
       `<div style="margin-top:6px; padding-top:6px; border-top:1px solid #444;">${escapeHtml(s.preflopLine)}</div>`,
@@ -169,14 +169,15 @@ function renderOverlay() {
     `<div style="color:${AI_STATUS_COLORS[s.aiStatus]}; font-weight:600;">${escapeHtml(s.aiStatus === "received" ? "RECOMMENDATION AVAILABLE" : s.aiStatus.replaceAll("_", " ").toUpperCase())}</div>`,
   );
   if (s.policyLine) parts.push(`<div>${escapeHtml(s.policyLine)}</div>`);
-  if (riverDisplay) parts.push(`<div data-river-illustration style="margin-top:8px; padding:6px; border:1px solid #888;">${riverDisplay.lines.map(escapeHtml).join("<br/>")}</div>`);
-  if (hjDisplay) parts.push(`<div data-hj-reference style="margin-top:8px; padding:6px; border:1px solid #888;">${hjDisplay.lines.map(escapeHtml).join("<br/>")}</div>`);
   if (s.aiResult && displayLifetime) parts.push(`<div data-proof-countdown>Evidence expires in ${Math.max(0, (displayLifetime.expiresAt - Date.now()) / 1000).toFixed(1)}s</div>`);
   if (s.aiResult) {
     parts.push(`<div style="font-size:16px; font-weight:700; margin:4px 0;">${escapeHtml(s.aiResult.action)}</div>`);
     parts.push(`<div>Confidence: ${(s.aiResult.confidence * 100).toFixed(0)}%</div>`);
     parts.push(`<div style="margin-top:4px; color:#ccc;">${escapeHtml(s.aiResult.reasoning)}</div>`);
   }
+  if (riverDisplay) parts.push(`<div data-river-illustration style="margin-top:8px; padding:6px; border:1px solid #888;">${riverDisplay.lines.map(escapeHtml).join("<br/>")}</div>`);
+  if (hjDisplay) parts.push(`<div data-hj-reference style="margin-top:8px; padding:6px; border:1px solid #888;"><div>Current cards: ${escapeHtml(hjDisplay.binding.heroCards.join(" "))}</div>${hjDisplay.lines.map(escapeHtml).join("<br/>")}</div>`);
+  if (s.opponentStatsLine) parts.push(`<div style="margin-top:6px;">${escapeHtml(s.opponentStatsLine)}</div>`);
   if (s.aiWarnings.length > 0) {
     parts.push(
       `<div style="margin-top:6px; color:#e0a030;">${s.aiWarnings.map((w) => escapeHtml(w)).join("<br/>")}</div>`,
@@ -588,7 +589,9 @@ function liveReadFingerprint(read: ReturnType<typeof readLiveTable>, timeline: R
   // Omit the receipt timestamp itself so a fresh identical poll is stable.
   const { observedAt, ...callObservation } = read.callControl ?? {};
   return JSON.stringify([dom, liveProofRevision(timeline),
-    ...(["flop", "turn", "river"].includes(street ?? "") ? [{ callObservation,
+    // The HJ preflop reference also consumes this contradiction check. A
+    // changed control must trigger reevaluation, without renewing its source.
+    ...(["preflop", "flop", "turn", "river"].includes(street ?? "") ? [{ callObservation,
       callFresh: observedAt !== undefined && observedAt <= Date.now() && Date.now() - observedAt < 10_000 }] : [])]);
 }
 
@@ -628,6 +631,8 @@ setInterval(() => {
     clearHjDisplay();
     currentDiagnosticPacket = null;
     lastStateJson = stateJson;
+    // A newly observed decision must not inherit a previous panel's scroll.
+    ensureOverlay().scrollTop = 0;
     // Invalidate in-flight results on every changed or failed read, including
     // leaving hero's turn. A later identical-looking decision gets a new token.
     lastRecommendationRequestKey = null;
