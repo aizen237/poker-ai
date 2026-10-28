@@ -491,6 +491,100 @@ describe("reviewed weak-offsuit HJ folds through the existing locked overlay", (
   });
 });
 
+describe("reported J5o T8o KTo recognition comparison (synthetic replay)", () => {
+  // These vary existing captured source grammars, not the three reported live
+  // hands. Identical CALL5 DOM must not stand in for a certified source prefix.
+  const hands = [
+    { hand: "J5o", cards: ["Jc", "5d"], authorized: true },
+    { hand: "T8o", cards: ["Tc", "8d"], authorized: false },
+    { hand: "KTo", cards: ["Kc", "Ts"], authorized: false },
+  ];
+  for (const profile of ["hand169", "hand261"] as const) {
+    it.each(hands)(`${profile}: recognizes $hand with separate live authorization`, async ({ hand, cards, authorized }) => {
+      const f = await live((fs, read) => {
+        const heroId = fs[0].payload.currentPlayer.id;
+        for (const frame of fs) {
+          const sourceCards = (frame.payload.gameState ?? frame.payload).pC?.[heroId]?.cards;
+          sourceCards?.forEach((c: any, i: number) => { c.value = cards[i]; });
+        }
+        read.raw.seats.find((s: any) => s.isYou).holeCardClassLists = cards.map(c =>
+          ["card-container", `card-${c[1]}`, `card-s-${c[0]}`, "flipped", "med"]);
+      }, false, undefined, '<button type="button">Call 5</button>', false, undefined,
+      profile === "hand261" ? load("pokernow-hj-open-261.json").frames : undefined);
+      const d = f.diagnostic();
+      expect(d.preflop).toMatchObject({ situation: "facing_open", heroPosition: "HJ",
+        historyCoverage: "complete", actionWindowEvidence: "hj_facing_utg_open5" });
+      expect(d.handTimeline.current.coverage.historyComplete).toBe(false);
+      expect(d.handTimeline.sourceStatus.facingOpenProof.historyComplete).toBe(false);
+      expect(d.decision.scopedProofs.responseStrategy.sourceReference).toMatchObject({
+        hand, status: "pure", strategyClass: "FOLD", liveAuthorized: false });
+      expect(d.decision.scopedProofs.activation).toMatchObject({
+        allowed: authorized, state: authorized ? "proof_ready" : "unsupported" });
+      expect(f.document.querySelector("[data-hj-reference]")?.textContent).toContain("FOLD 100% / CALL 0%");
+      expect(f.action()).toBe(authorized ? "FOLD" : null);
+      if (!authorized) expect(f.text()).toContain("UNSUPPORTED");
+      expect(f.requests).toHaveLength(authorized ? 1 : 0);
+      expect(f.socket.send).not.toHaveBeenCalled();
+      f.atAge(10000); f.refresh();
+      expect(f.action()).toBeNull();
+      expect(f.document.querySelector("[data-hj-reference]")).toBeNull();
+    });
+  }
+
+  it.each(["source-shape", "dom-stack"])("reproduces the generic T8o UNSAFE fallback with %s and a raise log", async variant => {
+    const f = await live((fs, read) => {
+      foldCards(fs, read, ["Tc", "8d"]);
+      if (variant === "source-shape") fs.at(-2).payload.unknownAction = true;
+      else {
+        const utg = read.raw.seats.find((s: any) => s.seatNumber === 1);
+        utg.stackText = utg.stackContainerText = "244";
+      }
+    }, false, ['"UTG @ PLAYER_1" raises to 5'], '<button type="button">Call 5</button>');
+    expect(f.diagnostic().decision.scopedProofs.activation).toMatchObject({
+      state: "unsafe", allowed: false, supportedDecisionType: "preflop_unclassified" });
+    expect(f.text()).toContain("UNSAFE");
+    expect(f.text()).toContain("Observed source action(s) exclude a proven unopened window: raise.");
+    expect(f.text()).toContain("No authoritative source prefix/watermark");
+    expect(f.text()).toContain("Player stacks supplies seat assignments only.");
+    expect(f.text()).toContain("Six listed players is not a certified six-player dealt-in roster.");
+    expect(f.document.querySelector("[data-hj-reference]")).toBeNull();
+    expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
+    expect(f.socket.send).not.toHaveBeenCalled();
+  });
+
+  it.each(["missing-boundary", "missing-open", "unknown-open-shape", "wrong-actor", "roster", "dealer", "predecessor", "reconnect", "dom-stack"])(
+    "keeps T8o unclassified despite CALL5 with %s", async variant => {
+      const f = await live((fs, read) => {
+        foldCards(fs, read, ["Tc", "8d"]);
+        const boundary = fs.at(-3).payload, open = fs.at(-2).payload, turn = fs.at(-1);
+        if (variant === "missing-boundary") fs.splice(-3, 1);
+        if (variant === "missing-open") fs.splice(-2, 1);
+        if (variant === "unknown-open-shape") open.unknownAction = true;
+        if (variant === "wrong-actor") turn.payload.cPI = turn.payload.pITT = "PLAYER_3";
+        if (variant === "roster") boundary.iHPI.pop();
+        if (variant === "dealer") boundary.dealerSeat = 2;
+        if (variant === "predecessor") turn.payload.pre++;
+        if (variant === "reconnect") turn.connectionGeneration++;
+        if (variant === "dom-stack") {
+          const utg = read.raw.seats.find((s: any) => s.seatNumber === 1);
+          utg.stackText = utg.stackContainerText = "244";
+        }
+      }, false, undefined, '<button type="button">Call 5</button>');
+      const d = f.diagnostic();
+      expect(f.document.querySelector("button")?.textContent).toBe("Call 5");
+      expect(d.preflop.situation).toBe("unknown");
+      expect(d.preflop.actionWindowEvidence).toBeUndefined();
+      expect(d.decision.scopedProofs.responseStrategy).toBeNull();
+      // DOM mismatch can reject a valid source certificate; other cases fail
+      // before one exists. Both paths withhold the same illustrative reference.
+      if (variant === "dom-stack") expect(d.handTimeline.sourceStatus.facingOpenProof).not.toBeNull();
+      else expect(d.handTimeline.sourceStatus.facingOpenProof).toBeNull();
+      expect(f.document.querySelector("[data-hj-reference]")).toBeNull();
+      expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
+      expect(f.socket.send).not.toHaveBeenCalled();
+    });
+});
+
 describe("169-category illustrative HJ overlay through automated source replay", () => {
   const referenceText = (f: Awaited<ReturnType<typeof live>>) =>
     f.document.querySelector("[data-hj-reference]")?.textContent ?? null;
