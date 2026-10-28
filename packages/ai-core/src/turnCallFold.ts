@@ -41,16 +41,14 @@ function compareCheckdownCallFold(input: RiverCallFoldInput, street: "flop" | "t
         { iterations: 10_000, rng: mulberry32(0xF10F) }) : calculateExactTurnEquity(input.heroCards, range, input.board)).equity;
       return { ...profile, equity, callEV: calculateCallEV(equity, pot, call).ev };
     });
-    const handLines: string[] = [];
-    if (flop) {
-      const hand = evaluateBest([...input.heroCards, ...input.board]);
-      const flush = detectFlushDraw(input.heroCards, input.board), straight = detectStraightDraw(input.heroCards, input.board);
-      const texture = classifyBoardTexture(input.board);
-      handLines.push(`Current hand: ${HAND_CATEGORY_NAMES[hand.category]}.`,
-        `Draws: ${flush.hasFlushDraw ? `flush draw (${flush.suit})` : "no direct flush draw"}; ${straight.kind === "none" ? "no direct straight draw" : straight.kind.replaceAll("_", " ") + " straight draw"}.`,
-        `Board texture: ${texture.overall}, ${texture.suitTexture}, ${texture.pairTexture}, ${texture.connectivity}.`,
-        "Draw labels are structural, not guaranteed winning outs; backdoor draws are included in sampled runouts but not separately labeled.");
-    }
+    const hand = evaluateBest([...input.heroCards, ...input.board]);
+    const flush = detectFlushDraw(input.heroCards, input.board), straight = detectStraightDraw(input.heroCards, input.board);
+    const texture = classifyBoardTexture(input.board);
+    const handLines = [`Current hand: ${HAND_CATEGORY_NAMES[hand.category]}.`,
+      `Draws: ${flush.hasFlushDraw ? `flush draw (${flush.suit})` : "no direct flush draw"}; ${straight.kind === "none" ? "no direct straight draw" : straight.kind.replaceAll("_", " ") + " straight draw"}.`,
+      `Board texture: ${texture.overall}, ${texture.suitTexture}, ${texture.pairTexture}, ${texture.connectivity}.`,
+      flop ? "Draw labels are structural, not guaranteed winning outs; backdoor draws are included in sampled runouts but not separately labeled." :
+        "Draw labels are structural, not guaranteed winning outs; all legal river cards are evaluated."];
     return { ...base, status: "conditional" as const,
       reason: "Conditional CALL versus FOLD only: assumes no further betting and showdown on the river.", handLines,
       requiredEquity: calculatePotOdds(pot, call).breakevenEquity,

@@ -7000,7 +7000,8 @@
       requiredEquity: null,
       equityBounds: null,
       callEVBounds: null,
-      assumptions: []
+      assumptions: [],
+      handLines: []
     });
     if (input.street !== "river" || input.board.length !== 5)
       return abstain("Exactly five river board cards are required.");
@@ -7029,6 +7030,7 @@
         equityBounds,
         callEVBounds,
         assumptions,
+        handLines: [`Current hand: ${HAND_CATEGORY_NAMES[evaluateBest([...input.heroCards, ...input.board]).category]}.`],
         reason: status === "call_preferred" ? "CALL preferred to FOLD under all supplied assumptions." : status === "fold_preferred" ? "FOLD preferred to CALL under all supplied assumptions." : "Range-dependent / uncertain."
       };
     } catch (error) {
@@ -7039,6 +7041,7 @@
     if (result.status === "abstained")
       return [`River CALL vs FOLD withheld: ${result.reason}`, result.warning];
     return [
+      ...result.handLines,
       result.reason,
       `Required equity: ${(100 * result.requiredEquity).toFixed(2)}% = CALL / (pot before hero call + CALL).`,
       `Equity sensitivity: ${(100 * result.equityBounds.low).toFixed(2)}%\u2013${(100 * result.equityBounds.high).toFixed(2)}%; CALL EV ${result.callEVBounds.low.toFixed(3)} to ${result.callEVBounds.high.toFixed(3)}; FOLD EV 0 (input units).`,
@@ -7094,13 +7097,15 @@
         const equity = (flop ? calculateEquityVsRange(input.heroCards, range, input.board, { iterations: 1e4, rng: mulberry32(61711) }) : calculateExactTurnEquity(input.heroCards, range, input.board)).equity;
         return { ...profile, equity, callEV: calculateCallEV(equity, pot, call).ev };
       });
-      const handLines = [];
-      if (flop) {
-        const hand = evaluateBest([...input.heroCards, ...input.board]);
-        const flush = detectFlushDraw(input.heroCards, input.board), straight = detectStraightDraw(input.heroCards, input.board);
-        const texture = classifyBoardTexture(input.board);
-        handLines.push(`Current hand: ${HAND_CATEGORY_NAMES[hand.category]}.`, `Draws: ${flush.hasFlushDraw ? `flush draw (${flush.suit})` : "no direct flush draw"}; ${straight.kind === "none" ? "no direct straight draw" : straight.kind.replaceAll("_", " ") + " straight draw"}.`, `Board texture: ${texture.overall}, ${texture.suitTexture}, ${texture.pairTexture}, ${texture.connectivity}.`, "Draw labels are structural, not guaranteed winning outs; backdoor draws are included in sampled runouts but not separately labeled.");
-      }
+      const hand = evaluateBest([...input.heroCards, ...input.board]);
+      const flush = detectFlushDraw(input.heroCards, input.board), straight = detectStraightDraw(input.heroCards, input.board);
+      const texture = classifyBoardTexture(input.board);
+      const handLines = [
+        `Current hand: ${HAND_CATEGORY_NAMES[hand.category]}.`,
+        `Draws: ${flush.hasFlushDraw ? `flush draw (${flush.suit})` : "no direct flush draw"}; ${straight.kind === "none" ? "no direct straight draw" : straight.kind.replaceAll("_", " ") + " straight draw"}.`,
+        `Board texture: ${texture.overall}, ${texture.suitTexture}, ${texture.pairTexture}, ${texture.connectivity}.`,
+        flop ? "Draw labels are structural, not guaranteed winning outs; backdoor draws are included in sampled runouts but not separately labeled." : "Draw labels are structural, not guaranteed winning outs; all legal river cards are evaluated."
+      ];
       return {
         ...base,
         status: "conditional",
@@ -10130,7 +10135,7 @@
     const source = timeline.sourceStatus, identity3 = source.identity, state = assessment.state;
     const card = (c) => `${"23456789TJQKA"[c.rank - 2]}${c.suit}`;
     const seats = state?.seats.filter((s) => s.isOccupied) ?? [], hero = seats.find((s) => s.isYou);
-    const sourceZero = w.street === "flop" && w.heroChecked === false && hero?.currentBet === null && !hero.isChecking && !hero.betReadError && w.players.find((p) => p.playerId === w.heroId)?.contribution === 0;
+    const sourceZero = w.street !== "river" && w.heroChecked === false && hero?.currentBet === null && !hero.isChecking && !hero.betReadError && w.players.find((p) => p.playerId === w.heroId)?.contribution === 0;
     const same6 = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     const ui = assessCallControlReadiness(read.callControl ?? null, w.payableCall, w.receivedAt, Date.now());
     if (!source.connected || identity3?.chainGap || identity3?.tableId !== w.tableId || identity3?.handId !== w.handId || identity3?.handNumber !== w.handNumber || identity3?.heroPlayerId !== w.heroId || timeline.current.handId !== `${w.tableId}:hand:${w.handId}` || source.sourceMetadata.socketContinuity.generation !== w.generation) return empty([`${w.street} source identity or connection contradicts the activation.`], true);
@@ -10187,7 +10192,7 @@
         "ILLUSTRATIVE ONLY \u2014 not verified; no action authorization.",
         `Assumes all ${w.grossPotBeforeCall} chips are hero-contestable in one pot, no unresolved returns and zero rake/drop. These assumptions are unproven.`,
         `Collected ${w.collectedPot} + current bet ${w.streetSubtotal} = ${w.grossPotBeforeCall} chips before CALL; payable CALL ${w.payableCall}. The bet is included once.`,
-        ...sourceZero ? ["Hero has not acted: zero contribution established by the continuous flop source window; native CALL independently matched."] : [],
+        ...sourceZero ? [`Hero has not acted: zero contribution established by the continuous ${w.street} source window; native CALL independently matched.`] : [],
         ...w.street === "flop" ? flopCallFoldDisplay(cachedFlop.result) : w.street === "turn" ? turnCallFoldDisplay(cachedTurn.result) : riverCallFoldDisplay(cached.result)
       ]
     };
@@ -11723,7 +11728,7 @@
           if (!object8(input) || !chips4(seq) || !chips4(gen) || !chips4(received) || received > now() || received < at || now() - received >= 1e4 || !object8(input.source)) throw new Error("Invalid receipt");
           const p = input, s = p.source;
           if (!s.heroId || s.event !== "registered" && (seq !== sequence + 1 || gen !== generation || s.heroId !== heroId || !state) || s.event === "registered" && gen <= generation) throw new Error("Discontinuous river source");
-          const previous = state;
+          const previous = state, previousPot = pot;
           state = s.event === "registered" ? initializeUtgState(s.frame, tableId, s.heroId) : advanceUtgState(state, s.frame, tableId, s.heroId);
           heroId = s.heroId;
           sequence = seq;
@@ -11737,6 +11742,11 @@
           if (p.pot !== void 0) {
             if (!chips4(p.pot)) throw new Error("Invalid pot");
             pot = p.pot;
+          }
+          if (s.event !== "registered" && previous && previous.hI === state.hI && !same4(previous.gT, state.gT) && [1, 2, 3].some((index) => same4(state.gT, [1, index]))) {
+            const collected = Object.values(previous.tB ?? {}).reduce((sum, value) => sum + Number(value), 0);
+            if (collected > 0 && (p.pot === void 0 || p.pot < collected || previousPot !== null && p.pot !== previousPot + collected || Object.entries(previous.tB).some(([id, value]) => Number(value) > 0 && state.players[id]?.stack !== previous.players[id].stack - Number(value))))
+              throw new Error("Postflop collection is missing or contradicts previous wagers, pot or stacks.");
           }
           if (p.kind === "river" || p.kind === "turn_board" || p.kind === "flop_board") {
             const street = p.kind === "river" ? "river" : p.kind === "turn_board" ? "turn" : "flop";
@@ -12505,7 +12515,7 @@
         return;
       }
       const latest = readLiveTable();
-      const latestFingerprint = JSON.stringify([decisionFingerprint(location.origin + location.pathname, latest.raw, latest.context, latest.raiseControl), liveProofRevision(handTimeline.snapshot())]);
+      const latestFingerprint = liveReadFingerprint(latest, handTimeline.snapshot(), assessLiveState(latest.raw, latest.context).state?.street);
       if (requestKey !== decisionRequestKey(requestSequence, latestFingerprint) || !responseProofStillCurrent(packet, latest)) {
         lastRecommendationRequestKey = null;
         overlayState.aiResult = null;
@@ -12568,7 +12578,7 @@
         let fresh = false;
         try {
           const latest = readLiveTable();
-          const fingerprint = JSON.stringify([decisionFingerprint(location.origin + location.pathname, latest.raw, latest.context, latest.raiseControl), liveProofRevision(handTimeline.snapshot())]);
+          const fingerprint = liveReadFingerprint(latest, handTimeline.snapshot(), assessLiveState(latest.raw, latest.context).state?.street);
           fresh = requestKey === decisionRequestKey(requestSequence, fingerprint);
         } catch {
         }
@@ -12717,6 +12727,17 @@
   setInterval(refreshFreshnessDisplay, 250);
   document.addEventListener("visibilitychange", refreshFreshnessDisplay);
   window.addEventListener?.("focus", refreshFreshnessDisplay);
+  function liveReadFingerprint(read, timeline, street, dom = decisionFingerprint(location.origin + location.pathname, read.raw, read.context, read.raiseControl)) {
+    const { observedAt, ...callObservation } = read.callControl ?? {};
+    return JSON.stringify([
+      dom,
+      liveProofRevision(timeline),
+      ...["flop", "turn", "river"].includes(street ?? "") ? [{
+        callObservation,
+        callFresh: observedAt !== void 0 && observedAt <= Date.now() && Date.now() - observedAt < 1e4
+      }] : []
+    ]);
+  }
   setInterval(() => {
     try {
       const read = readLiveTable();
@@ -12725,15 +12746,7 @@
       void handTimeline.tick();
       const domStateJson = decisionFingerprint(location.origin + location.pathname, read.raw, read.context, read.raiseControl);
       const timelineSnapshot = handTimeline.snapshot();
-      const { observedAt: callObservedAt, ...callObservation } = read.callControl ?? {};
-      const stateJson = JSON.stringify([
-        domStateJson,
-        liveProofRevision(timelineSnapshot),
-        ...assessment.state?.street === "river" || assessment.state?.street === "turn" ? [{
-          callObservation,
-          callFresh: callObservedAt !== void 0 && callObservedAt <= Date.now() && Date.now() - callObservedAt < 1e4
-        }] : []
-      ]);
+      const stateJson = liveReadFingerprint(read, timelineSnapshot, assessment.state?.street, domStateJson);
       if (stateJson !== lastStateJson) currentDiagnosticPacket = null;
       if (domStateJson !== lastDomStateJson) {
         lastDomStateJson = domStateJson;

@@ -53,12 +53,15 @@ export function projectRiverObservation(data: unknown, knownHero: string | null)
     if (exact(raw, [...turn, "gT", "pC", "tB", "oTC", "cRPI", "players"]) && active &&
         (same(raw.gT, [1, 3]) || same(raw.gT, [1, 2])) && same(raw.cRPI, []) && same(raw.players, {}) &&
         object(raw.tB) && Object.values(raw.tB).every(v => v === "<D>")) result.kind = same(raw.gT, [1, 3]) ? "river" : "turn_board";
-    // Flop deal collects the previous street and publishes remaining stacks.
+    // Reuse the collection/deal shape on every street. Paid streets publish pot
+    // and stacks; a check/check deal above has no new chips to collect. Later
+    // street variants are illustrative input support, not live certificates.
     if (exact(raw, [...turn, "gT", "mR", "pC", "tB", "cHB", "oTC", "pot", "cRPI", "players", "bigBlindCheck"]) &&
-        active && same(raw.gT, [1, 1]) && raw.cHB === 0 && chips(raw.mR) && chips(raw.mAVTB) &&
+        active && [1, 2, 3].some(index => same(raw.gT, [1, index])) && raw.cHB === 0 && chips(raw.mR) && chips(raw.mAVTB) &&
         raw.bigBlindCheck === false && same(raw.cRPI, []) && object(raw.players) &&
         Object.values(raw.players).every(p => object(p) && exact(p, ["stack"]) && chips(p.stack)) &&
-        object(raw.tB) && Object.values(raw.tB).every(v => v === "<D>")) result.kind = "flop_board";
+        object(raw.tB) && Object.values(raw.tB).every(v => v === "<D>"))
+      result.kind = raw.gT[1] === 1 ? "flop_board" : raw.gT[1] === 2 ? "turn_board" : "river";
     const action = raw.sNA === "NSAA" && raw.pITT === null && chips(raw.sNAA);
     if (action && object(raw.tB) && Object.keys(raw.tB).length === 1) {
       const [actor, amount] = Object.entries(raw.tB)[0]!;
@@ -104,13 +107,26 @@ export function createRiverObservation(tableId: string, now: () => number) {
         const p = input as unknown as RiverProjection, s = p.source;
         if (!s.heroId || s.event !== "registered" && (seq !== sequence + 1 || gen !== generation || s.heroId !== heroId || !state) ||
             s.event === "registered" && gen <= generation) throw new Error("Discontinuous river source");
-        const previous = state;
+        const previous = state, previousPot = pot;
         state = s.event === "registered" ? initializeUtgState(s.frame, tableId, s.heroId) : advanceUtgState(state!, s.frame, tableId, s.heroId);
         heroId = s.heroId; sequence = seq; generation = gen; at = received;
         reason = "Continuous observations; waiting for a supported postflop check/bet/activation window.";
         // A new baseline/hand cannot borrow monetary evidence from the old one.
         if (s.event === "registered" || previous?.hI !== state.hI) { pending = null; pot = null; }
         if (p.pot !== undefined) { if (!chips(p.pot)) throw new Error("Invalid pot"); pot = p.pot; }
+        if (s.event !== "registered" && previous && previous.hI === state.hI && !same(previous.gT, state.gT) &&
+            [1, 2, 3].some(index => same(state!.gT, [1, index]))) {
+          const collected = Object.values(previous.tB ?? {}).reduce<number>((sum, value) => sum + Number(value), 0);
+          // Clearing wagers cannot silently carry an earlier street's pot or
+          // undebited stacks into a new calculation, even for unsupported deal
+          // shapes. An explicit new pot can establish the gross baseline when
+          // no earlier pot was observed; never assume a missing baseline is zero.
+          if (collected > 0 && (p.pot === undefined || p.pot < collected ||
+              previousPot !== null && p.pot !== previousPot + collected ||
+              Object.entries(previous.tB).some(([id, value]) => Number(value) > 0 &&
+                state!.players[id]?.stack !== previous.players[id].stack - Number(value))))
+            throw new Error("Postflop collection is missing or contradicts previous wagers, pot or stacks.");
+        }
         if (p.kind === "river" || p.kind === "turn_board" || p.kind === "flop_board") {
           const street = p.kind === "river" ? "river" : p.kind === "turn_board" ? "turn" : "flop";
           const streetIndex = street === "river" ? 3 : street === "turn" ? 2 : 1;

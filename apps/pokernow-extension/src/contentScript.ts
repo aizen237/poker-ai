@@ -331,7 +331,7 @@ async function requestRecommendation(packet: DecisionPacket, stateDescription: s
     // A response can arrive between polls. Re-read before showing it instead
     // of assuming the last one-second snapshot still describes the live turn.
     const latest = readLiveTable();
-    const latestFingerprint = JSON.stringify([decisionFingerprint(location.origin + location.pathname, latest.raw, latest.context, latest.raiseControl), liveProofRevision(handTimeline.snapshot())]);
+    const latestFingerprint = liveReadFingerprint(latest, handTimeline.snapshot(), assessLiveState(latest.raw, latest.context).state?.street);
     if (requestKey !== decisionRequestKey(requestSequence, latestFingerprint) || !responseProofStillCurrent(packet, latest)) {
       lastRecommendationRequestKey = null;
       overlayState.aiResult = null;
@@ -403,7 +403,7 @@ async function requestRecommendation(packet: DecisionPacket, stateDescription: s
       let fresh = false;
       try {
         const latest = readLiveTable();
-        const fingerprint = JSON.stringify([decisionFingerprint(location.origin + location.pathname, latest.raw, latest.context, latest.raiseControl), liveProofRevision(handTimeline.snapshot())]);
+        const fingerprint = liveReadFingerprint(latest, handTimeline.snapshot(), assessLiveState(latest.raw, latest.context).state?.street);
         fresh = requestKey === decisionRequestKey(requestSequence, fingerprint);
       } catch { /* Failed read invalidates the current display. */ }
       if (locked && policy && fresh) {
@@ -549,6 +549,16 @@ setInterval(refreshFreshnessDisplay, 250);
 document.addEventListener("visibilitychange", refreshFreshnessDisplay);
 window.addEventListener?.("focus", refreshFreshnessDisplay);
 
+// Polling and asynchronous response checks must bind exactly the same inputs.
+function liveReadFingerprint(read: ReturnType<typeof readLiveTable>, timeline: ReturnType<typeof handTimeline.snapshot>,
+  street: string | undefined, dom = decisionFingerprint(location.origin + location.pathname, read.raw, read.context, read.raiseControl)) {
+  // Omit the receipt timestamp itself so a fresh identical poll is stable.
+  const { observedAt, ...callObservation } = read.callControl ?? {};
+  return JSON.stringify([dom, liveProofRevision(timeline),
+    ...(["flop", "turn", "river"].includes(street ?? "") ? [{ callObservation,
+      callFresh: observedAt !== undefined && observedAt <= Date.now() && Date.now() - observedAt < 10_000 }] : [])]);
+}
+
 setInterval(() => {
   try {
   const read = readLiveTable();
@@ -558,12 +568,7 @@ setInterval(() => {
   // Include blinds, dealer, and extraction failures in the identity of a read.
   const domStateJson = decisionFingerprint(location.origin + location.pathname, read.raw, read.context, read.raiseControl);
   const timelineSnapshot = handTimeline.snapshot();
-  // Turn/river diagnostics must notice CALL-only changes and observation expiry as
-  // well. Omit the receipt timestamp itself so a fresh identical poll is stable.
-  const { observedAt: callObservedAt, ...callObservation } = read.callControl ?? {};
-  const stateJson = JSON.stringify([domStateJson, liveProofRevision(timelineSnapshot),
-    ...(assessment.state?.street === "river" || assessment.state?.street === "turn" ? [{ callObservation,
-      callFresh: callObservedAt !== undefined && callObservedAt <= Date.now() && Date.now() - callObservedAt < 10_000 }] : [])]);
+  const stateJson = liveReadFingerprint(read, timelineSnapshot, assessment.state?.street, domStateJson);
   if (stateJson !== lastStateJson) currentDiagnosticPacket = null;
   if (domStateJson !== lastDomStateJson) {
     lastDomStateJson = domStateJson;

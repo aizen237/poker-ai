@@ -19,10 +19,10 @@ export function riverIllustration(read: LiveTableRead, assessment: LiveStateAsse
   const source = timeline.sourceStatus, identity = source.identity, state = assessment.state;
   const card = (c: { rank: number; suit: string }) => `${"23456789TJQKA"[c.rank - 2]}${c.suit}`;
   const seats = state?.seats.filter(s => s.isOccupied) ?? [], hero = seats.find(s => s.isYou);
-  // In an opponent-first flop window, the linked deal cleared every wager and
+  // In an opponent-first flop/turn window, the linked deal cleared every wager and
   // only the opponent has acted. That source proves hero's zero contribution;
   // a missing DOM wager alone never does. Do not synthesize a hero check.
-  const sourceZero = w.street === "flop" && w.heroChecked === false &&
+  const sourceZero = w.street !== "river" && w.heroChecked === false &&
     hero?.currentBet === null && !hero.isChecking && !hero.betReadError &&
     w.players.find(p => p.playerId === w.heroId)?.contribution === 0;
   const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
@@ -75,7 +75,7 @@ export function riverIllustration(read: LiveTableRead, assessment: LiveStateAsse
     lines: ["ILLUSTRATIVE ONLY — not verified; no action authorization.",
       `Assumes all ${w.grossPotBeforeCall} chips are hero-contestable in one pot, no unresolved returns and zero rake/drop. These assumptions are unproven.`,
       `Collected ${w.collectedPot} + current bet ${w.streetSubtotal} = ${w.grossPotBeforeCall} chips before CALL; payable CALL ${w.payableCall}. The bet is included once.`,
-      ...(sourceZero ? ["Hero has not acted: zero contribution established by the continuous flop source window; native CALL independently matched."] : []),
+      ...(sourceZero ? [`Hero has not acted: zero contribution established by the continuous ${w.street} source window; native CALL independently matched.`] : []),
       ...(w.street === "flop" ? flopCallFoldDisplay(cachedFlop!.result) :
         w.street === "turn" ? turnCallFoldDisplay(cachedTurn!.result) : riverCallFoldDisplay(cached!.result))] };
 }

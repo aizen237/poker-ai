@@ -15,7 +15,7 @@ vi.mock("../../../apps/pokernow-extension/src/tableRead.js", () => ({ readLiveTa
 vi.mock("@poker-ai/browser-reader", async importOriginal => ({ ...await importOriginal<object>(), assessLiveState: mocks.assess }));
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
-it.each(["changed DOM", "changed source proof", "turn advisory", "malformed result", "consensus array", "HTTP error"])("withholds %s at the live response boundary", async scenario => {
+it.each(["unchanged decision", "changed DOM", "changed CALL", "changed CALL freshness", "changed source proof", "turn advisory", "malformed result", "consensus array", "HTTP error"])("validates %s at the live response boundary", async scenario => {
   vi.resetModules();
   mocks.revision = "source-1";
   mocks.turn = false;
@@ -31,8 +31,9 @@ it.each(["changed DOM", "changed source proof", "turn advisory", "malformed resu
   let complete!: (value: unknown) => void;
   const fetchMock = vi.fn(() => new Promise(resolve => { complete = resolve; }));
   vi.stubGlobal("fetch", fetchMock);
-  let observedStack = 25;
-  mocks.read.mockImplementation(() => ({ raw: { observedStack }, context: { readErrors: [], dealerSeatNumber: 2 }, raiseControl: null }));
+  let observedStack = 25, observedCall = 3, callAge = 0;
+  mocks.read.mockImplementation(() => ({ raw: { observedStack }, context: { readErrors: [], dealerSeatNumber: 2 }, raiseControl: null,
+    callControl: { observedAt: Date.now() - callAge, amountChips: observedCall, enabled: true } }));
   // Synthetic independently verified policy inputs solely to reach the response
   // boundary in this test. Real live pot/legality gates remain disabled.
   const seats = [
@@ -49,6 +50,8 @@ it.each(["changed DOM", "changed source proof", "turn advisory", "malformed resu
   poll();
   expect(fetchMock).toHaveBeenCalledOnce();
   if (scenario === "changed DOM") observedStack = 20; // No second poll: re-read at delivery.
+  if (scenario === "changed CALL") observedCall = 4;
+  if (scenario === "changed CALL freshness") callAge = 10000;
   if (scenario === "changed source proof") mocks.revision = "source-2"; // Identical DOM; no second poll.
   if (scenario === "turn advisory") {
     mocks.turn = true;
@@ -59,9 +62,13 @@ it.each(["changed DOM", "changed source proof", "turn advisory", "malformed resu
     poll();
     expect(fetchMock).toHaveBeenCalledOnce(); // No new turn action request.
   }
-  const result = scenario === "consensus array" ? [] : { action: scenario === "malformed result" ? "INVALID" : "CALL", confidence: 0.99, reasoning: "stale recommendation" };
+  const result = scenario === "consensus array" ? [] : { action: scenario === "malformed result" ? "INVALID" : "CALL", confidence: 0.99,
+    reasoning: scenario === "unchanged decision" ? "current recommendation" : "stale recommendation" };
   complete({ ok: scenario !== "HTTP error", json: async () => ({ ok: true, result }) });
-  if (scenario === "turn advisory") {
+  if (scenario === "unchanged decision") {
+    await vi.waitFor(() => expect(document.getElementById("poker-ai-reader-overlay")!.textContent).toContain("current recommendation"));
+    expect(document.getElementById("poker-ai-reader-overlay")!.textContent).not.toContain("Table changed");
+  } else if (scenario === "turn advisory") {
     await vi.waitFor(() => expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("Discarding stale AI response")));
     expect(document.getElementById("poker-ai-reader-overlay")!.textContent).toContain("Turn unconditional CALL/FOLD recommendation withheld.");
   } else await vi.waitFor(() => expect(document.getElementById("poker-ai-reader-overlay")!.textContent).toContain(scenario.startsWith("changed") ? "Table changed" : "invalid response"));

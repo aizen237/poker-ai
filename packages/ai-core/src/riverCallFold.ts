@@ -1,5 +1,5 @@
 import type { Card } from "@poker-ai/shared";
-import { calculateCallEV, calculateFoldEV, calculatePotOdds } from "@poker-ai/poker-engine";
+import { calculateCallEV, calculateFoldEV, calculatePotOdds, evaluateBest, HAND_CATEGORY_NAMES } from "@poker-ai/poker-engine";
 import { calculateExactRiverEquity, riverBettingAssumptions } from "@poker-ai/range-engine";
 
 export const RIVER_PAIRWISE_WARNING = "RAISE not evaluated.";
@@ -24,7 +24,7 @@ export function compareRiverCallFold(input: RiverCallFoldInput) {
   const base = { liveAuthorized: false as const, llmMayChoose: false as const,
     warning: RIVER_PAIRWISE_WARNING, foldEV: calculateFoldEV().ev };
   const abstain = (reason: string) => ({ ...base, status: "abstained" as const, reason,
-    requiredEquity: null, equityBounds: null, callEVBounds: null, assumptions: [] });
+    requiredEquity: null, equityBounds: null, callEVBounds: null, assumptions: [], handLines: [] as string[] });
   if (input.street !== "river" || input.board.length !== 5) return abstain("Exactly five river board cards are required.");
   if (input.activeOpponents !== 1) return abstain("Exactly one active opponent is required.");
   if (input.accounting !== "single_pot_no_rake") return abstain("Single contestable pot, resolved returns and no rake/side pots are required.");
@@ -47,6 +47,7 @@ export function compareRiverCallFold(input: RiverCallFoldInput) {
     const status = equityBounds.low > requiredEquity + 1e-10 ? "call_preferred" as const
       : equityBounds.high < requiredEquity - 1e-10 ? "fold_preferred" as const : "uncertain" as const;
     return { ...base, status, requiredEquity, equityBounds, callEVBounds, assumptions,
+      handLines: [`Current hand: ${HAND_CATEGORY_NAMES[evaluateBest([...input.heroCards, ...input.board]).category]}.`],
       reason: status === "call_preferred" ? "CALL preferred to FOLD under all supplied assumptions."
         : status === "fold_preferred" ? "FOLD preferred to CALL under all supplied assumptions."
         : "Range-dependent / uncertain." };
@@ -59,7 +60,7 @@ export function compareRiverCallFold(input: RiverCallFoldInput) {
  * never sent to an LLM. All numbers retain the caller's common chip/BB unit. */
 export function riverCallFoldDisplay(result: ReturnType<typeof compareRiverCallFold>): string[] {
   if (result.status === "abstained") return [`River CALL vs FOLD withheld: ${result.reason}`, result.warning];
-  return [result.reason,
+  return [...result.handLines, result.reason,
     `Required equity: ${(100 * result.requiredEquity!).toFixed(2)}% = CALL / (pot before hero call + CALL).`,
     `Equity sensitivity: ${(100 * result.equityBounds!.low).toFixed(2)}%–${(100 * result.equityBounds!.high).toFixed(2)}%; CALL EV ${result.callEVBounds!.low.toFixed(3)} to ${result.callEVBounds!.high.toFixed(3)}; FOLD EV 0 (input units).`,
     ...result.assumptions.map(a => `${a.label}: equity ${(100 * a.equity).toFixed(2)}%; CALL EV ${a.callEV.toFixed(3)}. ${a.valueAssumption} ${a.bluffAssumption} ${a.valueCombos} value / ${a.bluffCombos} bluff combos.`),
