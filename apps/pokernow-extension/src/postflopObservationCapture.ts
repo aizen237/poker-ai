@@ -2,7 +2,7 @@ import { assessLiveState } from "@poker-ai/browser-reader";
 import type { LiveTimelineDiagnostic } from "./liveTimeline.js";
 import type { LiveTableRead } from "./tableRead.js";
 import { liveProofRevision } from "./decisionProofs.js";
-import { decisionFingerprint } from "./requestIdentity.js";
+import { liveDecisionFingerprint } from "./requestIdentity.js";
 
 type Dependencies = { snapshot: () => LiveTimelineDiagnostic; read: () => LiveTableRead;
   epoch: () => { decisionEpoch: string; stateJson: string | null }; tableUrl: () => string; now: () => number };
@@ -55,9 +55,8 @@ export function capturePostflopObservation(d: Dependencies) {
       completedAt < startedAt || call!.observedAt < startedAt || call!.observedAt > completedAt ||
       head!.receivedAt > startedAt || completedAt - head!.receivedAt >= 10_000)
     reasons.push("Stale, future, missing or unbracketed local observation time.");
-  const polled = (s: LiveTimelineDiagnostic) => JSON.stringify([
-    decisionFingerprint(tableUrl, read.raw, read.context, read.raiseControl), liveProofRevision(s),
-  ]);
+  const polled = (s: LiveTimelineDiagnostic) => liveDecisionFingerprint(
+    tableUrl, read, liveProofRevision(s), assessment.state?.street, completedAt);
   const epochStatus = !epochBefore.decisionEpoch || epochBefore.stateJson === null ? "unavailable"
     : same(epochBefore, epochAfter) && epochBefore.stateJson === polled(first) && epochAfter.stateJson === polled(last)
       ? "observed_matching" : "mismatched";

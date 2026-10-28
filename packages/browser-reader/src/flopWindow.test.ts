@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createFirstUtgSource, projectFirstUtgSource } from "../../../apps/pokernow-extension/src/firstUtgSource.js";
 import { parseHTML } from "linkedom";
-import { decisionFingerprint } from "../../../apps/pokernow-extension/src/requestIdentity.js";
+import { liveDecisionFingerprint } from "../../../apps/pokernow-extension/src/requestIdentity.js";
 import { liveProofRevision } from "../../../apps/pokernow-extension/src/decisionProofs.js";
 
 const mocks = vi.hoisted(() => ({ read: vi.fn() }));
@@ -360,7 +360,7 @@ describe("recorded flop MAIN -> source runtime -> decision/display boundary", ()
       const cp = captured.checkpoints[0];
       if (hand === 246) {
         const observation = cp.observation;
-        const stateJson = JSON.stringify([decisionFingerprint(String(location), read.raw, read.context, read.raiseControl), liveProofRevision(captureTimeline)]);
+        const stateJson = liveDecisionFingerprint(String(location), read, liveProofRevision(captureTimeline), "flop", cp.capturedAt);
         const legacy = { ...observation, epochBefore: { decisionEpoch: observation.epochBefore.decisionEpoch, stateJson },
           epochAfter: { decisionEpoch: observation.epochAfter.decisionEpoch, stateJson } };
         const size = (value: unknown) => Buffer.byteLength(JSON.stringify(value), "utf8");

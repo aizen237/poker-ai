@@ -21,7 +21,7 @@ import { evaluateDecisionPolicy, deriveCandidateActions, type DecisionPacket } f
 import { calculateEquityForEstimates, estimateOpponentRange } from "@poker-ai/range-engine";
 import { readLiveTable } from "./tableRead.js";
 import { logLiveDiagnostics } from "./diagnostics.js";
-import { decisionFingerprint, decisionRequestKey } from "./requestIdentity.js";
+import { decisionFingerprint, decisionRequestKey, liveDecisionFingerprint } from "./requestIdentity.js";
 import { RecommendationSchema, lockedEngineRecommendation, validateReasoningConsistency } from "@poker-ai/ai-core";
 import { startLiveTimeline } from "./liveTimeline.js";
 import { installRaiseEvidenceResponder } from "./raiseEvidenceCapture.js";
@@ -586,13 +586,7 @@ window.addEventListener?.("focus", refreshFreshnessDisplay);
 // Polling and asynchronous response checks must bind exactly the same inputs.
 function liveReadFingerprint(read: ReturnType<typeof readLiveTable>, timeline: ReturnType<typeof handTimeline.snapshot>,
   street: string | undefined, dom = decisionFingerprint(location.origin + location.pathname, read.raw, read.context, read.raiseControl)) {
-  // Omit the receipt timestamp itself so a fresh identical poll is stable.
-  const { observedAt, ...callObservation } = read.callControl ?? {};
-  return JSON.stringify([dom, liveProofRevision(timeline),
-    // The HJ preflop reference also consumes this contradiction check. A
-    // changed control must trigger reevaluation, without renewing its source.
-    ...(["preflop", "flop", "turn", "river"].includes(street ?? "") ? [{ callObservation,
-      callFresh: observedAt !== undefined && observedAt <= Date.now() && Date.now() - observedAt < 10_000 }] : [])]);
+  return liveDecisionFingerprint(location.origin + location.pathname, read, liveProofRevision(timeline), street, Date.now(), dom);
 }
 
 setInterval(() => {

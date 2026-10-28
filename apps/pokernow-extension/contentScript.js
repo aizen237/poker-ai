@@ -11108,6 +11108,17 @@
   function decisionRequestKey(epoch, fingerprint) {
     return `${epoch}:${fingerprint}`;
   }
+  function liveDecisionFingerprint(tableUrl, read, sourceRevision, street, now = Date.now(), dom = decisionFingerprint(tableUrl, read.raw, read.context, read.raiseControl)) {
+    const { observedAt, ...callObservation } = read.callControl ?? {};
+    return JSON.stringify([
+      dom,
+      sourceRevision,
+      ...["preflop", "flop", "turn", "river"].includes(street ?? "") ? [{
+        callObservation,
+        callFresh: observedAt !== void 0 && observedAt <= now && now - observedAt < 1e4
+      }] : []
+    ]);
+  }
 
   // src/pokerNowTransport.ts
   var TIMELINE_CHANNEL = "poker-ai:hand-source:v1";
@@ -12563,15 +12574,19 @@
     const startedAt = d.now(), tableUrl = d.tableUrl(), epochBefore = { ...d.epoch() };
     const first = d.snapshot(), before = copySource(first, startedAt);
     const read = d.read();
-    const evidence = flopCallEvidence(read, assessLiveState(read.raw, read.context), first, epochBefore.decisionEpoch);
+    const assessment = assessLiveState(read.raw, read.context);
+    const evidence = flopCallEvidence(read, assessment, first, epochBefore.decisionEpoch);
     const last = d.snapshot(), after = copySource(last, d.now()), epochAfter = { ...d.epoch() };
     const completedAt = d.now(), binding = evidence?.binding ?? null;
     const reasons = [];
     if (!evidence || evidence.ui.status !== "observed_matching") reasons.push("No fresh matching Phase6E source/DOM/CALL observation.");
-    const stateJson = (s) => JSON.stringify([
-      decisionFingerprint(tableUrl, read.raw, read.context, read.raiseControl),
-      liveProofRevision(s)
-    ]);
+    const stateJson = (s) => liveDecisionFingerprint(
+      tableUrl,
+      read,
+      liveProofRevision(s),
+      assessment.state?.street,
+      completedAt
+    );
     if (!epochBefore.decisionEpoch || epochBefore.stateJson === null || JSON.stringify(epochBefore) !== JSON.stringify(epochAfter) || epochBefore.stateJson !== stateJson(first) || epochAfter.stateJson !== stateJson(last))
       reasons.push("Current read/source does not match the existing decision epoch; wait for an ordinary poll, never mint a capture epoch.");
     if (JSON.stringify(before) !== JSON.stringify(after) || tableUrl !== d.tableUrl()) reasons.push("Source or table changed across the read.");
@@ -12664,10 +12679,13 @@
     if (head && head.generation !== 1) limitations.push("Reconnect generation: no continuity with the previous connection is claimed.");
     if (![startedAt, completedAt, call?.observedAt, head?.receivedAt].every(Number.isSafeInteger) || completedAt < startedAt || call.observedAt < startedAt || call.observedAt > completedAt || head.receivedAt > startedAt || completedAt - head.receivedAt >= 1e4)
       reasons.push("Stale, future, missing or unbracketed local observation time.");
-    const polled = (s) => JSON.stringify([
-      decisionFingerprint(tableUrl, read.raw, read.context, read.raiseControl),
-      liveProofRevision(s)
-    ]);
+    const polled = (s) => liveDecisionFingerprint(
+      tableUrl,
+      read,
+      liveProofRevision(s),
+      assessment.state?.street,
+      completedAt
+    );
     const epochStatus = !epochBefore.decisionEpoch || epochBefore.stateJson === null ? "unavailable" : same5(epochBefore, epochAfter) && epochBefore.stateJson === polled(first) && epochAfter.stateJson === polled(last) ? "observed_matching" : "mismatched";
     if (epochStatus !== "observed_matching") reasons.push("Existing decision epoch unavailable or mismatched; capture does not create one.");
     if (!state || state.street !== "flop" || seats.filter((s) => s.isYou).length !== 1 || seats.filter((s) => s.isCurrentToAct).length !== 1 || !hero?.isCurrentToAct || read.context.readErrors.length)
@@ -13190,17 +13208,7 @@
   document.addEventListener("visibilitychange", refreshFreshnessDisplay);
   window.addEventListener?.("focus", refreshFreshnessDisplay);
   function liveReadFingerprint(read, timeline, street, dom = decisionFingerprint(location.origin + location.pathname, read.raw, read.context, read.raiseControl)) {
-    const { observedAt, ...callObservation } = read.callControl ?? {};
-    return JSON.stringify([
-      dom,
-      liveProofRevision(timeline),
-      // The HJ preflop reference also consumes this contradiction check. A
-      // changed control must trigger reevaluation, without renewing its source.
-      ...["preflop", "flop", "turn", "river"].includes(street ?? "") ? [{
-        callObservation,
-        callFresh: observedAt !== void 0 && observedAt <= Date.now() && Date.now() - observedAt < 1e4
-      }] : []
-    ]);
+    return liveDecisionFingerprint(location.origin + location.pathname, read, liveProofRevision(timeline), street, Date.now(), dom);
   }
   setInterval(() => {
     try {

@@ -8,7 +8,7 @@ import { identityFromSocketPacket, TIMELINE_CHANNEL, type HandIdentityEvidence }
 import { inspectSocketMetadata } from "../../../apps/pokernow-extension/src/sourceMetadata.js";
 import { capturePostflopObservation } from "../../../apps/pokernow-extension/src/postflopObservationCapture.js";
 import { buildLiveDecisionProofs, liveProofRevision } from "../../../apps/pokernow-extension/src/decisionProofs.js";
-import { decisionFingerprint } from "../../../apps/pokernow-extension/src/requestIdentity.js";
+import { liveDecisionFingerprint } from "../../../apps/pokernow-extension/src/requestIdentity.js";
 
 const load = (name: string) => JSON.parse(readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url), "utf8"));
 const frames = (): any[] => load("pokernow-flop-248").frames;
@@ -225,9 +225,8 @@ describe("hand248 real source and saved UI through production diagnostic/decisio
     // The original internal stateJson was intentionally not exported. Recompute
     // only a replay fingerprint using today's production code, never claim to
     // recover that original string or mint a live epoch from saved evidence.
-    const epoch = (): { decisionEpoch: string; stateJson: string | null } => ({ decisionEpoch: "replay-epoch", stateJson: JSON.stringify([
-      decisionFingerprint(cp.tableUrl, read.raw, read.context, read.raiseControl), liveProofRevision(runtime.snapshot()),
-    ]) });
+    const epoch = (): { decisionEpoch: string; stateJson: string | null } => ({ decisionEpoch: "replay-epoch",
+      stateJson: liveDecisionFingerprint(cp.tableUrl, read, liveProofRevision(runtime.snapshot()), "flop", now) });
     const dependencies = { snapshot: () => runtime.snapshot(), read: () => read, epoch, tableUrl: () => cp.tableUrl, now: () => now };
     const blocked = () => {
       const p = buildLiveDecisionProofs(read, assessLiveState(read.raw, read.context), runtime.snapshot(), null, "replay-epoch");

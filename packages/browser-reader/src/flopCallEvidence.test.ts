@@ -10,7 +10,7 @@ import { readCallControl } from "../../../apps/pokernow-extension/src/callContro
 import { flopCallEvidence } from "../../../apps/pokernow-extension/src/flopCallEvidence.js";
 import { buildLiveDecisionProofs } from "../../../apps/pokernow-extension/src/decisionProofs.js";
 import { liveProofRevision } from "../../../apps/pokernow-extension/src/decisionProofs.js";
-import { decisionFingerprint } from "../../../apps/pokernow-extension/src/requestIdentity.js";
+import { liveDecisionFingerprint } from "../../../apps/pokernow-extension/src/requestIdentity.js";
 import { capturePostflopReadiness } from "../../../apps/pokernow-extension/src/postflopReadinessCapture.js";
 import { capturePostflopObservation } from "../../../apps/pokernow-extension/src/postflopObservationCapture.js";
 import { RawSocketCapture } from "../../../apps/pokernow-extension/src/rawSocketCapture.js";
@@ -211,9 +211,7 @@ describe("hand243 independent cost, UI readiness and historical acceptance", () 
 describe("development-only paired postflop readiness capture", () => {
   function paired(markup?: string) {
     const f = replay(undefined, markup), url = "https://www.pokernow.com/games/TABLE_TEST";
-    const epoch = { decisionEpoch: "7", stateJson: JSON.stringify([
-      decisionFingerprint(url, f.read.raw, f.read.context, f.read.raiseControl), liveProofRevision(f.runtime.snapshot()),
-    ]) };
+    const epoch = { decisionEpoch: "7", stateJson: liveDecisionFingerprint(url, f.read, liveProofRevision(f.runtime.snapshot()), "flop") };
     const d = { snapshot: vi.fn(() => f.runtime.snapshot()), read: vi.fn(() => { f.control(markup); return f.read; }),
       epoch: vi.fn(() => ({ ...epoch })), tableUrl: vi.fn(() => url), now: () => Date.now() };
     const raw = new RawSocketCapture(true);
@@ -342,9 +340,7 @@ describe("development-only paired postflop readiness capture", () => {
   it("rejects a stable different table URL even if its DOM fingerprint was polled", async () => {
     const f = paired(), url = "https://www.pokernow.com/games/OTHER";
     f.d.tableUrl.mockReturnValue(url);
-    f.epoch.stateJson = JSON.stringify([
-      decisionFingerprint(url, f.read.raw, f.read.context, f.read.raiseControl), liveProofRevision(f.runtime.snapshot()),
-    ]);
+    f.epoch.stateJson = liveDecisionFingerprint(url, f.read, liveProofRevision(f.runtime.snapshot()), "flop");
     expect(await f.collector.checkpoint("postflop_call")).toMatchObject({ accepted: false, retained: true, reasons: ["Table URL mismatch."] });
   });
 });
@@ -364,9 +360,7 @@ describe("general postflop observation capture (synthetic UI/source variants)", 
       for (const s of f.read.raw.seats) if (s.isOccupied) s.stackText = s.stackContainerText = String(Number(s.stackText) + 50);
       f.read.raw.seats[0].holeCardClassLists = ["As", "Kd"].map(c => ["card-container", `card-${c[1]}`, `card-s-${c[0]}`, "flipped"]);
     }
-    const epoch = { decisionEpoch: "7", stateJson: JSON.stringify([
-      decisionFingerprint(url, f.read.raw, f.read.context, f.read.raiseControl), liveProofRevision(f.runtime.snapshot()),
-    ]) };
+    const epoch = { decisionEpoch: "7", stateJson: liveDecisionFingerprint(url, f.read, liveProofRevision(f.runtime.snapshot()), "flop") };
     const d = { snapshot: vi.fn(() => f.runtime.snapshot()), read: vi.fn(() => { f.control(); return f.read; }),
       epoch: vi.fn(() => ({ ...epoch })), tableUrl: vi.fn(() => url), now: () => Date.now() };
     const raw = new RawSocketCapture(true);
@@ -391,6 +385,34 @@ describe("general postflop observation capture (synthetic UI/source variants)", 
     expect(f.evidence()).toBeNull(); expect(capturePostflopReadiness(f.d).readinessMatched).toBe(false);
     expect(f.dom).not.toHaveBeenCalled(); expect(f.disarm).toHaveBeenCalledOnce();
   });
+  it.each(["readiness", "observation"].flatMap(mode =>
+    ["fresh identical read", "amount", "disabled", "stale poll", "legacy fingerprint"].map(change => ({ mode, change }))))(
+    "$mode binds CALL state and freshness to the existing poll: $change", ({ mode, change }) => {
+      const f = fixture(true), before = f.runtime.snapshot();
+      if (change === "stale poll") {
+        f.read.callControl.observedAt -= 10_000;
+        f.epoch.stateJson = liveDecisionFingerprint(f.d.tableUrl(), f.read, liveProofRevision(before), "flop");
+      }
+      if (change === "legacy fingerprint") f.epoch.stateJson = JSON.stringify(JSON.parse(f.epoch.stateJson).slice(0, 2));
+      const epoch = { ...f.epoch };
+      f.at(activation + 1);
+      f.d.read.mockImplementation(() => {
+        f.control(change === "amount" ? '<button type="button">Call 3</button>'
+          : change === "disabled" ? '<button type="button" disabled>Call 2</button>'
+          : '<button type="button">Call 2</button>');
+        return f.read;
+      });
+      const capture = mode === "readiness" ? capturePostflopReadiness(f.d) : f.capture();
+      const matches = change === "fresh identical read";
+      expect(capture.epochBefore.matchesRead).toBe(matches);
+      expect(capture.epochAfter.matchesRead).toBe(matches);
+      expect("readinessMatched" in capture ? capture.readinessMatched : capture.observationPaired).toBe(matches);
+      expect(capture.liveRecommendationsAllowed).toBe(false);
+      expect(capture.legalityCertified).toBe(false);
+      expect(f.epoch).toEqual(epoch);
+      expect(f.runtime.snapshot()).toEqual(before);
+      expect(f.runtime.snapshot().sourceStatus.flopObservationProof!.expiresAt).toBe(expiry);
+    });
   it.each(["id", "fingerprint", "unavailable"])("preserves exact epoch rejection across a read: %s", variant => {
     const f = fixture();
     const before = { ...f.epoch };

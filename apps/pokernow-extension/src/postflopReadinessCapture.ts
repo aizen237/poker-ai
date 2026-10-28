@@ -3,7 +3,7 @@ import type { LiveTimelineDiagnostic } from "./liveTimeline.js";
 import type { LiveTableRead } from "./tableRead.js";
 import { flopCallEvidence } from "./flopCallEvidence.js";
 import { liveProofRevision } from "./decisionProofs.js";
-import { decisionFingerprint } from "./requestIdentity.js";
+import { liveDecisionFingerprint } from "./requestIdentity.js";
 import { raiseSourceObservation } from "./raiseEvidenceCapture.js";
 
 type Epoch = { decisionEpoch: string; stateJson: string | null };
@@ -20,14 +20,14 @@ export function capturePostflopReadiness(d: Dependencies) {
   const startedAt = d.now(), tableUrl = d.tableUrl(), epochBefore = { ...d.epoch() };
   const first = d.snapshot(), before = copySource(first, startedAt);
   const read = d.read();
-  const evidence = flopCallEvidence(read, assessLiveState(read.raw, read.context), first, epochBefore.decisionEpoch);
+  const assessment = assessLiveState(read.raw, read.context);
+  const evidence = flopCallEvidence(read, assessment, first, epochBefore.decisionEpoch);
   const last = d.snapshot(), after = copySource(last, d.now()), epochAfter = { ...d.epoch() };
   const completedAt = d.now(), binding = evidence?.binding ?? null;
   const reasons: string[] = [];
   if (!evidence || evidence.ui.status !== "observed_matching") reasons.push("No fresh matching Phase6E source/DOM/CALL observation.");
-  const stateJson = (s: LiveTimelineDiagnostic) => JSON.stringify([
-    decisionFingerprint(tableUrl, read.raw, read.context, read.raiseControl), liveProofRevision(s),
-  ]);
+  const stateJson = (s: LiveTimelineDiagnostic) => liveDecisionFingerprint(
+    tableUrl, read, liveProofRevision(s), assessment.state?.street, completedAt);
   if (!epochBefore.decisionEpoch || epochBefore.stateJson === null ||
       JSON.stringify(epochBefore) !== JSON.stringify(epochAfter) ||
       epochBefore.stateJson !== stateJson(first) || epochAfter.stateJson !== stateJson(last))

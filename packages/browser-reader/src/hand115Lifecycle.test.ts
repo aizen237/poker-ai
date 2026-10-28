@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseHTML, Event as DOMEvent } from "linkedom";
 
 const mocks = vi.hoisted(() => ({ read: vi.fn() }));
@@ -10,9 +10,9 @@ const observations = diagnostic.handTimeline.sourceStatus.firstUtgEvidence.obser
 const boundary = observations.find((o: any) => o.sequence === 67);
 // Full retained production projections. Reconstructed envelopes never add
 // discarded raw fields; current DOM inputs are the saved cross-check shape.
-afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+afterEach(() => { mocks.read.mockReset(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
-async function fixture(firstPollAge = 0) {
+async function createFixture() {
   vi.resetModules();
   const { document } = parseHTML("<html><body></body></html>");
   const tableId = diagnostic.handTimeline.sourceStatus.identity.tableId;
@@ -59,11 +59,20 @@ async function fixture(firstPollAge = 0) {
     socket.incoming(p.event, p.event === "registered" ? { gameState: p.frame, currentPlayer: { id: p.heroId } } : p.frame);
   };
   for (const o of observations.filter((o: any) => o.sequence <= 67)) incoming(o);
-  now = boundary.observedAt + firstPollAge;
-  poll();
   const text = () => document.getElementById("poker-ai-reader-overlay")!.textContent!;
   const action = () => document.querySelector('#poker-ai-reader-overlay [style*="font-size:16px"]')?.textContent ?? null;
-  return { read, poll, refresh, timers, document, requests, logs, text, action, socket, incoming, atAge: (ms: number) => { now = boundary.observedAt + ms; } };
+  return { read, poll, refresh, timers, document, requests, logs, text, action, socket, incoming,
+    start: (firstPollAge: number) => { now = boundary.observedAt + firstPollAge; poll(); },
+    atAge: (ms: number) => { now = boundary.observedAt + ms; } };
+}
+
+// Cold module loading belongs to setup, not the visibility/deadline test's budget.
+// Each case still boots an isolated runtime and controls its first poll explicitly.
+let currentFixture: Awaited<ReturnType<typeof createFixture>>;
+beforeEach(async () => { currentFixture = await createFixture(); });
+function fixture(firstPollAge = 0) {
+  currentFixture.start(firstPollAge);
+  return currentFixture;
 }
 
 const explain = (request: { resolve: (r: unknown) => void }, reasoning = "A3o is outside the UTG reference.") =>
