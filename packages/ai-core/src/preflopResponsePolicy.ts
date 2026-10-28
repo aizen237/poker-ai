@@ -3,6 +3,7 @@ import { allHandTypes, formatHandType } from "@poker-ai/range-engine";
 import type { Card } from "@poker-ai/shared";
 import type { DecisionPacket } from "./decisionPacket.js";
 import { buildPreflopContext, PreflopInputSchema } from "./preflopContext.js";
+import { hjResponseSource } from "./data/hjResponseSource.js";
 
 export const HJ_RESPONSE_POLICY_VERSION = "hj-vs-utg-2.5bb-reference-v1";
 export const HJ_RESPONSE_PROFILE = "pokernow-0.1.72-th-4fun-1-2-exact5-v1";
@@ -24,7 +25,7 @@ const allocation = z.discriminatedUnion("action", [
 export const HjResponseReferenceSchema = z.object({
   schemaVersion: z.literal(1), id: text, version: text,
   provenance: z.object({
-    kind: z.enum(["verified_reference", "adaptation", "heuristic", "test_fixture"]),
+    kind: z.enum(["verified_reference", "adaptation", "heuristic", "illustrative", "test_fixture"]),
     url: z.string().url(), node: text,
     review: z.enum(["pending", "reviewed"]), reviewNotes: text,
     assumptions: z.array(text).min(1).max(32),
@@ -190,7 +191,81 @@ const liveReference: HjResponseReference = {
 
 export function isReviewedHjFold(review: HjResponseReview): boolean {
   return review.status === "pure" && review.strategyClass === "FOLD" &&
-    review.reference?.provenance.review === "reviewed" && review.reference.provenance.kind !== "test_fixture";
+    review.reference?.provenance.review === "reviewed" &&
+    review.reference.provenance.kind !== "test_fixture" && review.reference.provenance.kind !== "illustrative";
+}
+
+/** Import only explicitly present paired nodes. README at the pinned commit
+ * defines FOLD = 1 - raise - call, and cash_default IP 3-bet = 3 * 2.5BB.
+ * Missing values never become zeros; invalid values never get normalized.
+ * The all-zero CALL node does not establish cold-call permission. */
+export function importHjResponseSource(source: unknown): HjResponseReference {
+  const node = z.record(z.string().refine(h => handTypes.has(h)), weight);
+  const data = z.object({ "3BetHJvsLJ": node, CallHJvsLJ: node }).strict().parse(source);
+  const entries: HjResponseReference["entries"] = [];
+  for (const hand of handTypes) {
+    if (!Object.hasOwn(data["3BetHJvsLJ"], hand) || !Object.hasOwn(data.CallHJvsLJ, hand)) continue;
+    const raise = data["3BetHJvsLJ"][hand]!, call = data.CallHJvsLJ[hand]!;
+    entries.push({ hand, allocations: [
+      { action: "FOLD", frequency: 1 - raise - call },
+      { action: "CALL", frequency: call },
+      { action: "THREE_BET", frequency: raise, raiseToBB: 7.5 },
+    ] });
+  }
+  return HjResponseReferenceSchema.parse({
+    schemaVersion: 1, id: "poker-trainer-cash100-hj-vs-lj-illustration", version: "590b8f65-1",
+    provenance: {
+      kind: "illustrative", review: "pending", url: liveReference.provenance.url,
+      node: "Cash_100_GTO.json: 3BetHJvsLJ + CallHJvsLJ; README fold complement. Six-max LJ maps to UTG.",
+      reviewNotes: "Unverified import in the documented source format; arbitrary caller data is not a reviewed extraction. README at commit 590b8f65a9728a99ab8fb5d7a4ec9dc40a65225e documents frequencies and cash_default sizing. Dataset naming does not verify solver provenance or live applicability.",
+      assumptions: [
+        "Source settings: six-max, 100BB, no ante, 2.5BB open; in-position three-bet to 7.5BB (3x open, minimum 7BB).",
+        "Original solver, solve accuracy, rake percentage/cap and distribution chain are unverified.",
+        "CALL entries are explicit zeros; availability of cold calls in the original tree is unknown.",
+        "Illustrative source strategy only: applicability to this unraked game and its stack vector is not established. No verified live recommendation or solver-certified GTO claim.",
+      ],
+    },
+    referenceSettings: { ...liveReference.referenceSettings },
+    application: { profile: HJ_RESPONSE_PROFILE, minCapacityBB: 100, maxCapacityBB: 150,
+      rationale: "Display-only comparison within the existing bounded HJ window. Native source stacks are 100BB; 100-150BB is a display bound, not a strategic depth adaptation or authorization." },
+    entries,
+  });
+}
+
+const illustrativeReference = importHjResponseSource(hjResponseSource);
+// Only the installed, reproducible snapshot receives this extraction review.
+// Caller-supplied imports keep pending provenance and cannot replace this object.
+illustrativeReference.provenance.review = "reviewed";
+illustrativeReference.provenance.reviewNotes = "Exact numeric extraction from Git blob 3102a91612bda6ffe8b8185ed1ecca07d089dcce, checked by scripts/import-hj-response.mjs --check. Original solver, rake/tree and live applicability remain unverified.";
+
+/** Broad source classification, independent of the installed live FOLD subset.
+ * Even a pure entry cannot authorize an action, CALL permission or raise size. */
+export function inspectHjResponseSourceStrategy(input: { preflop: unknown; holeCards: unknown }): HjResponseReview {
+  return reviewHjResponseReference(input, illustrativeReference);
+}
+
+/** Percentages retain all source decimal digits (source has at most 9).
+ * Tiny positive mixes are never formatted as pure zero/100 percent. */
+export function hjResponseIllustrationLines(review: HjResponseReview): string[] {
+  if (review.reference?.provenance.kind !== "illustrative") return [];
+  const lines = ["ILLUSTRATIVE PREFLOP REFERENCE — not a verified live recommendation",
+    `${review.hand}: HJ vs UTG 2.5BB; source 100BB, six-max, no ante.`];
+  if (review.allocations) {
+    lines.push(review.allocations.map(a => {
+      const exact = a.frequency * 100;
+      const rounded = Number(exact.toFixed(9));
+      const percent = (a.frequency > 0 && rounded === 0 || a.frequency < 1 && rounded === 100) ? exact : rounded;
+      return `${a.action}${a.action === "THREE_BET" ? ` to ${a.raiseToBB}BB` : ""} ${percent}%`;
+    }).join(" / "));
+    if (review.status === "pure") lines.push(`Pure source classification: ${review.strategyClass}.`);
+    if (review.status === "mixed") lines.push("Mixed strategy retained; no action sampled or selected.");
+    if (review.allocations.some(a => a.action === "CALL" && a.frequency === 0))
+      lines.push("CALL 0% is explicit source data; cold-call permission remains unknown.");
+  } else lines.push(`ABSTAIN: ${review.reasons.join(" ")}`);
+  lines.push("Rake, original solver and applicability to current stacks unverified; cold-call tree unknown.",
+    "Source: Poker Trainer extraction / poker-practice, 590b8f65, 3BetHJvsLJ + CallHJvsLJ.",
+    "Source sizing is not proof of legal live sizing. Live action authorization is separate.");
+  return lines;
 }
 
 /** Private installed catalog only; caller-supplied references remain offline. */

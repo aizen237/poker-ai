@@ -6034,6 +6034,352 @@
     };
   }
 
+  // ../../packages/ai-core/dist/data/hjResponseSource.js
+  var hjResponseSource = {
+    "3BetHJvsLJ": {
+      "22": 0,
+      "33": 0,
+      "44": 0,
+      "55": 0,
+      "66": 0,
+      "77": 0,
+      "88": 0,
+      "99": 0.549897475,
+      "32o": 0,
+      "32s": 0,
+      "42o": 0,
+      "42s": 0,
+      "43o": 0,
+      "43s": 0,
+      "52o": 0,
+      "52s": 0,
+      "53o": 0,
+      "53s": 0,
+      "54o": 0,
+      "54s": 0.583846558,
+      "62o": 0,
+      "62s": 0,
+      "63o": 0,
+      "63s": 0,
+      "64o": 0,
+      "64s": 0,
+      "65o": 0,
+      "65s": 1,
+      "72o": 0,
+      "72s": 0,
+      "73o": 0,
+      "73s": 0,
+      "74o": 0,
+      "74s": 0,
+      "75o": 0,
+      "75s": 0,
+      "76o": 0,
+      "76s": 0.333118899,
+      "82o": 0,
+      "82s": 0,
+      "83o": 0,
+      "83s": 0,
+      "84o": 0,
+      "84s": 0,
+      "85o": 0,
+      "85s": 0,
+      "86o": 0,
+      "86s": 0,
+      "87o": 0,
+      "87s": 0.564632435,
+      "92o": 0,
+      "92s": 0,
+      "93o": 0,
+      "93s": 0,
+      "94o": 0,
+      "94s": 0,
+      "95o": 0,
+      "95s": 0,
+      "96o": 0,
+      "96s": 0,
+      "97o": 0,
+      "97s": 0,
+      "98o": 0,
+      "98s": 0,
+      "A2o": 0,
+      "A2s": 0,
+      "A3o": 0,
+      "A3s": 0,
+      "A4o": 0,
+      "A4s": 1,
+      "A5o": 0,
+      "A5s": 0.576134585,
+      "A6o": 0,
+      "A6s": 0,
+      "A7o": 0,
+      "A7s": 0,
+      "A8o": 0,
+      "A8s": 0.196474837,
+      "A9o": 0,
+      "A9s": 0,
+      "AA": 1,
+      "AJo": 0,
+      "AJs": 1,
+      "AKo": 1,
+      "AKs": 1,
+      "AQo": 0.538056204,
+      "AQs": 1,
+      "ATo": 0,
+      "ATs": 1,
+      "J2o": 0,
+      "J2s": 0,
+      "J3o": 0,
+      "J3s": 0,
+      "J4o": 0,
+      "J4s": 0,
+      "J5o": 0,
+      "J5s": 0,
+      "J6o": 0,
+      "J6s": 0,
+      "J7o": 0,
+      "J7s": 0,
+      "J8o": 0,
+      "J8s": 0,
+      "J9o": 0,
+      "J9s": 0,
+      "JJ": 1,
+      "JTo": 0,
+      "JTs": 0,
+      "K2o": 0,
+      "K2s": 0,
+      "K3o": 0,
+      "K3s": 0,
+      "K4o": 0,
+      "K4s": 0,
+      "K5o": 0,
+      "K5s": 0,
+      "K6o": 0,
+      "K6s": 0,
+      "K7o": 0,
+      "K7s": 0,
+      "K8o": 0,
+      "K8s": 0,
+      "K9o": 0,
+      "K9s": 0,
+      "KJo": 0,
+      "KJs": 1,
+      "KK": 1,
+      "KQo": 0.292929688,
+      "KQs": 1,
+      "KTo": 0,
+      "KTs": 1,
+      "Q2o": 0,
+      "Q2s": 0,
+      "Q3o": 0,
+      "Q3s": 0,
+      "Q4o": 0,
+      "Q4s": 0,
+      "Q5o": 0,
+      "Q5s": 0,
+      "Q6o": 0,
+      "Q6s": 0,
+      "Q7o": 0,
+      "Q7s": 0,
+      "Q8o": 0,
+      "Q8s": 0,
+      "Q9o": 0,
+      "Q9s": 0,
+      "QJo": 0,
+      "QJs": 0.529857575,
+      "QQ": 1,
+      "QTo": 0,
+      "QTs": 0,
+      "T2o": 0,
+      "T2s": 0,
+      "T3o": 0,
+      "T3s": 0,
+      "T4o": 0,
+      "T4s": 0,
+      "T5o": 0,
+      "T5s": 0,
+      "T6o": 0,
+      "T6s": 0,
+      "T7o": 0,
+      "T7s": 0,
+      "T8o": 0,
+      "T8s": 0,
+      "T9o": 0,
+      "T9s": 0.476562585,
+      "TT": 1
+    },
+    "CallHJvsLJ": {
+      "22": 0,
+      "33": 0,
+      "44": 0,
+      "55": 0,
+      "66": 0,
+      "77": 0,
+      "88": 0,
+      "99": 0,
+      "32o": 0,
+      "32s": 0,
+      "42o": 0,
+      "42s": 0,
+      "43o": 0,
+      "43s": 0,
+      "52o": 0,
+      "52s": 0,
+      "53o": 0,
+      "53s": 0,
+      "54o": 0,
+      "54s": 0,
+      "62o": 0,
+      "62s": 0,
+      "63o": 0,
+      "63s": 0,
+      "64o": 0,
+      "64s": 0,
+      "65o": 0,
+      "65s": 0,
+      "72o": 0,
+      "72s": 0,
+      "73o": 0,
+      "73s": 0,
+      "74o": 0,
+      "74s": 0,
+      "75o": 0,
+      "75s": 0,
+      "76o": 0,
+      "76s": 0,
+      "82o": 0,
+      "82s": 0,
+      "83o": 0,
+      "83s": 0,
+      "84o": 0,
+      "84s": 0,
+      "85o": 0,
+      "85s": 0,
+      "86o": 0,
+      "86s": 0,
+      "87o": 0,
+      "87s": 0,
+      "92o": 0,
+      "92s": 0,
+      "93o": 0,
+      "93s": 0,
+      "94o": 0,
+      "94s": 0,
+      "95o": 0,
+      "95s": 0,
+      "96o": 0,
+      "96s": 0,
+      "97o": 0,
+      "97s": 0,
+      "98o": 0,
+      "98s": 0,
+      "A2o": 0,
+      "A2s": 0,
+      "A3o": 0,
+      "A3s": 0,
+      "A4o": 0,
+      "A4s": 0,
+      "A5o": 0,
+      "A5s": 0,
+      "A6o": 0,
+      "A6s": 0,
+      "A7o": 0,
+      "A7s": 0,
+      "A8o": 0,
+      "A8s": 0,
+      "A9o": 0,
+      "A9s": 0,
+      "AA": 0,
+      "AJo": 0,
+      "AJs": 0,
+      "AKo": 0,
+      "AKs": 0,
+      "AQo": 0,
+      "AQs": 0,
+      "ATo": 0,
+      "ATs": 0,
+      "J2o": 0,
+      "J2s": 0,
+      "J3o": 0,
+      "J3s": 0,
+      "J4o": 0,
+      "J4s": 0,
+      "J5o": 0,
+      "J5s": 0,
+      "J6o": 0,
+      "J6s": 0,
+      "J7o": 0,
+      "J7s": 0,
+      "J8o": 0,
+      "J8s": 0,
+      "J9o": 0,
+      "J9s": 0,
+      "JJ": 0,
+      "JTo": 0,
+      "JTs": 0,
+      "K2o": 0,
+      "K2s": 0,
+      "K3o": 0,
+      "K3s": 0,
+      "K4o": 0,
+      "K4s": 0,
+      "K5o": 0,
+      "K5s": 0,
+      "K6o": 0,
+      "K6s": 0,
+      "K7o": 0,
+      "K7s": 0,
+      "K8o": 0,
+      "K8s": 0,
+      "K9o": 0,
+      "K9s": 0,
+      "KJo": 0,
+      "KJs": 0,
+      "KK": 0,
+      "KQo": 0,
+      "KQs": 0,
+      "KTo": 0,
+      "KTs": 0,
+      "Q2o": 0,
+      "Q2s": 0,
+      "Q3o": 0,
+      "Q3s": 0,
+      "Q4o": 0,
+      "Q4s": 0,
+      "Q5o": 0,
+      "Q5s": 0,
+      "Q6o": 0,
+      "Q6s": 0,
+      "Q7o": 0,
+      "Q7s": 0,
+      "Q8o": 0,
+      "Q8s": 0,
+      "Q9o": 0,
+      "Q9s": 0,
+      "QJo": 0,
+      "QJs": 0,
+      "QQ": 0,
+      "QTo": 0,
+      "QTs": 0,
+      "T2o": 0,
+      "T2s": 0,
+      "T3o": 0,
+      "T3s": 0,
+      "T4o": 0,
+      "T4s": 0,
+      "T5o": 0,
+      "T5s": 0,
+      "T6o": 0,
+      "T6s": 0,
+      "T7o": 0,
+      "T7s": 0,
+      "T8o": 0,
+      "T8s": 0,
+      "T9o": 0,
+      "T9s": 0,
+      "TT": 0
+    }
+  };
+
   // ../../packages/ai-core/dist/preflopResponsePolicy.js
   var HJ_RESPONSE_POLICY_VERSION = "hj-vs-utg-2.5bb-reference-v1";
   var HJ_RESPONSE_PROFILE = "pokernow-0.1.72-th-4fun-1-2-exact5-v1";
@@ -6056,7 +6402,7 @@
     id: text,
     version: text,
     provenance: external_exports.object({
-      kind: external_exports.enum(["verified_reference", "adaptation", "heuristic", "test_fixture"]),
+      kind: external_exports.enum(["verified_reference", "adaptation", "heuristic", "illustrative", "test_fixture"]),
       url: external_exports.string().url(),
       node: text,
       review: external_exports.enum(["pending", "reviewed"]),
@@ -6234,7 +6580,79 @@
     ]
   };
   function isReviewedHjFold(review) {
-    return review.status === "pure" && review.strategyClass === "FOLD" && review.reference?.provenance.review === "reviewed" && review.reference.provenance.kind !== "test_fixture";
+    return review.status === "pure" && review.strategyClass === "FOLD" && review.reference?.provenance.review === "reviewed" && review.reference.provenance.kind !== "test_fixture" && review.reference.provenance.kind !== "illustrative";
+  }
+  function importHjResponseSource(source) {
+    const node = external_exports.record(external_exports.string().refine((h) => handTypes.has(h)), weight);
+    const data = external_exports.object({ "3BetHJvsLJ": node, CallHJvsLJ: node }).strict().parse(source);
+    const entries = [];
+    for (const hand of handTypes) {
+      if (!Object.hasOwn(data["3BetHJvsLJ"], hand) || !Object.hasOwn(data.CallHJvsLJ, hand))
+        continue;
+      const raise = data["3BetHJvsLJ"][hand], call = data.CallHJvsLJ[hand];
+      entries.push({ hand, allocations: [
+        { action: "FOLD", frequency: 1 - raise - call },
+        { action: "CALL", frequency: call },
+        { action: "THREE_BET", frequency: raise, raiseToBB: 7.5 }
+      ] });
+    }
+    return HjResponseReferenceSchema.parse({
+      schemaVersion: 1,
+      id: "poker-trainer-cash100-hj-vs-lj-illustration",
+      version: "590b8f65-1",
+      provenance: {
+        kind: "illustrative",
+        review: "pending",
+        url: liveReference.provenance.url,
+        node: "Cash_100_GTO.json: 3BetHJvsLJ + CallHJvsLJ; README fold complement. Six-max LJ maps to UTG.",
+        reviewNotes: "Unverified import in the documented source format; arbitrary caller data is not a reviewed extraction. README at commit 590b8f65a9728a99ab8fb5d7a4ec9dc40a65225e documents frequencies and cash_default sizing. Dataset naming does not verify solver provenance or live applicability.",
+        assumptions: [
+          "Source settings: six-max, 100BB, no ante, 2.5BB open; in-position three-bet to 7.5BB (3x open, minimum 7BB).",
+          "Original solver, solve accuracy, rake percentage/cap and distribution chain are unverified.",
+          "CALL entries are explicit zeros; availability of cold calls in the original tree is unknown.",
+          "Illustrative source strategy only: applicability to this unraked game and its stack vector is not established. No verified live recommendation or solver-certified GTO claim."
+        ]
+      },
+      referenceSettings: { ...liveReference.referenceSettings },
+      application: {
+        profile: HJ_RESPONSE_PROFILE,
+        minCapacityBB: 100,
+        maxCapacityBB: 150,
+        rationale: "Display-only comparison within the existing bounded HJ window. Native source stacks are 100BB; 100-150BB is a display bound, not a strategic depth adaptation or authorization."
+      },
+      entries
+    });
+  }
+  var illustrativeReference = importHjResponseSource(hjResponseSource);
+  illustrativeReference.provenance.review = "reviewed";
+  illustrativeReference.provenance.reviewNotes = "Exact numeric extraction from Git blob 3102a91612bda6ffe8b8185ed1ecca07d089dcce, checked by scripts/import-hj-response.mjs --check. Original solver, rake/tree and live applicability remain unverified.";
+  function inspectHjResponseSourceStrategy(input) {
+    return reviewHjResponseReference(input, illustrativeReference);
+  }
+  function hjResponseIllustrationLines(review) {
+    if (review.reference?.provenance.kind !== "illustrative")
+      return [];
+    const lines = [
+      "ILLUSTRATIVE PREFLOP REFERENCE \u2014 not a verified live recommendation",
+      `${review.hand}: HJ vs UTG 2.5BB; source 100BB, six-max, no ante.`
+    ];
+    if (review.allocations) {
+      lines.push(review.allocations.map((a) => {
+        const exact2 = a.frequency * 100;
+        const rounded = Number(exact2.toFixed(9));
+        const percent = a.frequency > 0 && rounded === 0 || a.frequency < 1 && rounded === 100 ? exact2 : rounded;
+        return `${a.action}${a.action === "THREE_BET" ? ` to ${a.raiseToBB}BB` : ""} ${percent}%`;
+      }).join(" / "));
+      if (review.status === "pure")
+        lines.push(`Pure source classification: ${review.strategyClass}.`);
+      if (review.status === "mixed")
+        lines.push("Mixed strategy retained; no action sampled or selected.");
+      if (review.allocations.some((a) => a.action === "CALL" && a.frequency === 0))
+        lines.push("CALL 0% is explicit source data; cold-call permission remains unknown.");
+    } else
+      lines.push(`ABSTAIN: ${review.reasons.join(" ")}`);
+    lines.push("Rake, original solver and applicability to current stacks unverified; cold-call tree unknown.", "Source: Poker Trainer extraction / poker-practice, 590b8f65, 3BetHJvsLJ + CallHJvsLJ.", "Source sizing is not proof of legal live sizing. Live action authorization is separate.");
+    return lines;
   }
   function inspectLiveHjResponseStrategy(input) {
     return reviewHjResponseReference(input, liveReference);
@@ -10320,6 +10738,7 @@
     const callLegality = callLegalityEvidence(read, assessment, timeline, epoch);
     const responseStrategy = facing ? {
       ...inspectLiveHjResponseStrategy({ preflop, holeCards: hero?.holeCards }),
+      sourceReference: inspectHjResponseSourceStrategy({ preflop, holeCards: hero?.holeCards }),
       binding: {
         decisionEpoch: epoch,
         tableId: facing.tableId,
@@ -10353,7 +10772,7 @@
     } : null;
     const responseFold = responseStrategy !== null && isReviewedHjFold(responseStrategy);
     if (responseFold) responseStrategy.remainingRequirements.FOLD = [];
-    if (responseFold && facing && pot.mainPot !== null && pot.displayedTotalPot !== null && pot.displayedTotalPot !== pot.mainPot + facing.players.reduce((sum, p) => sum + p.contribution, 0))
+    if (facing && pot.mainPot !== null && pot.displayedTotalPot !== null && pot.displayedTotalPot !== pot.mainPot + facing.players.reduce((sum, p) => sum + p.contribution, 0))
       set(
         "pot",
         "contradicted",
@@ -10417,18 +10836,29 @@
     } else if (facing && !responseFold && activation.state !== "unsafe") {
       activation.allowed = false;
       activation.state = "unsupported";
-      activation.reasons.push(...responseStrategy.reasons);
+      activation.reasons.push(...["pure", "mixed"].includes(responseStrategy.sourceReference.status) ? ["Source classification is illustrative only; no applicable live response strategy is established for this hand/profile."] : responseStrategy.sourceReference.reasons);
       activation.reasons.push("No reviewed pure FOLD for this hand/profile; missing CALL/3-BET legality must never substitute FOLD.");
     } else if (coFacing && activation.state !== "unsafe") {
       activation.allowed = false;
       activation.state = "unsupported";
       activation.reasons.push("CO facing UTG open plus HJ caller: no reviewed response strategy or independent CO action permission. Unsupported CALL/3-BET must never substitute FOLD.");
     }
+    const referenceScopes = ["decisionState", "connection", "actionWindow", "position", "roster", "blinds", "stack", "callCost"];
+    const responseIllustration = responseStrategy && responseExecution && epoch.length > 0 && responseExecution.expiresAt === responseExecution.receivedAt + 1e4 && proofs.every((p) => p.status !== "contradicted" && (!referenceScopes.includes(p.scope) || p.status === "proven" && p.confidence === "high" && p.provenance.length > 0 && p.reasons.length === 0)) && callLegality?.ui.status !== "contradicted" && ["pure", "mixed", "uncovered", "out_of_scope"].includes(responseStrategy.sourceReference.status) ? {
+      binding: responseExecution,
+      lines: [
+        ...hjResponseIllustrationLines(responseStrategy.sourceReference),
+        responseFold ? "Live policy: original 21-hand heuristic FOLD subset; low confidence, subject to independent live proofs." : ["pure", "mixed"].includes(responseStrategy.sourceReference.status) ? "Live policy: one of the other 148 categories; illustrative only, no live recommendation authorized." : "Live policy: outside supported coverage; no live recommendation authorized."
+      ],
+      chosenAction: null,
+      liveAuthorized: false
+    } : null;
     return {
       evidence: envelope,
       activation,
       unopened,
       openingSize: opening.size,
+      responseIllustration,
       riverCallFold: state?.street === "river" ? riverCallFoldReadiness(read, assessment, envelope, timeline) : null,
       turnCallFold: state?.street === "turn" ? riverCallFoldReadiness(read, assessment, envelope, timeline) : null,
       flopCallFold: state?.street === "flop" ? riverCallFoldReadiness(read, assessment, envelope, timeline) : null,
@@ -12322,6 +12752,34 @@
   var OVERLAY_ID = "poker-ai-reader-overlay";
   var riverDisplay = null;
   var riverExpiryTimer;
+  var hjDisplay = null;
+  var hjExpiryTimer;
+  function clearHjDisplay() {
+    hjDisplay = null;
+    if (hjExpiryTimer !== void 0) window.clearTimeout(hjExpiryTimer);
+    hjExpiryTimer = void 0;
+  }
+  function refreshHjDisplay() {
+    if (!hjDisplay) return;
+    if (Date.now() >= hjDisplay.binding.expiresAt) {
+      clearHjDisplay();
+      if (!displayLifetime) {
+        overlayState.aiStatus = "evidence_expired";
+        overlayState.policyLine = "No current source reference. Fresh source evidence is required.";
+        overlayState.aiWarnings = [];
+      }
+      return;
+    }
+    try {
+      const read = readLiveTable(), timeline = handTimeline.snapshot();
+      const assessment = assessLiveState(read.raw, read.context);
+      const preflop = buildLivePreflopContext(assessment, actionHistory, timeline, read);
+      const current = buildLiveDecisionProofs(read, assessment, timeline, preflop, hjDisplay.binding.decisionEpoch).responseIllustration;
+      if (Date.now() < hjDisplay.binding.receivedAt || liveProofRevision(timeline) !== hjDisplay.source || decisionFingerprint(location.origin + location.pathname, read.raw, read.context, read.raiseControl) !== hjDisplay.dom || !current || JSON.stringify(current.binding) !== JSON.stringify(hjDisplay.binding)) clearHjDisplay();
+    } catch {
+      clearHjDisplay();
+    }
+  }
   function clearRiverDisplay() {
     riverDisplay = null;
     if (riverExpiryTimer !== void 0) window.clearTimeout(riverExpiryTimer);
@@ -12369,6 +12827,7 @@
   };
   function renderOverlay() {
     refreshDisplayLifetime();
+    refreshHjDisplay();
     const el = ensureOverlay();
     const s = overlayState;
     const parts = [];
@@ -12388,6 +12847,7 @@
     );
     if (s.policyLine) parts.push(`<div>${escapeHtml(s.policyLine)}</div>`);
     if (riverDisplay) parts.push(`<div data-river-illustration style="margin-top:8px; padding:6px; border:1px solid #888;">${riverDisplay.lines.map(escapeHtml).join("<br/>")}</div>`);
+    if (hjDisplay) parts.push(`<div data-hj-reference style="margin-top:8px; padding:6px; border:1px solid #888;">${hjDisplay.lines.map(escapeHtml).join("<br/>")}</div>`);
     if (s.aiResult && displayLifetime) parts.push(`<div data-proof-countdown>Evidence expires in ${Math.max(0, (displayLifetime.expiresAt - Date.now()) / 1e3).toFixed(1)}s</div>`);
     if (s.aiResult) {
       parts.push(`<div style="font-size:16px; font-weight:700; margin:4px 0;">${escapeHtml(s.aiResult.action)}</div>`);
@@ -12687,6 +13147,7 @@
     }
   }
   function refreshFreshnessDisplay() {
+    if (hjDisplay) renderOverlay();
     if (riverDisplay) {
       try {
         const read = readLiveTable(), timeline = handTimeline.snapshot();
@@ -12770,6 +13231,7 @@
       logLiveDiagnostics(read, assessment, actionHistory, preflop, currentDiagnosticPacket, handTimeline.snapshot());
       if (stateJson !== lastStateJson) {
         clearRiverDisplay();
+        clearHjDisplay();
         currentDiagnosticPacket = null;
         lastStateJson = stateJson;
         lastRecommendationRequestKey = null;
@@ -12805,6 +13267,10 @@
           renderOverlay();
         }
         const scoped = buildLiveDecisionProofs(read, assessment, timelineSnapshot, preflop, String(requestSequence));
+        if (scoped.responseIllustration) {
+          hjDisplay = { ...scoped.responseIllustration, source: liveProofRevision(timelineSnapshot), dom: domStateJson };
+          hjExpiryTimer = window.setTimeout(refreshFreshnessDisplay, Math.max(0, hjDisplay.binding.expiresAt - Date.now()));
+        }
         const comparison = scoped.flopCallFold ?? scoped.turnCallFold ?? scoped.riverCallFold;
         if (comparison) {
           overlayState.aiStatus = comparison.unsafe ? "unsafe" : "waiting_for_proof";
@@ -12982,6 +13448,7 @@
       clearDisplayLifetime();
       overlayState.street = "unreadable";
       clearRiverDisplay();
+      clearHjDisplay();
       overlayState.opponentStatsLine = null;
       overlayState.policyLine = null;
       overlayState.equityLine = null;

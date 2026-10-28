@@ -68,6 +68,36 @@ const overlayState: OverlayState = {
 const OVERLAY_ID = "poker-ai-reader-overlay";
 let riverDisplay: { lines: string[]; source: string; expiresAt: number } | null = null;
 let riverExpiryTimer: number | undefined;
+let hjDisplay: { lines: string[]; source: string; dom: string;
+  binding: NonNullable<NonNullable<DecisionPacket["preflopExecution"]>["hjResponseWindow"]> } | null = null;
+let hjExpiryTimer: number | undefined;
+function clearHjDisplay() {
+  hjDisplay = null;
+  if (hjExpiryTimer !== undefined) window.clearTimeout(hjExpiryTimer);
+  hjExpiryTimer = undefined;
+}
+function refreshHjDisplay() {
+  if (!hjDisplay) return;
+  if (Date.now() >= hjDisplay.binding.expiresAt) {
+    clearHjDisplay();
+    if (!displayLifetime) {
+      overlayState.aiStatus = "evidence_expired";
+      overlayState.policyLine = "No current source reference. Fresh source evidence is required.";
+      overlayState.aiWarnings = [];
+    }
+    return;
+  }
+  try {
+    const read = readLiveTable(), timeline = handTimeline.snapshot();
+    const assessment = assessLiveState(read.raw, read.context);
+    const preflop = buildLivePreflopContext(assessment, actionHistory, timeline, read);
+    const current = buildLiveDecisionProofs(read, assessment, timeline, preflop, hjDisplay.binding.decisionEpoch).responseIllustration;
+    if (Date.now() < hjDisplay.binding.receivedAt ||
+        liveProofRevision(timeline) !== hjDisplay.source ||
+        decisionFingerprint(location.origin + location.pathname, read.raw, read.context, read.raiseControl) !== hjDisplay.dom ||
+        !current || JSON.stringify(current.binding) !== JSON.stringify(hjDisplay.binding)) clearHjDisplay();
+  } catch { clearHjDisplay(); }
+}
 function clearRiverDisplay() {
   riverDisplay = null;
   if (riverExpiryTimer !== undefined) window.clearTimeout(riverExpiryTimer);
@@ -118,6 +148,7 @@ const AI_STATUS_COLORS: Record<AIStatus, string> = {
 
 function renderOverlay() {
   refreshDisplayLifetime();
+  refreshHjDisplay();
   const el = ensureOverlay();
   const s = overlayState;
   const parts: string[] = [];
@@ -139,6 +170,7 @@ function renderOverlay() {
   );
   if (s.policyLine) parts.push(`<div>${escapeHtml(s.policyLine)}</div>`);
   if (riverDisplay) parts.push(`<div data-river-illustration style="margin-top:8px; padding:6px; border:1px solid #888;">${riverDisplay.lines.map(escapeHtml).join("<br/>")}</div>`);
+  if (hjDisplay) parts.push(`<div data-hj-reference style="margin-top:8px; padding:6px; border:1px solid #888;">${hjDisplay.lines.map(escapeHtml).join("<br/>")}</div>`);
   if (s.aiResult && displayLifetime) parts.push(`<div data-proof-countdown>Evidence expires in ${Math.max(0, (displayLifetime.expiresAt - Date.now()) / 1000).toFixed(1)}s</div>`);
   if (s.aiResult) {
     parts.push(`<div style="font-size:16px; font-weight:700; margin:4px 0;">${escapeHtml(s.aiResult.action)}</div>`);
@@ -503,6 +535,7 @@ function refreshDisplayLifetime() {
   }
 }
 function refreshFreshnessDisplay() {
+  if (hjDisplay) renderOverlay();
   if (riverDisplay) {
     try {
       const read = readLiveTable(), timeline = handTimeline.snapshot();
@@ -592,6 +625,7 @@ setInterval(() => {
   logLiveDiagnostics(read, assessment, actionHistory, preflop, currentDiagnosticPacket, handTimeline.snapshot());
   if (stateJson !== lastStateJson) {
     clearRiverDisplay();
+    clearHjDisplay();
     currentDiagnosticPacket = null;
     lastStateJson = stateJson;
     // Invalidate in-flight results on every changed or failed read, including
@@ -629,6 +663,10 @@ setInterval(() => {
       renderOverlay();
     }
     const scoped = buildLiveDecisionProofs(read, assessment, timelineSnapshot, preflop, String(requestSequence));
+    if (scoped.responseIllustration) {
+      hjDisplay = { ...scoped.responseIllustration, source: liveProofRevision(timelineSnapshot), dom: domStateJson };
+      hjExpiryTimer = window.setTimeout(refreshFreshnessDisplay, Math.max(0, hjDisplay.binding.expiresAt - Date.now()));
+    }
     const comparison = scoped.flopCallFold ?? scoped.turnCallFold ?? scoped.riverCallFold;
     if (comparison) {
       // Separate assumption-based illustration; never an action/LLM pathway.
@@ -801,6 +839,7 @@ setInterval(() => {
     clearDisplayLifetime();
     overlayState.street = "unreadable";
     clearRiverDisplay();
+    clearHjDisplay();
     overlayState.opponentStatsLine = null;
     overlayState.policyLine = null;
     overlayState.equityLine = null;

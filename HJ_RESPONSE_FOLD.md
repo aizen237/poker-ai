@@ -1,5 +1,9 @@
 # HJ response FOLD: bounded conservative reference
 
+The broader [169-category source reference](HJ_RESPONSE_COVERAGE.md) is now
+available as a separate illustration. The live FOLD authorization described
+here remains the original 21-category conservative heuristic subset.
+
 Reviewed against HEAD `471ce8b` on 2026-10-26. The existing reference now installs
 one explicitly reviewed **21-hand weak-offsuit pure-FOLD heuristic subset**:
 72o is preserved and 20 categories are added. Other hands are uncovered.

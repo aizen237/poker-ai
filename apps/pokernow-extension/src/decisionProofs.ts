@@ -1,5 +1,6 @@
 import { assessDecisionProofs, assessPacketDecisionProofs, decisionProofBinding, PROOF_SCOPES, RIVER_PAIRWISE_WARNING, TURN_CHECKDOWN_WARNING, FLOP_CHECKDOWN_WARNING,
-  unopenedChartAction, inspectLiveHjResponseStrategy, isReviewedHjFold, type DecisionPacket, type PreflopContext, type ScopedProof, type ProofScope, type DecisionProofs } from "@poker-ai/ai-core";
+  unopenedChartAction, inspectLiveHjResponseStrategy, inspectHjResponseSourceStrategy, hjResponseIllustrationLines,
+  isReviewedHjFold, type DecisionPacket, type PreflopContext, type ScopedProof, type ProofScope, type DecisionProofs } from "@poker-ai/ai-core";
 import type { LiveStateAssessment } from "@poker-ai/browser-reader";
 import type { LiveTableRead } from "./tableRead.js";
 import type { LiveTimelineDiagnostic } from "./liveTimeline.js";
@@ -111,6 +112,7 @@ export function buildLiveDecisionProofs(read: LiveTableRead, assessment: LiveSta
   // reference, selected control or classifier result can mint/renew a proof.
   const responseStrategy = facing ? {
     ...inspectLiveHjResponseStrategy({ preflop, holeCards: hero?.holeCards }),
+    sourceReference: inspectHjResponseSourceStrategy({ preflop, holeCards: hero?.holeCards }),
     binding: { decisionEpoch: epoch, tableId: facing.tableId, handId: facing.handId,
       heroId: facing.heroId, generation: facing.generation, cursor: facing.cursor,
       receivedAt: facing.receivedAt, expiresAt: source!.facingOpenProof!.expiresAt },
@@ -132,7 +134,7 @@ export function buildLiveDecisionProofs(read: LiveTableRead, assessment: LiveSta
   if (responseFold) responseStrategy.remainingRequirements.FOLD = [];
   // Source-proven zeros permit the existing main + street-total display
   // cross-check. This detects conflict only; it never certifies a decision pot.
-  if (responseFold && facing && pot.mainPot !== null && pot.displayedTotalPot !== null &&
+  if (facing && pot.mainPot !== null && pot.displayedTotalPot !== null &&
       pot.displayedTotalPot !== pot.mainPot + facing.players.reduce((sum, p) => sum + p.contribution, 0))
     set("pot", "contradicted", "Current pot displays + source-proven street totals",
       ["Pot displays contradict collected pot plus the certified response contributions."]);
@@ -179,14 +181,32 @@ export function buildLiveDecisionProofs(read: LiveTableRead, assessment: LiveSta
   } else if (facing && !responseFold && activation.state !== "unsafe") {
     activation.allowed = false;
     activation.state = "unsupported";
-    activation.reasons.push(...responseStrategy!.reasons);
+    activation.reasons.push(...(["pure", "mixed"].includes(responseStrategy!.sourceReference.status)
+      ? ["Source classification is illustrative only; no applicable live response strategy is established for this hand/profile."]
+      : responseStrategy!.sourceReference.reasons));
     activation.reasons.push("No reviewed pure FOLD for this hand/profile; missing CALL/3-BET legality must never substitute FOLD.");
   } else if (coFacing && activation.state !== "unsafe") {
     activation.allowed = false;
     activation.state = "unsupported";
     activation.reasons.push("CO facing UTG open plus HJ caller: no reviewed response strategy or independent CO action permission. Unsupported CALL/3-BET must never substitute FOLD.");
   }
-  return { evidence: envelope, activation, unopened, openingSize: opening.size,
+  // Display classification needs the same current source/DOM facts as the
+  // response window, but never turns them into CALL/THREE_BET authorization.
+  // Unknown sizing is harmless to a reference; any actual contradiction is not.
+  const referenceScopes: ProofScope[] = ["decisionState", "connection", "actionWindow", "position", "roster", "blinds", "stack", "callCost"];
+  const responseIllustration = responseStrategy && responseExecution &&
+    epoch.length > 0 && responseExecution.expiresAt === responseExecution.receivedAt + 10_000 &&
+    proofs.every(p => p.status !== "contradicted" && (!referenceScopes.includes(p.scope) ||
+      p.status === "proven" && p.confidence === "high" && p.provenance.length > 0 && p.reasons.length === 0)) &&
+    callLegality?.ui.status !== "contradicted" &&
+    ["pure", "mixed", "uncovered", "out_of_scope"].includes(responseStrategy.sourceReference.status)
+    ? { binding: responseExecution, lines: [...hjResponseIllustrationLines(responseStrategy.sourceReference),
+      responseFold ? "Live policy: original 21-hand heuristic FOLD subset; low confidence, subject to independent live proofs."
+        : ["pure", "mixed"].includes(responseStrategy.sourceReference.status)
+          ? "Live policy: one of the other 148 categories; illustrative only, no live recommendation authorized."
+          : "Live policy: outside supported coverage; no live recommendation authorized."],
+      chosenAction: null, liveAuthorized: false as const } : null;
+  return { evidence: envelope, activation, unopened, openingSize: opening.size, responseIllustration,
     riverCallFold: state?.street === "river" ? riverCallFoldReadiness(read, assessment, envelope, timeline) : null,
     turnCallFold: state?.street === "turn" ? riverCallFoldReadiness(read, assessment, envelope, timeline) : null,
     flopCallFold: state?.street === "flop" ? riverCallFoldReadiness(read, assessment, envelope, timeline) : null,

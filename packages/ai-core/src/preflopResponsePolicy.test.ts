@@ -3,7 +3,9 @@ import { parseCards } from "@poker-ai/shared";
 import { allHandTypes, formatHandType } from "@poker-ai/range-engine";
 import { buildPreflopContext, type PreflopInput } from "./preflopContext.js";
 import { HjResponseReferenceSchema, HJ_RESPONSE_PROFILE, inspectLiveHjResponseStrategy,
+  inspectHjResponseSourceStrategy, importHjResponseSource, hjResponseIllustrationLines,
   reviewHjResponseReference, isReviewedHjFold, type HjResponseReference } from "./preflopResponsePolicy.js";
+import { hjResponseSource } from "./data/hjResponseSource.js";
 import { getPolicyRecommendation } from "./policyRecommendation.js";
 import { validateDecisionPacket, type DecisionPacket } from "./decisionPacket.js";
 import { decisionProofBinding, PROOF_SCOPES } from "./decisionProofs.js";
@@ -75,6 +77,97 @@ function rebind(packet: DecisionPacket) {
   packet.decisionProofs!.binding = decisionProofBinding(packet, packet.decisionProofs!.decisionEpoch);
   return packet;
 }
+
+describe("complete pinned HJ source reference (illustrative only)", () => {
+  const mixed: Record<string, number> = { "54s": 0.583846558, "76s": 0.333118899, "87s": 0.564632435,
+    "99": 0.549897475, A5s: 0.576134585, A8s: 0.196474837, AQo: 0.538056204,
+    KQo: 0.292929688, QJs: 0.529857575, T9s: 0.476562585 };
+  const raises = ["65s", "A4s", "AA", "AJs", "AKo", "AKs", "AQs", "ATs", "JJ", "KJs", "KK", "KQs", "KTs", "QQ", "TT"];
+  it.each(allHandTypes().map(formatHandType))("retains the original allocation for every combination of %s", hand => {
+    let combinations = 0;
+    for (const a of "shdc") for (const b of "shdc") {
+      if (hand.endsWith("s") ? a !== b : a === b) continue;
+      for (const cards of [`${hand[0]}${a} ${hand[1]}${b}`, `${hand[1]}${b} ${hand[0]}${a}`]) {
+        const r = inspectHjResponseSourceStrategy(input(cards));
+        const frequency = mixed[hand] ?? (raises.includes(hand) ? 1 : 0);
+        expect(r).toMatchObject({ hand, status: mixed[hand] === undefined ? "pure" : "mixed",
+          strategyClass: mixed[hand] !== undefined ? null : frequency === 1 ? "THREE_BET" : "FOLD",
+          chosenAction: null, liveAuthorized: false, reference: { provenance: { kind: "illustrative" } },
+          allocations: [{ action: "FOLD", frequency: 1 - frequency }, { action: "CALL", frequency: 0 },
+            { action: "THREE_BET", frequency, raiseToBB: 7.5 }] });
+        expect(isReviewedHjFold(r)).toBe(false);
+        combinations++;
+      }
+    }
+    expect(combinations).toBe(hand.endsWith("s") ? 8 : 24);
+    const packet = foldPacket(`${hand[0]}h ${hand[1]}${hand.endsWith("s") ? "h" : "c"}`);
+    expect(evaluateDecisionPolicy(packet).chosenAction).toBe(reviewedHands.includes(hand) ? "FOLD" : null);
+  });
+  it("counts 144 pure folds, 15 pure three-bets, 10 mixes and no positive CALL entries", () => {
+    const r = importHjResponseSource(hjResponseSource);
+    expect(r.entries).toHaveLength(169);
+    expect(r.entries.filter(e => e.allocations[0]!.frequency === 1)).toHaveLength(144);
+    expect(r.entries.filter(e => e.allocations[2]!.frequency === 1)).toHaveLength(15);
+    expect(r.entries.filter(e => e.allocations[2]!.frequency > 0 && e.allocations[2]!.frequency < 1)).toHaveLength(10);
+    expect(r.entries.every(e => e.allocations[1]!.frequency === 0)).toBe(true);
+    expect(r.referenceSettings.coldCallsAllowed).toBeNull();
+    expect(r.provenance.review).toBe("pending");
+    expect(inspectHjResponseSourceStrategy(input()).reference?.provenance.review).toBe("reviewed");
+  });
+  it.each(["3BetHJvsLJ", "CallHJvsLJ"] as const)("does not invent %s values for a missing hand", node => {
+    const source: any = structuredClone(hjResponseSource); delete source[node].AA;
+    const reference = importHjResponseSource(source);
+    expect(reference.entries).toHaveLength(168);
+    const review = reviewHjResponseReference(input("Ah Ac"), reference);
+    expect(review).toMatchObject({ status: "uncovered", allocations: null, chosenAction: null });
+    expect(hjResponseIllustrationLines(review).join(" ")).toContain("ABSTAIN");
+  });
+  it.each(["negative", "over-one", "unknown-call-permission", "nan", "bad-hand"])("rejects source corruption: %s", variant => {
+    const source: any = structuredClone(hjResponseSource);
+    if (variant === "negative") source["3BetHJvsLJ"].AA = -0.1;
+    if (variant === "over-one") source["3BetHJvsLJ"].AA = 1.1;
+    if (variant === "unknown-call-permission") source.CallHJvsLJ["88"] = 1;
+    if (variant === "nan") source["3BetHJvsLJ"].AA = NaN;
+    if (variant === "bad-hand") source.CallHJvsLJ.AAAs = 0;
+    expect(() => importHjResponseSource(source)).toThrow();
+  });
+  it("preserves suited/offsuit differences and all mixed digits in the display", () => {
+    const suited = inspectHjResponseSourceStrategy(input("Ah Qh"));
+    const offsuit = inspectHjResponseSourceStrategy(input("Ah Qc"));
+    expect(suited.strategyClass).toBe("THREE_BET");
+    expect(offsuit.status).toBe("mixed");
+    const lines = hjResponseIllustrationLines(offsuit).join(" ");
+    expect(lines).toContain("THREE_BET to 7.5BB 53.8056204%");
+    expect(lines).toContain("FOLD 46.1943796%");
+    expect(lines).toContain("CALL 0%");
+    expect(lines).toContain("CALL 0% is explicit source data; cold-call permission remains unknown.");
+    expect(hjResponseIllustrationLines(suited).join(" ")).toContain("Pure source classification: THREE_BET.");
+    expect(lines).toContain("not a verified live recommendation");
+    expect(lines).toContain("no action sampled");
+  });
+  it.each(["UTG", "CO", "BTN", "SB", "BB"])("does not apply the HJ table to %s", position => {
+    const i = input("Ah Ac"); i.preflop.heroSeat = i.preflop.players.find(p => p.position === position)!.seat;
+    expect(inspectHjResponseSourceStrategy(i).status).toBe("invalid_context");
+  });
+  it("labels unavailable depth coverage instead of extending strategy applicability", () => {
+    const i = input("Ah Ac"); i.preflop.players[2]!.remainingStackBB = 151;
+    const r = inspectHjResponseSourceStrategy(i);
+    expect(r).toMatchObject({ status: "out_of_scope", chosenAction: null });
+    expect(hjResponseIllustrationLines(r).join(" ")).toContain("ABSTAIN");
+  });
+  it.each(["Ah Ac", "Ah Qc", "8h 8c"])("legality and matching sizing alone cannot promote source-only %s", cards => {
+    const packet = foldPacket(cards);
+    packet.dataConfidence = "high";
+    packet.decisionProofs!.proofs.forEach(p => { p.status = "proven"; p.confidence = "high"; p.reasons = []; });
+    packet.preflopExecution!.raiseBounds = { source: "Synthetic test bounds", verified: true, chipUnitBB: 0.5, minRaiseToBB: 4 };
+    packet.preflopExecution!.controls = { source: "Synthetic matching 7.5BB control", formVisible: true,
+      raiseSubmitVisible: true, raiseSubmitEnabled: true, selectedRaiseToBB: 7.5, issues: [] };
+    const policy = evaluateDecisionPolicy(rebind(packet));
+    expect(policy.chosenAction).toBeNull();
+    expect(policy.activation?.allowed).toBe(false);
+    expect(lockedEngineRecommendation(policy)).toBeNull();
+  });
+});
 describe("locked HJ fold production policy", () => {
   it.each(reviewedHands)("selects and correctly explains all 12 offsuit combinations of %s", hand => {
     for (const a of "shdc") for (const b of "shdc") {

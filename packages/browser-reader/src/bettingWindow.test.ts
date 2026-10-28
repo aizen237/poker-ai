@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseHTML } from "linkedom";
+import { allHandTypes, formatHandType } from "@poker-ai/range-engine";
 import { createFirstUtgSource, projectFirstUtgSource } from "../../../apps/pokernow-extension/src/firstUtgSource.js";
 import { isObservedUtgOpenPatch } from "../../../apps/pokernow-extension/src/bettingWindow.js";
 import { callLegalityEvidence } from "../../../apps/pokernow-extension/src/callLegalityEvidence.js";
@@ -489,6 +490,92 @@ describe("reviewed weak-offsuit HJ folds through the existing locked overlay", (
   });
 });
 
+describe("169-category illustrative HJ overlay through automated source replay", () => {
+  const referenceText = (f: Awaited<ReturnType<typeof live>>) =>
+    f.document.querySelector("[data-hj-reference]")?.textContent ?? null;
+  it.each(allHandTypes().map(formatHandType))("displays %s source frequencies with separate live authorization", async hand => {
+    const f = await live((fs, read) => foldCards(fs, read, [`${hand[0]}h`, `${hand[1]}${hand.endsWith("s") ? "h" : "c"}`]));
+    const r = f.diagnostic().decision.scopedProofs.responseStrategy.sourceReference;
+    expect(r).toMatchObject({ hand, chosenAction: null, liveAuthorized: false,
+      reference: { provenance: { kind: "illustrative" } } });
+    expect(["pure", "mixed"]).toContain(r.status);
+    expect(referenceText(f)).toContain(`${hand}: HJ vs UTG 2.5BB`);
+    expect(referenceText(f)).toContain("ILLUSTRATIVE PREFLOP REFERENCE");
+    expect(referenceText(f)).toContain("not a verified live recommendation");
+    expect(referenceText(f)).toContain("CALL 0%");
+    expect(referenceText(f)).toContain("CALL 0% is explicit source data; cold-call permission remains unknown.");
+    expect(referenceText(f)).toContain(r.status === "pure" ? `Pure source classification: ${r.strategyClass}.` : "Mixed strategy retained");
+    expect(referenceText(f)).toContain("THREE_BET to 7.5BB");
+    const liveFold = f.diagnostic().decision.scopedProofs.responseStrategy.status === "pure";
+    expect(referenceText(f)).toContain(liveFold ? "original 21-hand heuristic FOLD subset" : "one of the other 148 categories");
+    expect(f.action()).toBe(liveFold ? "FOLD" : null);
+    expect(f.requests).toHaveLength(liveFold ? 1 : 0);
+    expect(f.socket.send).not.toHaveBeenCalled();
+    f.atAge(10000); f.refresh();
+    expect(referenceText(f)).toBeNull(); expect(f.action()).toBeNull();
+  });
+  it("shows exact mixed frequencies without selecting a random action or requesting an explanation", async () => {
+    const f = await live((fs, read) => foldCards(fs, read, ["Ah", "Qc"]));
+    expect(referenceText(f)).toContain("FOLD 46.1943796%");
+    expect(referenceText(f)).toContain("THREE_BET to 7.5BB 53.8056204%");
+    expect(referenceText(f)).toContain("Mixed strategy retained; no action sampled or selected");
+    f.atAge(9000); f.poll(); f.refresh();
+    expect(referenceText(f)).not.toBeNull();
+    expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
+    f.atAge(10000); f.refresh(); expect(referenceText(f)).toBeNull();
+    expect(f.text()).toContain("EVIDENCE EXPIRED");
+  });
+  it.each(["disconnect", "source-update", "cards", "actor", "clock-regression", "pot", "call", "read-error"])(
+    "removes source-only THREE_BET information on %s between polls", async variant => {
+      const f = await live((fs, read) => foldCards(fs, read, ["Ah", "Ac"]), false, undefined, '<button type="button">Call 5</button>');
+      expect(referenceText(f)).toContain("THREE_BET to 7.5BB 100%");
+      if (variant === "disconnect") f.socket.dispatchEvent(new Event("close"));
+      if (variant === "source-update") f.incoming({ ...f.turn, localReceiveSequence: 68,
+        localReceivedAt: f.turn.localReceivedAt + 2000,
+        payload: { pre: f.turn.payload.now, now: f.turn.payload.now + 1, eventsData: [], fV: "0.1.72" } });
+      if (variant === "cards") f.read.raw.seats.find((s: any) => s.isYou).holeCardClassLists = [["card-h", "card-s-A"], ["card-d", "card-s-K"]];
+      if (variant === "actor") f.read.raw.seats.find((s: any) => s.isYou).statusClasses = [];
+      if (variant === "clock-regression") f.atAge(-1);
+      if (variant === "pot") f.read.raw.potTotalValueText = "99";
+      if (variant === "call") f.document.querySelector("button")!.textContent = "Call 6";
+      if (variant === "read-error") mocks.read.mockImplementation(() => { throw new Error("Unreadable"); });
+      f.refresh(); expect(referenceText(f)).toBeNull();
+      expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
+    });
+  it.each(["pot", "call", "gap", "wrong-position"])("withholds illustrative information on initial %s mismatch", async variant => {
+    const f = await live((fs, read) => {
+      foldCards(fs, read, ["Ah", "Ac"]);
+      if (variant === "pot") read.raw.potTotalValueText = "99";
+      if (variant === "gap") fs.at(-1).payload.pre++;
+      if (variant === "wrong-position") read.context.dealerSeatNumber = 3;
+    }, false, undefined, variant === "call" ? '<button type="button">Call 6</button>' : "");
+    expect(referenceText(f)).toBeNull(); expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
+  });
+  it("does not require raise-sizing or CALL permission to illustrate a pure FOLD", async () => {
+    const f = await live((fs, read) => foldCards(fs, read, ["8h", "8c"]));
+    expect(referenceText(f)).toContain("FOLD 100%");
+    expect(f.diagnostic().decision.scopedProofs.responseStrategy.call.authorization).toBe("unproven");
+    expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
+  });
+  it("matching the source three-bet size does not establish live raise legality or strategy applicability", async () => {
+    const f = await live((fs, read) => {
+      foldCards(fs, read, ["Ah", "Ac"]);
+      read.raiseControl = { ...read.raiseControl, formVisible: true, amountControlVisible: true,
+        selectedRaiseToChips: 15, selectedRaiseToText: "15", raiseSubmitVisible: true, raiseSubmitEnabled: true, issues: [] };
+    });
+    expect(referenceText(f)).toContain("THREE_BET to 7.5BB 100%");
+    expect(f.diagnostic().decision.scopedProofs.responseStrategy.threeBet.raiseRights).toBe("unproven");
+    expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
+  });
+  it("late explanations cannot restore an expired source reference or broaden the live FOLD", async () => {
+    const f = await live(foldCards);
+    expect(referenceText(f)).not.toBeNull(); expect(f.action()).toBe("FOLD");
+    f.atAge(10000); f.refresh();
+    await f.respond({ ok: true, decisionSource: "engine_policy", result: { action: "RAISE", sizingBB: 7.5, confidence: 1, reasoning: "Override" } });
+    expect(referenceText(f)).toBeNull(); expect(f.action()).toBeNull();
+  });
+});
+
 describe("HJ facing recorded UTG open through the production context/display path", () => {
   it("classifies facing_open with five-chip call gap, but selects nothing, even with AK", async () => {
     const f = await live(), d = f.diagnostic();
@@ -539,6 +626,7 @@ describe("HJ facing recorded UTG open through the production context/display pat
     expect(f.diagnostic()?.preflop?.actionWindowEvidence).toBeUndefined();
     expect(f.diagnostic()?.decision.scopedProofs.responseStrategy).toBeNull();
     expect(f.diagnostic()?.decision.scopedProofs.callLegality).toBeNull();
+    expect(f.document.querySelector("[data-hj-reference]")).toBeNull();
     expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0); expect(f.socket.send).not.toHaveBeenCalled();
   });
   it("unchanged polls do not renew context; expiry and disconnect remove it without producing advice", async () => {
@@ -573,7 +661,7 @@ describe("HJ facing recorded UTG open through the production context/display pat
       });
       expect(f.diagnostic().decision.scopedProofs.responseStrategy).toMatchObject({ hand,
         status: "uncovered", chosenAction: null, liveAuthorized: false });
-      expect(f.text()).toContain("Hand is not explicitly covered");
+      expect(f.text()).toContain("Source classification is illustrative only");
       expect(f.action()).toBeNull(); expect(f.requests).toHaveLength(0);
       expect(f.socket.send).not.toHaveBeenCalled();
     });
