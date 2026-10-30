@@ -47,8 +47,11 @@ export function projectRiverObservation(data: unknown, knownHero: string | null)
     // Hand465 frame 2: a settled hand -> new hand excludes one standing player.
     // Only this closed status/deletion patch may discard these two UI flags;
     // the linked reducer below must independently confirm the hand/roster change.
+    const standingUpFields = [...common, ..."gN gT hI mR nR pC tB cHB cPI oTC pGS rHP sBS sNA bBPI cRPI iHPI pASA pITT sBPI sNAA wBACPI players dealerID dealerSeat gameResult rHC".split(" ")];
+    // Hand482 frame2 adds a numeric mAVTB to the Hand465 boundary. Both
+    // closed shapes retain the same independent hand/roster validation below.
     const standingUpShape = event === "gC" && same(raw.gT, [1, 0]) && raw.gameResult === "<D>" &&
-      exact(raw, [...common, ..."gN gT hI mR nR pC tB cHB cPI oTC pGS rHP sBS sNA bBPI cRPI iHPI pASA pITT sBPI sNAA wBACPI players dealerID dealerSeat gameResult rHC".split(" ")]) &&
+      (exact(raw, standingUpFields) || exact(raw, [...standingUpFields, "mAVTB"]) && chips(raw.mAVTB)) &&
       object(raw.players) && Object.keys(raw.players).length === 1;
     const standingUpPlayer = standingUpShape ? Object.keys(raw.players)[0]! : null;
     const standingUp = standingUpPlayer !== null && standingUpPlayer !== knownHero && object(raw.players[standingUpPlayer]) &&
@@ -81,13 +84,19 @@ export function projectRiverObservation(data: unknown, knownHero: string | null)
     // Keep this explicit-actor omission shape flop-only; never accept true/null.
     const paidDealShape = exact(raw, [...paidDeal, "bigBlindCheck"]) && raw.bigBlindCheck === false ||
       same(raw.gT, [1, 1]) && exact(raw, paidDeal);
+    // Hand482 frame57 omits BOTH mAVTB and bigBlindCheck, with an explicit
+    // actor on the paid flop only. No capacity is inferred or inserted; pot,
+    // stack debits, cleared wagers and board continuity still reconcile below.
+    const paidFlopWithoutCapacity = event === "gC" && same(raw.gT, [1, 1]) &&
+      exact(raw, paidDeal.filter(k => k !== "mAVTB"));
     // Hand465 is a DIFFERENT closed shape: both cPI and bigBlindCheck absent,
     // paid turn only. This is a candidate, never an actor inferred from pITT.
     // The receiver requires a matching explicit activation in this same hand/flop.
     const carriedTurnShape = event === "gC" && same(raw.gT, [1, 2]) && exact(raw, paidDeal.filter(k => k !== "cPI")) &&
       raw.pITT === source.heroId && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now;
-    if ((paidDealShape && active || carriedTurnShape) &&
-        [1, 2, 3].some(index => same(raw.gT, [1, index])) && raw.cHB === 0 && chips(raw.mR) && chips(raw.mAVTB) &&
+    if (((paidDealShape || paidFlopWithoutCapacity) && active || carriedTurnShape) &&
+        [1, 2, 3].some(index => same(raw.gT, [1, index])) && raw.cHB === 0 && chips(raw.mR) &&
+        (paidFlopWithoutCapacity || chips(raw.mAVTB)) &&
         same(raw.cRPI, []) && object(raw.players) &&
         Object.values(raw.players).every(p => object(p) && exact(p, ["stack"]) && chips(p.stack)) &&
         object(raw.tB) && Object.values(raw.tB).every(v => v === "<D>"))
