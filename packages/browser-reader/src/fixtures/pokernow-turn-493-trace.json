@@ -1,0 +1,254 @@
+[
+  {
+    "frame": 1,
+    "kind": "other",
+    "diagnostic": {
+      "reason": "Continuous observations; waiting for a supported postflop check/bet/activation window.",
+      "sequence": 1,
+      "generation": 1
+    }
+  },
+  {
+    "frame": 2,
+    "kind": "other",
+    "diagnostic": {
+      "reason": "Continuous observations; waiting for a supported postflop check/bet/activation window.",
+      "sequence": 2,
+      "generation": 1
+    }
+  },
+  {
+    "frame": 3,
+    "kind": "turn",
+    "diagnostic": {
+      "reason": "Continuous observations; waiting for a supported postflop check/bet/activation window.",
+      "sequence": 3,
+      "generation": 1
+    }
+  },
+  {
+    "frame": 4,
+    "kind": "other",
+    "diagnostic": {
+      "reason": "Continuous observations; waiting for a supported postflop check/bet/activation window.",
+      "sequence": 4,
+      "generation": 1
+    }
+  },
+  {
+    "frame": 5,
+    "kind": "other",
+    "diagnostic": {
+      "reason": "Continuous observations; waiting for a supported postflop check/bet/activation window.",
+      "sequence": 5,
+      "generation": 1
+    }
+  },
+  {
+    "frame": 6,
+    "kind": "other",
+    "diagnostic": {
+      "reason": "Continuous observations; waiting for a supported postflop check/bet/activation window.",
+      "sequence": 6,
+      "generation": 1
+    }
+  },
+  {
+    "frame": 7,
+    "kind": "other",
+    "diagnostic": {
+      "reason": "Continuous observations; waiting for a supported postflop check/bet/activation window.",
+      "sequence": 7,
+      "generation": 1
+    }
+  },
+  {
+    "frame": 8,
+    "kind": "turn",
+    "diagnostic": {
+      "reason": "Continuous observations; waiting for a supported postflop check/bet/activation window.",
+      "sequence": 8,
+      "generation": 1
+    }
+  },
+  {
+    "frame": 9,
+    "kind": "bet",
+    "diagnostic": {
+      "reason": "Continuous observations; waiting for a supported postflop check/bet/activation window.",
+      "sequence": 9,
+      "generation": 1
+    }
+  },
+  {
+    "frame": 10,
+    "kind": "turn",
+    "diagnostic": {
+      "reason": "Continuous observations; waiting for a supported postflop check/bet/activation window.",
+      "sequence": 10,
+      "generation": 1
+    }
+  },
+  {
+    "frame": 11,
+    "kind": "other",
+    "diagnostic": {
+      "reason": "Continuous observations; waiting for a supported postflop check/bet/activation window.",
+      "sequence": 11,
+      "generation": 1
+    }
+  },
+  {
+    "frame": 12,
+    "kind": "turn",
+    "diagnostic": {
+      "reason": "Continuous observations; waiting for a supported postflop check/bet/activation window.",
+      "sequence": 12,
+      "generation": 1
+    }
+  },
+  {
+    "frame": 13,
+    "kind": "call",
+    "diagnostic": {
+      "reason": "Continuous observations; waiting for a supported postflop check/bet/activation window.",
+      "sequence": 13,
+      "generation": 1
+    }
+  },
+  {
+    "frame": 14,
+    "kind": "turn",
+    "diagnostic": {
+      "reason": "Continuous observations; waiting for a supported postflop check/bet/activation window.",
+      "sequence": 14,
+      "generation": 1
+    }
+  },
+  {
+    "frame": 15,
+    "kind": "other",
+    "diagnostic": {
+      "reason": "Continuous observations; waiting for a supported postflop check/bet/activation window.",
+      "sequence": 15,
+      "generation": 1
+    }
+  },
+  {
+    "frame": 16,
+    "kind": "turn",
+    "diagnostic": {
+      "reason": "Continuous observations; waiting for a supported postflop check/bet/activation window.",
+      "sequence": 16,
+      "generation": 1
+    }
+  },
+  {
+    "frame": 17,
+    "kind": "other",
+    "diagnostic": {
+      "reason": "Continuous observations; waiting for a supported postflop check/bet/activation window.",
+      "sequence": 17,
+      "generation": 1
+    }
+  },
+  {
+    "frame": 18,
+    "kind": "flop_board",
+    "diagnostic": {
+      "reason": "Continuous observations; waiting for a supported postflop check/bet/activation window.",
+      "sequence": 18,
+      "generation": 1
+    }
+  },
+  {
+    "frame": 19,
+    "kind": "check",
+    "diagnostic": {
+      "reason": "Continuous observations; waiting for a supported postflop check/bet/activation window.",
+      "sequence": 19,
+      "generation": 1
+    }
+  },
+  {
+    "frame": 20,
+    "kind": "turn",
+    "diagnostic": {
+      "reason": "Continuous observations; waiting for a supported postflop check/bet/activation window.",
+      "sequence": 20,
+      "generation": 1
+    }
+  },
+  {
+    "frame": 21,
+    "kind": "bet",
+    "diagnostic": {
+      "reason": "Continuous observations; waiting for a supported postflop check/bet/activation window.",
+      "sequence": 21,
+      "generation": 1
+    }
+  },
+  {
+    "frame": 22,
+    "kind": "turn",
+    "diagnostic": {
+      "reason": "Matched flop source window; gross arithmetic only, no contestable-pot or action authorization.",
+      "sequence": 22,
+      "generation": 1
+    }
+  },
+  {
+    "frame": 23,
+    "kind": "call",
+    "diagnostic": {
+      "reason": "Continuous observations; waiting for a supported postflop check/bet/activation window.",
+      "sequence": 23,
+      "generation": 1
+    }
+  },
+  {
+    "frame": 24,
+    "kind": "turn_board_carried_actor",
+    "diagnostic": {
+      "reason": "Continuous observations; waiting for a supported postflop check/bet/activation window.",
+      "sequence": 24,
+      "generation": 1
+    }
+  },
+  {
+    "frame": 25,
+    "kind": "check",
+    "diagnostic": {
+      "reason": "Continuous observations; waiting for a supported postflop check/bet/activation window.",
+      "sequence": 25,
+      "generation": 1
+    }
+  },
+  {
+    "frame": 26,
+    "kind": "turn",
+    "diagnostic": {
+      "reason": "Continuous observations; waiting for a supported postflop check/bet/activation window.",
+      "sequence": 26,
+      "generation": 1
+    }
+  },
+  {
+    "frame": 27,
+    "kind": "bet",
+    "diagnostic": {
+      "reason": "Continuous observations; waiting for a supported postflop check/bet/activation window.",
+      "sequence": 27,
+      "generation": 1
+    }
+  },
+  {
+    "frame": 28,
+    "kind": "turn",
+    "diagnostic": {
+      "reason": "Matched turn source window; gross arithmetic only, no contestable-pot or action authorization.",
+      "sequence": 28,
+      "generation": 1
+    }
+  }
+]

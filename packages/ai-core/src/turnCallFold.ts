@@ -1,7 +1,7 @@
 import { mulberry32 } from "@poker-ai/shared";
 import { calculateCallEV, calculateFoldEV, calculatePotOdds, evaluateBest, HAND_CATEGORY_NAMES,
   detectFlushDraw, detectStraightDraw, classifyBoardTexture } from "@poker-ai/poker-engine";
-import { calculateExactTurnEquity, calculateEquityVsRange, turnBettingAssumptions, flopBettingAssumptions } from "@poker-ai/range-engine";
+import { calculateExactTurnEquities, calculateEquityVsRange, turnBettingAssumptions, flopBettingAssumptions } from "@poker-ai/range-engine";
 import type { RiverCallFoldInput } from "./riverCallFold.js";
 
 export const TURN_CHECKDOWN_WARNING = "Future river betting is unmodeled. Unconditional CALL/FOLD recommendation withheld. RAISE not evaluated.";
@@ -35,10 +35,12 @@ function compareCheckdownCallFold(input: RiverCallFoldInput, street: "flop" | "t
   if (pot <= 0 || call <= 0 || call > pot || call >= heroStack || opponentStack <= 0)
     return abstain("A positive fully payable non-all-in CALL and consistent positive pot are required.");
   try {
-    const assumptions = (flop ? flopBettingAssumptions : turnBettingAssumptions)(input.heroCards, input.board).map(({ range, ...profile }) => {
+    const profiles = (flop ? flopBettingAssumptions : turnBettingAssumptions)(input.heroCards, input.board);
+    const exact = flop ? null : calculateExactTurnEquities(input.heroCards, profiles.map(p => p.range), input.board);
+    const assumptions = profiles.map(({ range, ...profile }, index) => {
       // Fixed seed makes polling/replays reproducible; never implies exact equity.
       const equity = (flop ? calculateEquityVsRange(input.heroCards, range, input.board,
-        { iterations: 10_000, rng: mulberry32(0xF10F) }) : calculateExactTurnEquity(input.heroCards, range, input.board)).equity;
+        { iterations: 10_000, rng: mulberry32(0xF10F) }) : exact![index]!).equity;
       return { ...profile, equity, callEV: calculateCallEV(equity, pot, call).ev };
     });
     const hand = evaluateBest([...input.heroCards, ...input.board]);
