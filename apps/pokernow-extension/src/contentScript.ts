@@ -39,7 +39,7 @@ console.log("[Poker AI Reader] Content script loaded on:", window.location.href)
 // It has no poker action controls; clicks inside it stay on the panel.
 // ---------------------------------------------------------------------
 
-type AIStatus = "idle" | "waiting" | "received" | "blocked" | "error" | "waiting_for_proof" | "unsupported" | "unsafe" | "evidence_expired";
+type AIStatus = "idle" | "waiting" | "received" | "blocked" | "error" | "waiting_for_proof" | "unsupported" | "unsafe" | "evidence_expired" | "model_abstained";
 
 interface OverlayState {
   street: string;
@@ -145,6 +145,7 @@ const AI_STATUS_COLORS: Record<AIStatus, string> = {
   error: "#e05050",
   waiting_for_proof: "#e0a030", unsupported: "#888888", unsafe: "#e05050",
   evidence_expired: "#999999",
+  model_abstained: "#e0a030",
 };
 
 function renderOverlay() {
@@ -542,7 +543,8 @@ function refreshFreshnessDisplay() {
       const read = readLiveTable(), timeline = handTimeline.snapshot();
       const scoped = buildLiveDecisionProofs(read, assessLiveState(read.raw, read.context), timeline, null, "display-refresh");
       const river = scoped.flopCallFold ?? scoped.turnCallFold ?? scoped.riverCallFold;
-      if (Date.now() >= riverDisplay.expiresAt || liveProofRevision(timeline) !== riverDisplay.source || !river?.illustration) {
+      if (Date.now() >= riverDisplay.expiresAt || liveProofRevision(timeline) !== riverDisplay.source ||
+          !river?.binding || !river.illustration && !river.modelAbstention) {
         clearRiverDisplay();
         overlayState.aiStatus = river?.unsafe ? "unsafe" : "waiting_for_proof";
         overlayState.aiWarnings = river?.reasons ?? ["Postflop illustration expired or inputs changed; fresh matching evidence is required."];
@@ -669,11 +671,11 @@ setInterval(() => {
     const comparison = scoped.flopCallFold ?? scoped.turnCallFold ?? scoped.riverCallFold;
     if (comparison) {
       // Separate assumption-based illustration; never an action/LLM pathway.
-      overlayState.aiStatus = comparison.unsafe ? "unsafe" : "waiting_for_proof";
+      overlayState.aiStatus = comparison.unsafe ? "unsafe" : comparison.modelAbstention ? "model_abstained" : "waiting_for_proof";
       overlayState.policyLine = (state.street === "flop" ? "Flop unconditional CALL/FOLD recommendation withheld. " :
         state.street === "turn" ? "Turn unconditional CALL/FOLD recommendation withheld. " : "River CALL vs FOLD withheld. ") + comparison.warning;
       overlayState.aiWarnings = comparison.reasons;
-      if (comparison.illustration && comparison.binding) {
+      if ((comparison.illustration || comparison.modelAbstention) && comparison.binding) {
         riverDisplay = { lines: comparison.illustrationLines, source: liveProofRevision(timelineSnapshot),
           expiresAt: comparison.binding.expiresAt };
         riverExpiryTimer = window.setTimeout(refreshFreshnessDisplay, Math.max(0, riverDisplay.expiresAt - Date.now()));

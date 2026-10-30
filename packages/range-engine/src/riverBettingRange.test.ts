@@ -1,8 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { cardId, parseCards, type Card } from "@poker-ai/shared";
+import { cardId, fullDeck, parseCards, type Card } from "@poker-ai/shared";
+import { combinations, evaluateBest, HandCategory } from "@poker-ai/poker-engine";
 import { createComboRange } from "./comboRange.js";
 import { calculateExactRiverEquity } from "./rangeEquity.js";
-import { riverBettingAssumptions } from "./riverBettingRange.js";
+import { riverBettingAssumptions, turnBettingAssumptions } from "./riverBettingRange.js";
+
+it("Hand471: every legal opponent holding exceeds the bluff bucket's one-pair ceiling", () => {
+  const hero = parseCards("Td 2h"), board = parseCards("4h 4s Th Ts");
+  const known = new Set([...hero, ...board].map(cardId));
+  const holdings = [...combinations(fullDeck().filter(c => !known.has(cardId(c))), 2)];
+  expect(holdings).toHaveLength(1035); // C(46, 2), independently of range construction.
+  const categories = holdings.map(cards => evaluateBest([...cards, ...board]).category);
+  expect(categories.every(category => category >= HandCategory.TwoPair)).toBe(true);
+  expect(categories.filter(category => category === HandCategory.TwoPair)).toHaveLength(903);
+  expect(categories.filter(category => category === HandCategory.FullHouse)).toHaveLength(131);
+  expect(categories.filter(category => category === HandCategory.FourOfAKind)).toHaveLength(1);
+  // Value exists; the empty bluff bucket must not become fabricated combos or
+  // a silent value-only range with changed mixture weights.
+  expect(() => turnBettingAssumptions(hero, board)).toThrow(
+    "Strong value / 10% bluffs: no legal bluff combinations; assumption cannot be evaluated");
+});
 
 describe("conditional river ranges and exact weighted equity", () => {
   const hero = parseCards("Ah Ad"), board = parseCards("2s 7h 9d Jc Qc");

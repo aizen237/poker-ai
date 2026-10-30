@@ -10548,7 +10548,14 @@
   var cachedFlop = null;
   function riverIllustration(read, assessment, timeline, envelope) {
     const w = timeline?.sourceStatus.riverObservation;
-    const empty = (reasons = [], unsafe = false) => ({ binding: null, calculation: null, lines: [], reasons, unsafe });
+    const empty = (reasons = [], unsafe = false) => ({
+      binding: null,
+      calculation: null,
+      modelAbstention: null,
+      lines: [],
+      reasons,
+      unsafe
+    });
     if (!w || !timeline || Date.now() < w.receivedAt || Date.now() >= w.expiresAt) return empty();
     const source = timeline.sourceStatus, identity3 = source.identity, state = assessment.state;
     const card = (c) => `${"23456789TJQKA"[c.rank - 2]}${c.suit}`;
@@ -10589,21 +10596,33 @@
       if (cachedTurn?.key !== key) cachedTurn = { key, result: compareTurnCallFold(input) };
     } else if (cached?.key !== key) cached = { key, result: compareRiverCallFold(input) };
     const calculation = w.street === "flop" ? cachedFlop.result : w.street === "turn" ? cachedTurn.result : cached.result;
-    if (calculation.status === "abstained") return empty([calculation.reason]);
     if (Date.now() < w.receivedAt || Date.now() >= w.expiresAt || assessCallControlReadiness(read.callControl ?? null, w.payableCall, w.receivedAt, Date.now()).status !== "observed_matching") return empty();
+    const binding = {
+      tableId: w.tableId,
+      handId: w.handId,
+      heroId: w.heroId,
+      generation: w.generation,
+      cursor: w.cursor,
+      sequence: w.sequence,
+      receivedAt: w.receivedAt,
+      expiresAt: w.expiresAt,
+      decisionEpoch: envelope.decisionEpoch
+    };
+    if (calculation.status === "abstained") return {
+      binding,
+      calculation: null,
+      modelAbstention: calculation.reason,
+      reasons: [calculation.reason],
+      unsafe: false,
+      lines: [
+        "Source and DOM binding validated; numerical illustration withheld by the model.",
+        "No verified recommendation or action authorization."
+      ]
+    };
     return {
-      binding: {
-        tableId: w.tableId,
-        handId: w.handId,
-        heroId: w.heroId,
-        generation: w.generation,
-        cursor: w.cursor,
-        sequence: w.sequence,
-        receivedAt: w.receivedAt,
-        expiresAt: w.expiresAt,
-        decisionEpoch: envelope.decisionEpoch
-      },
+      binding,
       calculation,
+      modelAbstention: null,
       reasons: [],
       unsafe: false,
       lines: [
@@ -10922,6 +10941,7 @@
       illustration: illustration.calculation,
       binding: illustration.binding,
       illustrationLines: illustration.lines,
+      modelAbstention: illustration.modelAbstention,
       requiredProofs: relevant,
       reasons: [.../* @__PURE__ */ new Set([...contradictions, ...reasons])],
       warning: flop ? FLOP_CHECKDOWN_WARNING : turn2 ? TURN_CHECKDOWN_WARNING : RIVER_PAIRWISE_WARNING
@@ -12858,7 +12878,8 @@
     waiting_for_proof: "#e0a030",
     unsupported: "#888888",
     unsafe: "#e05050",
-    evidence_expired: "#999999"
+    evidence_expired: "#999999",
+    model_abstained: "#e0a030"
   };
   function renderOverlay() {
     refreshDisplayLifetime();
@@ -13188,7 +13209,7 @@
         const read = readLiveTable(), timeline = handTimeline.snapshot();
         const scoped = buildLiveDecisionProofs(read, assessLiveState(read.raw, read.context), timeline, null, "display-refresh");
         const river = scoped.flopCallFold ?? scoped.turnCallFold ?? scoped.riverCallFold;
-        if (Date.now() >= riverDisplay.expiresAt || liveProofRevision(timeline) !== riverDisplay.source || !river?.illustration) {
+        if (Date.now() >= riverDisplay.expiresAt || liveProofRevision(timeline) !== riverDisplay.source || !river?.binding || !river.illustration && !river.modelAbstention) {
           clearRiverDisplay();
           overlayState.aiStatus = river?.unsafe ? "unsafe" : "waiting_for_proof";
           overlayState.aiWarnings = river?.reasons ?? ["Postflop illustration expired or inputs changed; fresh matching evidence is required."];
@@ -13301,10 +13322,10 @@
         }
         const comparison = scoped.flopCallFold ?? scoped.turnCallFold ?? scoped.riverCallFold;
         if (comparison) {
-          overlayState.aiStatus = comparison.unsafe ? "unsafe" : "waiting_for_proof";
+          overlayState.aiStatus = comparison.unsafe ? "unsafe" : comparison.modelAbstention ? "model_abstained" : "waiting_for_proof";
           overlayState.policyLine = (state.street === "flop" ? "Flop unconditional CALL/FOLD recommendation withheld. " : state.street === "turn" ? "Turn unconditional CALL/FOLD recommendation withheld. " : "River CALL vs FOLD withheld. ") + comparison.warning;
           overlayState.aiWarnings = comparison.reasons;
-          if (comparison.illustration && comparison.binding) {
+          if ((comparison.illustration || comparison.modelAbstention) && comparison.binding) {
             riverDisplay = {
               lines: comparison.illustrationLines,
               source: liveProofRevision(timelineSnapshot),

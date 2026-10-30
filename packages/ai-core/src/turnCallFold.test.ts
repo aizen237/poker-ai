@@ -5,6 +5,16 @@ import { compareTurnCallFold, turnCallFoldDisplay, compareFlopCallFold, flopCall
 const fixture = (): TurnCallFoldInput => ({ street: "turn", heroCards: parseCards("Ah Ad"), board: parseCards("2s 7h 9d Jc"),
   activeOpponents: 1, potBeforeCall: 30, amountToCall: 10, heroStack: 200, opponentStack: 200, accounting: "single_pot_no_rake" });
 
+it("Hand471 withholds all numerical output when the fixed bluff mixture is impossible", () => {
+  const result = compareTurnCallFold({ ...fixture(), heroCards: parseCards("Td 2h"), board: parseCards("4h 4s Th Ts"),
+    potBeforeCall: 25, amountToCall: 4 });
+  expect(result).toMatchObject({ status: "abstained", liveAuthorized: false, llmMayChoose: false, chosenAction: null,
+    requiredEquity: null, equityBounds: null, callEVBounds: null, assumptions: [],
+    reason: "Strong value / 10% bluffs: no legal bluff combinations; assumption cannot be evaluated" });
+  expect(turnCallFoldDisplay(result).join(" ")).toContain("Turn checkdown calculation withheld");
+  expect(turnCallFoldDisplay(result).join(" ")).not.toMatch(/Estimated turn equity|CALL EV|preferred/);
+});
+
 describe.each(["turn", "flop"] as const)("%s conditional diagnostics never select an action", street => {
   const compare = street === "flop" ? compareFlopCallFold : compareTurnCallFold;
   const displayResult = street === "flop" ? flopCallFoldDisplay : turnCallFoldDisplay;

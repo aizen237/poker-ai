@@ -253,6 +253,7 @@ function riverCallFoldReadiness(read: LiveTableRead, assessment: LiveStateAssess
   return { status: "abstained" as const, liveAuthorized: false as const,
     unsafe: contradictions.length > 0 || ui?.status === "contradicted" || illustration.unsafe,
     illustration: illustration.calculation, binding: illustration.binding, illustrationLines: illustration.lines,
+    modelAbstention: illustration.modelAbstention,
     requiredProofs: relevant, reasons: [...new Set([...contradictions, ...reasons])], warning: flop ? FLOP_CHECKDOWN_WARNING : turn ? TURN_CHECKDOWN_WARNING : RIVER_PAIRWISE_WARNING };
 }
 

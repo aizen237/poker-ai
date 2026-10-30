@@ -14,7 +14,8 @@ let cachedFlop: { key: string; result: ReturnType<typeof compareFlopCallFold> } 
 export function riverIllustration(read: LiveTableRead, assessment: LiveStateAssessment,
   timeline: LiveTimelineDiagnostic | null, envelope: DecisionProofs) {
   const w = timeline?.sourceStatus.riverObservation;
-  const empty = (reasons: string[] = [], unsafe = false) => ({ binding: null, calculation: null, lines: [] as string[], reasons, unsafe });
+  const empty = (reasons: string[] = [], unsafe = false) => ({ binding: null, calculation: null,
+    modelAbstention: null as string | null, lines: [] as string[], reasons, unsafe });
   if (!w || !timeline || Date.now() < w.receivedAt || Date.now() >= w.expiresAt) return empty();
   const source = timeline.sourceStatus, identity = source.identity, state = assessment.state;
   const card = (c: { rank: number; suit: string }) => `${"23456789TJQKA"[c.rank - 2]}${c.suit}`;
@@ -65,13 +66,18 @@ export function riverIllustration(read: LiveTableRead, assessment: LiveStateAsse
     if (cachedTurn?.key !== key) cachedTurn = { key, result: compareTurnCallFold(input) };
   } else if (cached?.key !== key) cached = { key, result: compareRiverCallFold(input) };
   const calculation = w.street === "flop" ? cachedFlop!.result : w.street === "turn" ? cachedTurn!.result : cached!.result;
-  if (calculation.status === "abstained") return empty([calculation.reason]);
   // Enumeration may take time; it never renews the source/control deadline.
   if (Date.now() < w.receivedAt || Date.now() >= w.expiresAt ||
       assessCallControlReadiness(read.callControl ?? null, w.payableCall, w.receivedAt, Date.now()).status !== "observed_matching") return empty();
-  return { binding: { tableId: w.tableId, handId: w.handId, heroId: w.heroId, generation: w.generation,
-    cursor: w.cursor, sequence: w.sequence, receivedAt: w.receivedAt, expiresAt: w.expiresAt, decisionEpoch: envelope.decisionEpoch },
-    calculation, reasons: [], unsafe: false,
+  const binding = { tableId: w.tableId, handId: w.handId, heroId: w.heroId, generation: w.generation,
+    cursor: w.cursor, sequence: w.sequence, receivedAt: w.receivedAt, expiresAt: w.expiresAt, decisionEpoch: envelope.decisionEpoch };
+  // Model coverage and evidence validity are independent. Keep the original
+  // binding for diagnostics only; an abstention supplies no numerical result.
+  if (calculation.status === "abstained") return { binding, calculation: null, modelAbstention: calculation.reason,
+    reasons: [calculation.reason], unsafe: false,
+    lines: ["Source and DOM binding validated; numerical illustration withheld by the model.",
+      "No verified recommendation or action authorization."] };
+  return { binding, calculation, modelAbstention: null, reasons: [], unsafe: false,
     lines: ["ILLUSTRATIVE ONLY — not verified; no action authorization.",
       `Assumes all ${w.grossPotBeforeCall} chips are hero-contestable in one pot, no unresolved returns and zero rake/drop. These assumptions are unproven.`,
       `Collected ${w.collectedPot} + current bet ${w.streetSubtotal} = ${w.grossPotBeforeCall} chips before CALL; payable CALL ${w.payableCall}. The bet is included once.`,
