@@ -25,7 +25,7 @@ afterEach(() => { mocks.timeline = null; vi.restoreAllMocks(); vi.unstubAllGloba
 // paid-street collection/deals are synthetic variants of its flop collection.
 const fixture = JSON.parse(readFileSync(new URL("./fixtures/pokernow-flop-synthetic.json", import.meta.url), "utf8"));
 type Street = "flop" | "turn" | "river";
-async function table() {
+async function table(reportedFlop = false) {
   vi.resetModules();
   let now = 100000, cursor = 1000, sequence = 0;
   vi.spyOn(Date, "now").mockImplementation(() => now);
@@ -47,6 +47,15 @@ async function table() {
   for (const method of ["log", "warn", "error"] as const) vi.spyOn(console, method).mockImplementation(() => {});
 
   const base = structuredClone(fixture.frames[0].payload.gameState);
+  // Reported cards/positions only; all source shapes, times, pots and stacks
+  // remain synthetic scaffolding, not a reconstruction of the failed hand.
+  const heroCards = reportedFlop ? ["2s", "2c"] : ["8s", "As"];
+  if (reportedFlop) {
+    base.pC.player1.cards = heroCards.map(value => ({ value, showing: false }));
+    base.seats = base.seats.map(([seat, id]: [number, string]) =>
+      [seat, id === "player3" ? "player4" : id === "player4" ? "player3" : id]);
+    base.dealerID = "player4"; base.sBPI = "player3";
+  }
   const stacks = Object.fromEntries(Object.entries(base.players).map(([id, p]: [string, any]) => [id, p.stack as number]));
   let board: string[] = [], pot = 12, bets: Record<string, number> = {}, actor: string | null = "player1";
   let checked = false, call = 0;
@@ -59,7 +68,7 @@ async function table() {
       <div class="blind-value"><span class="chips-value"><span class="normal-value">2</span></span></div><div class="dealer-position-3"></div>
       ${base.seats.map(([seat, id]: [number, string]) => `<div class="table-player-${seat} ${id === "player1" ? "you-player" : ""} ${base.pGS[id] === "fold" ? "fold" : ""} ${actor === id ? "decision-current" : ""}">
         <div class="table-player-name"><a>${id}</a></div><div class="table-player-stack"><span class="normal-value">${stacks[id]! - (bets[id] ?? 0)}</span></div>
-        <div class="table-player-cards">${id === "player1" ? ["8s", "As"].map(card).join("") : ""}</div>
+        <div class="table-player-cards">${id === "player1" ? heroCards.map(card).join("") : ""}</div>
         ${bets[id] !== undefined || id === "player1" && checked ? `<div class="table-player-bet-value">${bets[id] || "check"}</div>` : ""}</div>`).join("")}
       <button type="button">Call ${call}</button>`;
     document.querySelector("button")!.getBoundingClientRect = () => ({ width: 30, height: 20 } as DOMRect);
@@ -87,7 +96,8 @@ async function table() {
   function decision(street: Street, amount: number, options: { opponentFirst?: boolean; alterDeal?: (p: any) => void } = {}) {
     pot += Object.values(bets).reduce((a, b) => a + b, 0);
     for (const [id, value] of Object.entries(bets)) stacks[id]! -= value;
-    board = ["2h", "9s", "4h", "Qs", "6c"].slice(0, street === "flop" ? 3 : street === "turn" ? 4 : 5);
+    board = (reportedFlop ? ["Jh", "8d", "8c", "Qs", "6c"] : ["2h", "9s", "4h", "Qs", "6c"])
+      .slice(0, street === "flop" ? 3 : street === "turn" ? 4 : 5);
     const deal = structuredClone(fixture.frames[1].payload);
     Object.assign(deal, { gT: [1, board.length - 2], oTC: { "1": board }, pot,
       players: Object.fromEntries(Object.entries(stacks).map(([id, stack]) => [id, { stack }])),
@@ -122,6 +132,37 @@ async function table() {
 }
 
 describe("combined postflop pipeline", () => {
+  it("illustrates the reported HJ 22 versus BTN CALL4 only with a supported synthetic source sequence", async () => {
+    const t = await table(true); t.decision("flop", 4);
+    const read = readLiveTable(), assessment = assessLiveState(read.raw, read.context);
+    expect(assessment.positions.get(1)).toBe("HJ");
+    expect(assessment.positions.get(3)).toBe("BTN");
+    expect(assessment.activeOpponents).toBe(1);
+    expect(assessment.bigBlind).toBe(2); expect(assessment.smallBlind).toBe(1);
+    const w = t.runtime.snapshot().sourceStatus.riverObservation!;
+    expect(w).toMatchObject({ street: "flop", heroCards: ["2s", "2c"], board: ["Jh", "8d", "8c"],
+      heroChecked: true, payableCall: 4, collectedPot: 12, grossPotBeforeCall: 16 });
+    expect(w.expiresAt).toBe(w.receivedAt + 10_000);
+    const proofs = t.proofs(), calculation = proofs.flopCallFold!.illustration!;
+    expect(proofs.activation.allowed).toBe(false);
+    expect(calculation).toMatchObject({ status: "conditional", chosenAction: null, llmMayChoose: false,
+      requiredEquity: 0.2, foldEV: 0 });
+    t.poll();
+    expect(t.overlay()).toContain("Estimated flop equity");
+    expect(t.overlay()).toContain("CALL EV");
+    expect(t.overlay()).toContain("ILLUSTRATIVE ONLY");
+    // The status remains WAITING even when the separate numerical panel exists.
+    expect(t.overlay()).toContain("WAITING FOR PROOF");
+    const dom = readLiveTable().raw;
+    t.runtime.gap("Synthetic missing source; same visible cards and CALL.");
+    t.poll();
+    expect(readLiveTable().raw).toEqual(dom);
+    expect(t.overlay()).toContain("Street: flop");
+    expect(t.overlay()).toContain("No validated flop source activation");
+    expect(t.overlay()).not.toContain("CALL EV");
+    expect(t.fetch).not.toHaveBeenCalled();
+  }, 30000);
+
   it("reads and renders one continuous hand through paid flop, turn, river and the next hand", async () => {
     const t = await table(); t.poll(); expect(t.overlay()).toContain("Street: preflop");
     let sequence = 0;

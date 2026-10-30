@@ -56,9 +56,17 @@ export function projectRiverObservation(data: unknown, knownHero: string | null)
     // Reuse the collection/deal shape on every street. Paid streets publish pot
     // and stacks; a check/check deal above has no new chips to collect. Later
     // street variants are illustrative input support, not live certificates.
-    if (exact(raw, [...turn, "gT", "mR", "pC", "tB", "cHB", "oTC", "pot", "cRPI", "players", "bigBlindCheck"]) &&
+    const paidDeal = [...turn, "gT", "mR", "pC", "tB", "cHB", "oTC", "pot", "cRPI", "players"];
+    // Hand435 omits bigBlindCheck on the paid flop deal. This is a separate
+    // closed wire shape, not evidence that an absent flag means false. The
+    // linked reducer still requires collection/stack reconciliation, cleared
+    // wagers and a heads-up preflop -> flop boundary before opening a window.
+    // Do not extend omission support to later streets or accept explicit true/null.
+    const paidDealShape = exact(raw, [...paidDeal, "bigBlindCheck"]) && raw.bigBlindCheck === false ||
+      same(raw.gT, [1, 1]) && exact(raw, paidDeal);
+    if (paidDealShape &&
         active && [1, 2, 3].some(index => same(raw.gT, [1, index])) && raw.cHB === 0 && chips(raw.mR) && chips(raw.mAVTB) &&
-        raw.bigBlindCheck === false && same(raw.cRPI, []) && object(raw.players) &&
+        same(raw.cRPI, []) && object(raw.players) &&
         Object.values(raw.players).every(p => object(p) && exact(p, ["stack"]) && chips(p.stack)) &&
         object(raw.tB) && Object.values(raw.tB).every(v => v === "<D>"))
       result.kind = raw.gT[1] === 1 ? "flop_board" : raw.gT[1] === 2 ? "turn_board" : "river";
