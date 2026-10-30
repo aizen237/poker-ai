@@ -4,6 +4,9 @@ import { initializeUtgState, advanceUtgState, type BoundedUtgState } from "./fir
 const object = (v: unknown): v is Record<string, any> => !!v && typeof v === "object" && !Array.isArray(v);
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const chips = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+// A CALL can settle near the decision deadline. Retain its evidence only for
+// the next paid turn frame, never as a renewed decision or action authority.
+const PAID_TURN_CONTINUITY_MS = 2_000;
 const exact = (v: Record<string, any>, keys: string[]) => Object.keys(v).length === keys.length && keys.every(k => Object.hasOwn(v, k));
 const common = "now pre eventsData mEV fV sN".split(" ");
 const turn = [...common, "cPI", "sNA", "pASA", "pITT", "sNAA", "mAVTB"];
@@ -127,13 +130,17 @@ export function createRiverObservation(tableId: string, now: () => number) {
   let sequence = 0, generation = 0, at = -1, pot: number | null = null;
   let pending: { step: number; street: RiverObservation["street"]; villain: string; base: BoundedUtgState; pot: number; bet: number } | null = null;
   let observation: RiverObservation | null = null;
-  let actorSource: { handId: string; handNumber: number; street: number[]; actor: string; expiresAt: number; callCursor?: number } | null = null;
+  type ActorSource = { handId: string; handNumber: number; street: number[]; actor: string; cursor: number; expiresAt: number };
+  let actorSource: ActorSource | null = null;
+  let paidTurnBridge: { actor: ActorSource; callCursor: number; receivedAt: number; sequence: number; generation: number } | null = null;
   let reason = "Waiting for a continuous postflop source window.";
-  const reset = () => { state = null; heroId = null; pot = null; pending = null; observation = null; actorSource = null; reason = "Postflop observation invalidated; fresh registration is required."; };
+  const reset = () => { state = null; heroId = null; pot = null; pending = null; observation = null; actorSource = null; paidTurnBridge = null; reason = "Postflop observation invalidated; fresh registration is required."; };
   return {
     reset,
     accept(input: unknown, seq: unknown, gen: unknown, received: unknown) {
       observation = null; // Every new source frame invalidates; polling never renews.
+      const bridge = paidTurnBridge;
+      paidTurnBridge = null; // Single use: even an unrelated valid event consumes it.
       try {
         if (!object(input) || !chips(seq) || !chips(gen) || !chips(received) || received > now() || received < at ||
             now() - received >= 10_000 || !object(input.source)) throw new Error("Invalid receipt");
@@ -159,12 +166,20 @@ export function createRiverObservation(tableId: string, now: () => number) {
         if (s.event === "registered" || previous?.hI !== state.hI) { pending = null; pot = null; }
         if (s.event === "registered" || actorSource && (actorSource.handId !== state.hI || actorSource.handNumber !== state.gN ||
             actorSource.actor !== state.cPI)) actorSource = null;
-        if (p.kind === "turn" && typeof p.actor === "string" && p.actor === state.cPI && p.actor === state.pITT)
-          actorSource = { handId: state.hI, handNumber: state.gN, street: [...state.gT], actor: p.actor, expiresAt: received + 10_000 };
-        if (p.kind === "call" && actorSource && previous?.pITT === heroId && previous.cPI === heroId && p.actor === heroId &&
+        if (p.kind === "call" && actorSource && previous?.now === actorSource.cursor &&
+            received < actorSource.expiresAt && now() < actorSource.expiresAt && state.now - actorSource.cursor < 10_000 &&
+            actorSource.actor === heroId && same(actorSource.street, [1, 1]) &&
+            previous.pITT === heroId && previous.cPI === heroId && p.actor === heroId && state.pITT === null &&
             same(state.gT, [1, 1]) && (previous.tB[heroId] === 0 || previous.tB[heroId] === undefined) &&
-            state.cRPI.every((id: string) => state!.pGS[id] === "inGame" && state!.tB[id] === p.amount))
-          actorSource.callCursor = state.now;
+            chips(p.amount) && p.amount > 0 && state.cRPI.length === 2 && state.cRPI.includes(heroId) &&
+            state.iHPI.filter((id: string) => state!.pGS[id] === "inGame").length === 2 &&
+            state.cRPI.every((id: string) => state!.pGS[id] === "inGame" && state!.tB[id] === p.amount &&
+              state!.players[id].stack > p.amount! && (id === heroId || previous.tB[id] === p.amount)))
+          paidTurnBridge = { actor: actorSource, callCursor: state.now, receivedAt: received, sequence: seq, generation: gen };
+        // An explicit activation is usable only by its immediately linked CALL.
+        actorSource = p.kind === "turn" && typeof p.actor === "string" && p.actor === state.cPI && p.actor === state.pITT
+          ? { handId: state.hI, handNumber: state.gN, street: [...state.gT], actor: p.actor, cursor: state.now, expiresAt: received + 10_000 }
+          : null;
         if (p.pot !== undefined) { if (!chips(p.pot)) throw new Error("Invalid pot"); pot = p.pot; }
         if (s.event !== "registered" && previous && previous.hI === state.hI && !same(previous.gT, state.gT) &&
             [1, 2, 3].some(index => same(state!.gT, [1, index]))) {
@@ -180,14 +195,19 @@ export function createRiverObservation(tableId: string, now: () => number) {
             throw new Error("Postflop collection is missing or contradicts previous wagers, pot or stacks.");
         }
         if (p.kind === "turn_board_carried_actor") {
-          // No cPI is inserted into the projection. Carry only an independently
-          // observed, unexpired explicit actor through the linked flop call.
-          if (!previous || Object.hasOwn(s.frame, "cPI") || !actorSource || actorSource.callCursor !== previous.now || now() >= actorSource.expiresAt ||
-              actorSource.handId !== state.hI || actorSource.handNumber !== state.gN || !same(actorSource.street, [1, 1]) ||
-              actorSource.actor !== heroId || previous.cPI !== heroId || previous.pITT !== null || state.pITT !== heroId ||
+          // The original decision already ended at CALL. This short continuity
+          // bridge proves only its immediate collection, using both clocks.
+          if (!previous || Object.hasOwn(s.frame, "cPI") || !bridge || bridge.callCursor !== previous.now ||
+              bridge.sequence + 1 !== seq || bridge.generation !== gen ||
+              received - bridge.receivedAt >= PAID_TURN_CONTINUITY_MS || now() - bridge.receivedAt >= PAID_TURN_CONTINUITY_MS ||
+              state.now - bridge.callCursor >= PAID_TURN_CONTINUITY_MS ||
+              bridge.actor.handId !== state.hI || bridge.actor.handNumber !== state.gN || !same(bridge.actor.street, [1, 1]) ||
+              bridge.actor.actor !== heroId || previous.cPI !== heroId || previous.pITT !== null || state.pITT !== heroId ||
               previous.hI !== state.hI || previous.gN !== state.gN || !same(previous.gT, [1, 1]) ||
               !same(previous.seats, state.seats) || !same(previous.iHPI, state.iHPI) || !same(previous.pGS, state.pGS) ||
               !same(previous.pC, state.pC) || previous.dealerID !== state.dealerID ||
+              Object.entries(previous.players).some(([id, player]) => !same(state!.players[id],
+                { ...(player as object), stack: previous.players[id].stack - (previous.tB[id] ?? 0) })) ||
               Object.keys(previous.tB).length !== 2 || !chips(previous.tB[heroId]) || previous.tB[heroId] <= 0 ||
               Object.entries(previous.tB).some(([id, amount]) => previous.pGS[id] !== "inGame" || amount !== previous.tB[s.heroId!]))
             throw new Error("Paid turn lacks a matching independently established flop actor.");

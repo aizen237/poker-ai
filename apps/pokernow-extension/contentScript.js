@@ -12164,6 +12164,7 @@
   var object8 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
   var same4 = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   var chips4 = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+  var PAID_TURN_CONTINUITY_MS = 2e3;
   var common3 = "now pre eventsData mEV fV sN".split(" ");
   var turn = [...common3, "cPI", "sNA", "pASA", "pITT", "sNAA", "mAVTB"];
   var fields = new Set("id hI gN now pre r gT seats iHPI dealerID dealerSeat sBPI bBPI tB pGS cPI pITT smallBlind bigBlind ante deadButton gM mode oTC gameResult aD aS cM cR cRPI rHP rHC eventsData version fV nR mTB rIT sPM players pC sBS sNA pASA sNAA mAVTB wBACPI mEV sN mR cHB pot uP aGC aVC dSB gDM pTB sG lE lSPI pASA dLTWTB dLTWoTB ownerID status bigBlindCheck directToNexTurn recordChatForReplay allowStandaloneRebuy rH sPI tHC".split(" "));
@@ -12173,6 +12174,7 @@
     let pending = null;
     let observation = null;
     let actorSource = null;
+    let paidTurnBridge = null;
     let reason = "Waiting for a continuous postflop source window.";
     const reset = () => {
       state = null;
@@ -12181,12 +12183,15 @@
       pending = null;
       observation = null;
       actorSource = null;
+      paidTurnBridge = null;
       reason = "Postflop observation invalidated; fresh registration is required.";
     };
     return {
       reset,
       accept(input, seq, gen, received) {
         observation = null;
+        const bridge = paidTurnBridge;
+        paidTurnBridge = null;
         try {
           if (!object8(input) || !chips4(seq) || !chips4(gen) || !chips4(received) || received > now() || received < at || now() - received >= 1e4 || !object8(input.source)) throw new Error("Invalid receipt");
           const p = input, s = p.source;
@@ -12208,10 +12213,9 @@
             pot = null;
           }
           if (s.event === "registered" || actorSource && (actorSource.handId !== state.hI || actorSource.handNumber !== state.gN || actorSource.actor !== state.cPI)) actorSource = null;
-          if (p.kind === "turn" && typeof p.actor === "string" && p.actor === state.cPI && p.actor === state.pITT)
-            actorSource = { handId: state.hI, handNumber: state.gN, street: [...state.gT], actor: p.actor, expiresAt: received + 1e4 };
-          if (p.kind === "call" && actorSource && previous?.pITT === heroId && previous.cPI === heroId && p.actor === heroId && same4(state.gT, [1, 1]) && (previous.tB[heroId] === 0 || previous.tB[heroId] === void 0) && state.cRPI.every((id) => state.pGS[id] === "inGame" && state.tB[id] === p.amount))
-            actorSource.callCursor = state.now;
+          if (p.kind === "call" && actorSource && previous?.now === actorSource.cursor && received < actorSource.expiresAt && now() < actorSource.expiresAt && state.now - actorSource.cursor < 1e4 && actorSource.actor === heroId && same4(actorSource.street, [1, 1]) && previous.pITT === heroId && previous.cPI === heroId && p.actor === heroId && state.pITT === null && same4(state.gT, [1, 1]) && (previous.tB[heroId] === 0 || previous.tB[heroId] === void 0) && chips4(p.amount) && p.amount > 0 && state.cRPI.length === 2 && state.cRPI.includes(heroId) && state.iHPI.filter((id) => state.pGS[id] === "inGame").length === 2 && state.cRPI.every((id) => state.pGS[id] === "inGame" && state.tB[id] === p.amount && state.players[id].stack > p.amount && (id === heroId || previous.tB[id] === p.amount)))
+            paidTurnBridge = { actor: actorSource, callCursor: state.now, receivedAt: received, sequence: seq, generation: gen };
+          actorSource = p.kind === "turn" && typeof p.actor === "string" && p.actor === state.cPI && p.actor === state.pITT ? { handId: state.hI, handNumber: state.gN, street: [...state.gT], actor: p.actor, cursor: state.now, expiresAt: received + 1e4 } : null;
           if (p.pot !== void 0) {
             if (!chips4(p.pot)) throw new Error("Invalid pot");
             pot = p.pot;
@@ -12222,7 +12226,10 @@
               throw new Error("Postflop collection is missing or contradicts previous wagers, pot or stacks.");
           }
           if (p.kind === "turn_board_carried_actor") {
-            if (!previous || Object.hasOwn(s.frame, "cPI") || !actorSource || actorSource.callCursor !== previous.now || now() >= actorSource.expiresAt || actorSource.handId !== state.hI || actorSource.handNumber !== state.gN || !same4(actorSource.street, [1, 1]) || actorSource.actor !== heroId || previous.cPI !== heroId || previous.pITT !== null || state.pITT !== heroId || previous.hI !== state.hI || previous.gN !== state.gN || !same4(previous.gT, [1, 1]) || !same4(previous.seats, state.seats) || !same4(previous.iHPI, state.iHPI) || !same4(previous.pGS, state.pGS) || !same4(previous.pC, state.pC) || previous.dealerID !== state.dealerID || Object.keys(previous.tB).length !== 2 || !chips4(previous.tB[heroId]) || previous.tB[heroId] <= 0 || Object.entries(previous.tB).some(([id, amount]) => previous.pGS[id] !== "inGame" || amount !== previous.tB[s.heroId]))
+            if (!previous || Object.hasOwn(s.frame, "cPI") || !bridge || bridge.callCursor !== previous.now || bridge.sequence + 1 !== seq || bridge.generation !== gen || received - bridge.receivedAt >= PAID_TURN_CONTINUITY_MS || now() - bridge.receivedAt >= PAID_TURN_CONTINUITY_MS || state.now - bridge.callCursor >= PAID_TURN_CONTINUITY_MS || bridge.actor.handId !== state.hI || bridge.actor.handNumber !== state.gN || !same4(bridge.actor.street, [1, 1]) || bridge.actor.actor !== heroId || previous.cPI !== heroId || previous.pITT !== null || state.pITT !== heroId || previous.hI !== state.hI || previous.gN !== state.gN || !same4(previous.gT, [1, 1]) || !same4(previous.seats, state.seats) || !same4(previous.iHPI, state.iHPI) || !same4(previous.pGS, state.pGS) || !same4(previous.pC, state.pC) || previous.dealerID !== state.dealerID || Object.entries(previous.players).some(([id, player2]) => !same4(
+              state.players[id],
+              { ...player2, stack: previous.players[id].stack - (previous.tB[id] ?? 0) }
+            )) || Object.keys(previous.tB).length !== 2 || !chips4(previous.tB[heroId]) || previous.tB[heroId] <= 0 || Object.entries(previous.tB).some(([id, amount]) => previous.pGS[id] !== "inGame" || amount !== previous.tB[s.heroId]))
               throw new Error("Paid turn lacks a matching independently established flop actor.");
           }
           if (p.kind === "river" || p.kind === "turn_board" || p.kind === "turn_board_carried_actor" || p.kind === "flop_board") {
