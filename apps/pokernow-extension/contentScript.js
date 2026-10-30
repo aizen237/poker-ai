@@ -12152,6 +12152,7 @@
     let sequence = 0, generation = 0, at = -1, pot = null;
     let pending = null;
     let observation = null;
+    let actorSource = null;
     let reason = "Waiting for a continuous postflop source window.";
     const reset = () => {
       state = null;
@@ -12159,6 +12160,7 @@
       pot = null;
       pending = null;
       observation = null;
+      actorSource = null;
       reason = "Postflop observation invalidated; fresh registration is required.";
     };
     return {
@@ -12171,6 +12173,11 @@
           if (!s.heroId || s.event !== "registered" && (seq !== sequence + 1 || gen !== generation || s.heroId !== heroId || !state) || s.event === "registered" && gen <= generation) throw new Error("Discontinuous river source");
           const previous = state, previousPot = pot;
           state = s.event === "registered" ? initializeUtgState(s.frame, tableId, s.heroId) : advanceUtgState(state, s.frame, tableId, s.heroId);
+          if (p.standingUpPlayer !== void 0) {
+            const id = p.standingUpPlayer;
+            if (!previous || s.event !== "gC" || !same4(previous.gT, [1, 5]) || !same4(state.gT, [1, 0]) || previous.hI === state.hI || state.gN !== previous.gN + 1 || id === s.heroId || previous.players[id]?.status !== "inGame" || state.players[id]?.status !== "standingUp" || !previous.iHPI.includes(id) || !same4(state.iHPI, previous.iHPI.filter((player2) => player2 !== id)) || state.pGS[id] !== "fold" || Object.hasOwn(state.pC, id) || !same4(previous.seats, state.seats) || state.players[id].stack !== previous.players[id].stack || [state.cPI, state.pITT, state.dealerID, state.sBPI, state.bBPI].includes(id))
+              throw new Error("Unsupported standing-player hand boundary.");
+          }
           heroId = s.heroId;
           sequence = seq;
           generation = gen;
@@ -12180,6 +12187,11 @@
             pending = null;
             pot = null;
           }
+          if (s.event === "registered" || actorSource && (actorSource.handId !== state.hI || actorSource.handNumber !== state.gN || actorSource.actor !== state.cPI)) actorSource = null;
+          if (p.kind === "turn" && typeof p.actor === "string" && p.actor === state.cPI && p.actor === state.pITT)
+            actorSource = { handId: state.hI, handNumber: state.gN, street: [...state.gT], actor: p.actor, expiresAt: received + 1e4 };
+          if (p.kind === "call" && actorSource && previous?.pITT === heroId && previous.cPI === heroId && p.actor === heroId && same4(state.gT, [1, 1]) && (previous.tB[heroId] === 0 || previous.tB[heroId] === void 0) && state.cRPI.every((id) => state.pGS[id] === "inGame" && state.tB[id] === p.amount))
+            actorSource.callCursor = state.now;
           if (p.pot !== void 0) {
             if (!chips4(p.pot)) throw new Error("Invalid pot");
             pot = p.pot;
@@ -12189,8 +12201,12 @@
             if (collected > 0 && (p.pot === void 0 || p.pot < collected || previousPot !== null && p.pot !== previousPot + collected || Object.entries(previous.tB).some(([id, value]) => Number(value) > 0 && state.players[id]?.stack !== previous.players[id].stack - Number(value))))
               throw new Error("Postflop collection is missing or contradicts previous wagers, pot or stacks.");
           }
-          if (p.kind === "river" || p.kind === "turn_board" || p.kind === "flop_board") {
-            const street = p.kind === "river" ? "river" : p.kind === "turn_board" ? "turn" : "flop";
+          if (p.kind === "turn_board_carried_actor") {
+            if (!previous || Object.hasOwn(s.frame, "cPI") || !actorSource || actorSource.callCursor !== previous.now || now() >= actorSource.expiresAt || actorSource.handId !== state.hI || actorSource.handNumber !== state.gN || !same4(actorSource.street, [1, 1]) || actorSource.actor !== heroId || previous.cPI !== heroId || previous.pITT !== null || state.pITT !== heroId || previous.hI !== state.hI || previous.gN !== state.gN || !same4(previous.gT, [1, 1]) || !same4(previous.seats, state.seats) || !same4(previous.iHPI, state.iHPI) || !same4(previous.pGS, state.pGS) || !same4(previous.pC, state.pC) || previous.dealerID !== state.dealerID || Object.keys(previous.tB).length !== 2 || !chips4(previous.tB[heroId]) || previous.tB[heroId] <= 0 || Object.entries(previous.tB).some(([id, amount]) => previous.pGS[id] !== "inGame" || amount !== previous.tB[s.heroId]))
+              throw new Error("Paid turn lacks a matching independently established flop actor.");
+          }
+          if (p.kind === "river" || p.kind === "turn_board" || p.kind === "turn_board_carried_actor" || p.kind === "flop_board") {
+            const street = p.kind === "river" ? "river" : p.kind === "flop_board" ? "flop" : "turn";
             const streetIndex = street === "river" ? 3 : street === "turn" ? 2 : 1;
             const boardCount = streetIndex + 2, previousBoardCount = street === "flop" ? 0 : boardCount - 1;
             const active = state.iHPI.filter((id) => state.pGS[id] === "inGame");

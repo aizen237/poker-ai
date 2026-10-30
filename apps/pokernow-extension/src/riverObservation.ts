@@ -14,7 +14,8 @@ const fields = new Set(("id hI gN now pre r gT seats iHPI dealerID dealerSeat sB
 interface RiverProjection {
   source: UtgProjection;
   pot?: number;
-  kind: "other" | "river" | "turn_board" | "flop_board" | "check" | "turn" | "bet";
+  standingUpPlayer?: string;
+  kind: "other" | "river" | "turn_board" | "turn_board_carried_actor" | "flop_board" | "check" | "turn" | "bet" | "call";
   actor: string | null;
   amount: number | null;
 }
@@ -40,13 +41,26 @@ export function projectRiverObservation(data: unknown, knownHero: string | null)
         else if (Object.values(hand).some(v => v !== null && (typeof v !== "string" || v.length > 32))) return null;
       }
     }
+    // Hand465 frame 2: a settled hand -> new hand excludes one standing player.
+    // Only this closed status/deletion patch may discard these two UI flags;
+    // the linked reducer below must independently confirm the hand/roster change.
+    const standingUpShape = event === "gC" && same(raw.gT, [1, 0]) && raw.gameResult === "<D>" &&
+      exact(raw, [...common, ..."gN gT hI mR nR pC tB cHB cPI oTC pGS rHP sBS sNA bBPI cRPI iHPI pASA pITT sBPI sNAA wBACPI players dealerID dealerSeat gameResult rHC".split(" ")]) &&
+      object(raw.players) && Object.keys(raw.players).length === 1;
+    const standingUpPlayer = standingUpShape ? Object.keys(raw.players)[0]! : null;
+    const standingUp = standingUpPlayer !== null && standingUpPlayer !== knownHero && object(raw.players[standingUpPlayer]) &&
+      exact(raw.players[standingUpPlayer], ["status", "sUNH", "hideAway"]) &&
+      raw.players[standingUpPlayer].status === "standingUp" && raw.players[standingUpPlayer].sUNH === "<D>" &&
+      raw.players[standingUpPlayer].hideAway === "<D>";
     if (object(raw.players) && Object.values(raw.players).some(p => !object(p) ||
+        !(standingUp && p === raw.players[standingUpPlayer!]) &&
         Object.keys(p).some(k => !["id", "stack", "status", "disconnectedSince", "dAC", "name", "avatarID", "winCount", "quitCount", "isNetworkPlayer"].includes(k)))) return null;
     if (object(raw.tB)) normalized.tB = Object.fromEntries(Object.entries(raw.tB).map(([id, n]) => [id, n === "check" ? 0 : n]));
     const source = projectFirstUtgSource("42" + JSON.stringify([event, event === "registered" ? { currentPlayer: payload.currentPlayer, gameState: normalized } : normalized]), knownHero);
     if (!source) return null;
     // Discard the unrelated profile recognizers; only their sanitized frame is used.
     const result: RiverProjection = { source: { event: source.event, heroId: source.heroId, frame: source.frame },
+      ...(standingUp ? { standingUpPlayer: standingUpPlayer! } : {}),
       ...(Object.hasOwn(raw, "pot") ? { pot: raw.pot } : {}), kind: "other", actor: null, amount: null };
     const active = raw.cPI === raw.pITT && typeof raw.cPI === "string" && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now;
     if (exact(raw, turn) && active && chips(raw.mAVTB)) { result.kind = "turn"; result.actor = raw.cPI; }
@@ -61,15 +75,20 @@ export function projectRiverObservation(data: unknown, knownHero: string | null)
     // closed wire shape, not evidence that an absent flag means false. The
     // linked reducer still requires collection/stack reconciliation, cleared
     // wagers and a heads-up preflop -> flop boundary before opening a window.
-    // Do not extend omission support to later streets or accept explicit true/null.
+    // Keep this explicit-actor omission shape flop-only; never accept true/null.
     const paidDealShape = exact(raw, [...paidDeal, "bigBlindCheck"]) && raw.bigBlindCheck === false ||
       same(raw.gT, [1, 1]) && exact(raw, paidDeal);
-    if (paidDealShape &&
-        active && [1, 2, 3].some(index => same(raw.gT, [1, index])) && raw.cHB === 0 && chips(raw.mR) && chips(raw.mAVTB) &&
+    // Hand465 is a DIFFERENT closed shape: both cPI and bigBlindCheck absent,
+    // paid turn only. This is a candidate, never an actor inferred from pITT.
+    // The receiver requires a matching explicit activation in this same hand/flop.
+    const carriedTurnShape = event === "gC" && same(raw.gT, [1, 2]) && exact(raw, paidDeal.filter(k => k !== "cPI")) &&
+      raw.pITT === source.heroId && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now;
+    if ((paidDealShape && active || carriedTurnShape) &&
+        [1, 2, 3].some(index => same(raw.gT, [1, index])) && raw.cHB === 0 && chips(raw.mR) && chips(raw.mAVTB) &&
         same(raw.cRPI, []) && object(raw.players) &&
         Object.values(raw.players).every(p => object(p) && exact(p, ["stack"]) && chips(p.stack)) &&
         object(raw.tB) && Object.values(raw.tB).every(v => v === "<D>"))
-      result.kind = raw.gT[1] === 1 ? "flop_board" : raw.gT[1] === 2 ? "turn_board" : "river";
+      result.kind = carriedTurnShape ? "turn_board_carried_actor" : raw.gT[1] === 1 ? "flop_board" : raw.gT[1] === 2 ? "turn_board" : "river";
     const action = raw.sNA === "NSAA" && raw.pITT === null && chips(raw.sNAA);
     if (action && object(raw.tB) && Object.keys(raw.tB).length === 1) {
       const [actor, amount] = Object.entries(raw.tB)[0]!;
@@ -79,6 +98,11 @@ export function projectRiverObservation(data: unknown, knownHero: string | null)
       if (chips(amount) && amount > 0 && raw.cHB === amount && same(raw.pGS, {}) && same(raw.cRPI, [actor]) && same(raw.wBACPI, []) &&
           exact(raw, [...common, "mR", "tB", "cHB", "pGS", "sNA", "cRPI", "pITT", "sNAA", "wBACPI"])) {
         result.kind = "bet"; result.actor = actor; result.amount = amount;
+      }
+      if (chips(amount) && amount > 0 && same(raw.pGS, {}) && same(raw.wBACPI, []) &&
+          Array.isArray(raw.cRPI) && raw.cRPI.length === 2 && new Set(raw.cRPI).size === 2 && raw.cRPI.includes(actor) &&
+          exact(raw, [...common, "tB", "pGS", "sNA", "cRPI", "pITT", "sNAA", "wBACPI"])) {
+        result.kind = "call"; result.actor = actor; result.amount = amount;
       }
     }
     return result;
@@ -103,8 +127,9 @@ export function createRiverObservation(tableId: string, now: () => number) {
   let sequence = 0, generation = 0, at = -1, pot: number | null = null;
   let pending: { step: number; street: RiverObservation["street"]; villain: string; base: BoundedUtgState; pot: number; bet: number } | null = null;
   let observation: RiverObservation | null = null;
+  let actorSource: { handId: string; handNumber: number; street: number[]; actor: string; expiresAt: number; callCursor?: number } | null = null;
   let reason = "Waiting for a continuous postflop source window.";
-  const reset = () => { state = null; heroId = null; pot = null; pending = null; observation = null; reason = "Postflop observation invalidated; fresh registration is required."; };
+  const reset = () => { state = null; heroId = null; pot = null; pending = null; observation = null; actorSource = null; reason = "Postflop observation invalidated; fresh registration is required."; };
   return {
     reset,
     accept(input: unknown, seq: unknown, gen: unknown, received: unknown) {
@@ -117,10 +142,29 @@ export function createRiverObservation(tableId: string, now: () => number) {
             s.event === "registered" && gen <= generation) throw new Error("Discontinuous river source");
         const previous = state, previousPot = pot;
         state = s.event === "registered" ? initializeUtgState(s.frame, tableId, s.heroId) : advanceUtgState(state!, s.frame, tableId, s.heroId);
+        if (p.standingUpPlayer !== undefined) {
+          const id = p.standingUpPlayer;
+          if (!previous || s.event !== "gC" || !same(previous.gT, [1, 5]) || !same(state.gT, [1, 0]) ||
+              previous.hI === state.hI || state.gN !== previous.gN + 1 || id === s.heroId ||
+              previous.players[id]?.status !== "inGame" || state.players[id]?.status !== "standingUp" ||
+              !previous.iHPI.includes(id) || !same(state.iHPI, previous.iHPI.filter((player: string) => player !== id)) ||
+              state.pGS[id] !== "fold" || Object.hasOwn(state.pC, id) ||
+              !same(previous.seats, state.seats) || state.players[id].stack !== previous.players[id].stack ||
+              [state.cPI, state.pITT, state.dealerID, state.sBPI, state.bBPI].includes(id))
+            throw new Error("Unsupported standing-player hand boundary.");
+        }
         heroId = s.heroId; sequence = seq; generation = gen; at = received;
         reason = "Continuous observations; waiting for a supported postflop check/bet/activation window.";
         // A new baseline/hand cannot borrow monetary evidence from the old one.
         if (s.event === "registered" || previous?.hI !== state.hI) { pending = null; pot = null; }
+        if (s.event === "registered" || actorSource && (actorSource.handId !== state.hI || actorSource.handNumber !== state.gN ||
+            actorSource.actor !== state.cPI)) actorSource = null;
+        if (p.kind === "turn" && typeof p.actor === "string" && p.actor === state.cPI && p.actor === state.pITT)
+          actorSource = { handId: state.hI, handNumber: state.gN, street: [...state.gT], actor: p.actor, expiresAt: received + 10_000 };
+        if (p.kind === "call" && actorSource && previous?.pITT === heroId && previous.cPI === heroId && p.actor === heroId &&
+            same(state.gT, [1, 1]) && (previous.tB[heroId] === 0 || previous.tB[heroId] === undefined) &&
+            state.cRPI.every((id: string) => state!.pGS[id] === "inGame" && state!.tB[id] === p.amount))
+          actorSource.callCursor = state.now;
         if (p.pot !== undefined) { if (!chips(p.pot)) throw new Error("Invalid pot"); pot = p.pot; }
         if (s.event !== "registered" && previous && previous.hI === state.hI && !same(previous.gT, state.gT) &&
             [1, 2, 3].some(index => same(state!.gT, [1, index]))) {
@@ -135,8 +179,21 @@ export function createRiverObservation(tableId: string, now: () => number) {
                 state!.players[id]?.stack !== previous.players[id].stack - Number(value))))
             throw new Error("Postflop collection is missing or contradicts previous wagers, pot or stacks.");
         }
-        if (p.kind === "river" || p.kind === "turn_board" || p.kind === "flop_board") {
-          const street = p.kind === "river" ? "river" : p.kind === "turn_board" ? "turn" : "flop";
+        if (p.kind === "turn_board_carried_actor") {
+          // No cPI is inserted into the projection. Carry only an independently
+          // observed, unexpired explicit actor through the linked flop call.
+          if (!previous || Object.hasOwn(s.frame, "cPI") || !actorSource || actorSource.callCursor !== previous.now || now() >= actorSource.expiresAt ||
+              actorSource.handId !== state.hI || actorSource.handNumber !== state.gN || !same(actorSource.street, [1, 1]) ||
+              actorSource.actor !== heroId || previous.cPI !== heroId || previous.pITT !== null || state.pITT !== heroId ||
+              previous.hI !== state.hI || previous.gN !== state.gN || !same(previous.gT, [1, 1]) ||
+              !same(previous.seats, state.seats) || !same(previous.iHPI, state.iHPI) || !same(previous.pGS, state.pGS) ||
+              !same(previous.pC, state.pC) || previous.dealerID !== state.dealerID ||
+              Object.keys(previous.tB).length !== 2 || !chips(previous.tB[heroId]) || previous.tB[heroId] <= 0 ||
+              Object.entries(previous.tB).some(([id, amount]) => previous.pGS[id] !== "inGame" || amount !== previous.tB[s.heroId!]))
+            throw new Error("Paid turn lacks a matching independently established flop actor.");
+        }
+        if (p.kind === "river" || p.kind === "turn_board" || p.kind === "turn_board_carried_actor" || p.kind === "flop_board") {
+          const street = p.kind === "river" ? "river" : p.kind === "flop_board" ? "flop" : "turn";
           const streetIndex = street === "river" ? 3 : street === "turn" ? 2 : 1;
           const boardCount = streetIndex + 2, previousBoardCount = street === "flop" ? 0 : boardCount - 1;
           const active = state.iHPI.filter((id: string) => state!.pGS[id] === "inGame");

@@ -581,12 +581,16 @@
           else if (Object.values(hand).some((v) => v !== null && (typeof v !== "string" || v.length > 32))) return null;
         }
       }
-      if (object7(raw.players) && Object.values(raw.players).some((p) => !object7(p) || Object.keys(p).some((k) => !["id", "stack", "status", "disconnectedSince", "dAC", "name", "avatarID", "winCount", "quitCount", "isNetworkPlayer"].includes(k)))) return null;
+      const standingUpShape = event === "gC" && same4(raw.gT, [1, 0]) && raw.gameResult === "<D>" && exact2(raw, [...common3, ..."gN gT hI mR nR pC tB cHB cPI oTC pGS rHP sBS sNA bBPI cRPI iHPI pASA pITT sBPI sNAA wBACPI players dealerID dealerSeat gameResult rHC".split(" ")]) && object7(raw.players) && Object.keys(raw.players).length === 1;
+      const standingUpPlayer = standingUpShape ? Object.keys(raw.players)[0] : null;
+      const standingUp = standingUpPlayer !== null && standingUpPlayer !== knownHero && object7(raw.players[standingUpPlayer]) && exact2(raw.players[standingUpPlayer], ["status", "sUNH", "hideAway"]) && raw.players[standingUpPlayer].status === "standingUp" && raw.players[standingUpPlayer].sUNH === "<D>" && raw.players[standingUpPlayer].hideAway === "<D>";
+      if (object7(raw.players) && Object.values(raw.players).some((p) => !object7(p) || !(standingUp && p === raw.players[standingUpPlayer]) && Object.keys(p).some((k) => !["id", "stack", "status", "disconnectedSince", "dAC", "name", "avatarID", "winCount", "quitCount", "isNetworkPlayer"].includes(k)))) return null;
       if (object7(raw.tB)) normalized.tB = Object.fromEntries(Object.entries(raw.tB).map(([id, n]) => [id, n === "check" ? 0 : n]));
       const source = projectFirstUtgSource("42" + JSON.stringify([event, event === "registered" ? { currentPlayer: payload.currentPlayer, gameState: normalized } : normalized]), knownHero);
       if (!source) return null;
       const result = {
         source: { event: source.event, heroId: source.heroId, frame: source.frame },
+        ...standingUp ? { standingUpPlayer } : {},
         ...Object.hasOwn(raw, "pot") ? { pot: raw.pot } : {},
         kind: "other",
         actor: null,
@@ -600,8 +604,9 @@
       if (exact2(raw, [...turn, "gT", "pC", "tB", "oTC", "cRPI", "players"]) && active && (same4(raw.gT, [1, 3]) || same4(raw.gT, [1, 2])) && same4(raw.cRPI, []) && same4(raw.players, {}) && object7(raw.tB) && Object.values(raw.tB).every((v) => v === "<D>")) result.kind = same4(raw.gT, [1, 3]) ? "river" : "turn_board";
       const paidDeal = [...turn, "gT", "mR", "pC", "tB", "cHB", "oTC", "pot", "cRPI", "players"];
       const paidDealShape = exact2(raw, [...paidDeal, "bigBlindCheck"]) && raw.bigBlindCheck === false || same4(raw.gT, [1, 1]) && exact2(raw, paidDeal);
-      if (paidDealShape && active && [1, 2, 3].some((index) => same4(raw.gT, [1, index])) && raw.cHB === 0 && chips(raw.mR) && chips(raw.mAVTB) && same4(raw.cRPI, []) && object7(raw.players) && Object.values(raw.players).every((p) => object7(p) && exact2(p, ["stack"]) && chips(p.stack)) && object7(raw.tB) && Object.values(raw.tB).every((v) => v === "<D>"))
-        result.kind = raw.gT[1] === 1 ? "flop_board" : raw.gT[1] === 2 ? "turn_board" : "river";
+      const carriedTurnShape = event === "gC" && same4(raw.gT, [1, 2]) && exact2(raw, paidDeal.filter((k) => k !== "cPI")) && raw.pITT === source.heroId && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now;
+      if ((paidDealShape && active || carriedTurnShape) && [1, 2, 3].some((index) => same4(raw.gT, [1, index])) && raw.cHB === 0 && chips(raw.mR) && chips(raw.mAVTB) && same4(raw.cRPI, []) && object7(raw.players) && Object.values(raw.players).every((p) => object7(p) && exact2(p, ["stack"]) && chips(p.stack)) && object7(raw.tB) && Object.values(raw.tB).every((v) => v === "<D>"))
+        result.kind = carriedTurnShape ? "turn_board_carried_actor" : raw.gT[1] === 1 ? "flop_board" : raw.gT[1] === 2 ? "turn_board" : "river";
       const action = raw.sNA === "NSAA" && raw.pITT === null && chips(raw.sNAA);
       if (action && object7(raw.tB) && Object.keys(raw.tB).length === 1) {
         const [actor, amount] = Object.entries(raw.tB)[0];
@@ -611,6 +616,11 @@
         }
         if (chips(amount) && amount > 0 && raw.cHB === amount && same4(raw.pGS, {}) && same4(raw.cRPI, [actor]) && same4(raw.wBACPI, []) && exact2(raw, [...common3, "mR", "tB", "cHB", "pGS", "sNA", "cRPI", "pITT", "sNAA", "wBACPI"])) {
           result.kind = "bet";
+          result.actor = actor;
+          result.amount = amount;
+        }
+        if (chips(amount) && amount > 0 && same4(raw.pGS, {}) && same4(raw.wBACPI, []) && Array.isArray(raw.cRPI) && raw.cRPI.length === 2 && new Set(raw.cRPI).size === 2 && raw.cRPI.includes(actor) && exact2(raw, [...common3, "tB", "pGS", "sNA", "cRPI", "pITT", "sNAA", "wBACPI"])) {
+          result.kind = "call";
           result.actor = actor;
           result.amount = amount;
         }
