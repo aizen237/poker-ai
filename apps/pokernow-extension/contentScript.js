@@ -10591,7 +10591,8 @@
       reasons,
       unsafe
     });
-    if (!w || !timeline || Date.now() < w.receivedAt || Date.now() >= w.expiresAt) return empty();
+    if (!w || !timeline) return empty(["Binding gate source_window: no current validated observation."]);
+    if (Date.now() < w.receivedAt || Date.now() >= w.expiresAt) return empty(["Binding gate expiry: outside the original activation deadline."]);
     const source = timeline.sourceStatus, identity3 = source.identity, state = assessment.state;
     const card = (c) => `${"23456789TJQKA"[c.rank - 2]}${c.suit}`;
     const seats = state?.seats.filter((s) => s.isOccupied) ?? [], hero = seats.find((s) => s.isYou);
@@ -10599,11 +10600,13 @@
     const same6 = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     const ui = assessCallControlReadiness(read.callControl ?? null, w.payableCall, w.receivedAt, Date.now());
     if (!source.connected || identity3?.chainGap || identity3?.tableId !== w.tableId || identity3?.handId !== w.handId || identity3?.handNumber !== w.handNumber || identity3?.heroPlayerId !== w.heroId || timeline.current.handId !== `${w.tableId}:hand:${w.handId}` || source.sourceMetadata.socketContinuity.generation !== w.generation) return empty([`${w.street} source identity or connection contradicts the activation.`], true);
-    if (!state || read.context.readErrors.length || ui.status !== "observed_matching") return empty(ui.reasons, ui.status === "contradicted");
-    if (state.street !== w.street || assessment.activeOpponents !== 1 || !hero?.isCurrentToAct || !same6(state.board.map(card), w.board) || !same6(hero.holeCards.map(card).sort(), [...w.heroCards].sort()) || assessment.amountToCall !== w.payableCall && !(sourceZero && assessment.amountToCall === null) || seats.length !== w.players.length || new Set(seats.map((s) => s.seatNumber)).size !== seats.length || seats.filter((s) => s.isYou).length !== 1 || seats.filter((s) => s.isCurrentToAct).length !== 1 || timeline.current.seatMapping.status === "invalid" || timeline.current.seatMapping.entries.some((e) => !w.players.some((p) => p.seat === e.seat && p.playerId === e.playerId)) || !w.players.every((p) => {
+    if (!state || read.context.readErrors.length) return empty(["Binding gate DOM_read: unavailable state or recorded read errors."]);
+    if (ui.status !== "observed_matching") return empty(["Binding gate CALL_control: control is absent, stale or mismatched.", ...ui.reasons], ui.status === "contradicted");
+    const domGate = state.street !== w.street || assessment.activeOpponents !== 1 ? "street_or_opponents" : !hero?.isCurrentToAct ? "hero_actor" : !same6(state.board.map(card), w.board) || !same6(hero.holeCards.map(card).sort(), [...w.heroCards].sort()) ? "cards" : assessment.amountToCall !== w.payableCall && !(sourceZero && assessment.amountToCall === null) ? "payable_call" : seats.length !== w.players.length || new Set(seats.map((s) => s.seatNumber)).size !== seats.length || seats.filter((s) => s.isYou).length !== 1 || seats.filter((s) => s.isCurrentToAct).length !== 1 || timeline.current.seatMapping.status === "invalid" || timeline.current.seatMapping.entries.some((e) => !w.players.some((p) => p.seat === e.seat && p.playerId === e.playerId)) ? "seat_identity" : !w.players.every((p) => {
       const s = seats.find((s2) => s2.seatNumber === p.seat);
       return !!s && s.isYou === (p.playerId === w.heroId) && s.isFolded === p.folded && !s.isAllIn && !s.isSettling && (p.folded || !s.isOffline) && !s.betReadError && s.stack === p.remainingStack && (s.currentBet !== null ? s.currentBet === p.contribution : p.contribution === 0 && (s.isChecking || p.folded || s.isYou && sourceZero));
-    })) return empty([`${w.street} DOM identity, board, opponent roster, contributions or remaining capacity contradicts the source window.`], true);
+    }) ? "player_status_stack_or_contribution" : null;
+    if (domGate || !hero) return empty([`${w.street} DOM identity, board, opponent roster, contributions or remaining capacity contradicts the source window. Binding gate ${domGate}.`], true);
     if (assessment.pot.mainPot !== w.collectedPot || assessment.pot.displayedTotalPot !== w.grossPotBeforeCall || w.grossPotBeforeCall !== w.collectedPot + w.streetSubtotal) return empty([`${w.street} pot displays contradict collected pot plus current street contributions.`], true);
     if (timeline.current.events.some((e) => e.action === "uncalled_return") || timeline.current.accounting.adjustments.length)
       return empty(["Observed returns/settlement adjustments are unresolved; illustrative pot calculation withheld."], true);
@@ -10631,7 +10634,8 @@
       if (cachedTurn?.key !== key) cachedTurn = { key, result: compareTurnCallFold(input) };
     } else if (cached?.key !== key) cached = { key, result: compareRiverCallFold(input) };
     const calculation = w.street === "flop" ? cachedFlop.result : w.street === "turn" ? cachedTurn.result : cached.result;
-    if (Date.now() < w.receivedAt || Date.now() >= w.expiresAt || assessCallControlReadiness(read.callControl ?? null, w.payableCall, w.receivedAt, Date.now()).status !== "observed_matching") return empty();
+    if (Date.now() < w.receivedAt || Date.now() >= w.expiresAt || assessCallControlReadiness(read.callControl ?? null, w.payableCall, w.receivedAt, Date.now()).status !== "observed_matching")
+      return empty(["Binding gate computation_deadline: calculation outlived the original source or CALL-control deadline."]);
     const binding = {
       tableId: w.tableId,
       handId: w.handId,
@@ -10967,6 +10971,11 @@
     if (ui?.status !== "observed_matching") reasons.push(...ui?.reasons ?? ["No decision-local CALL-control cross-check is available."]);
     const illustration = riverIllustration(read, assessment, timeline, envelope);
     if (!illustration.binding) reasons.push(`No validated ${street} source activation binds the current hand, hero, ${cardCount} board cards, payable CALL and original expiry. A matching DOM label or connected socket is insufficient.`);
+    if (!illustration.binding && timeline?.sourceStatus.riverObservationDiagnostic) {
+      const d = timeline.sourceStatus.riverObservationDiagnostic, first = d.firstFailure;
+      reasons.push(`Postflop source frame ${d.attemptedSequence ?? "unknown"}, gate ${d.gate}: ${d.reason}`);
+      if (first) reasons.push(`First source failure at frame ${first.sequence ?? "unknown"}, gate ${first.gate}: ${first.reason}`);
+    }
     reasons.push(...illustration.reasons);
     const contradictions = envelope.proofs.filter((p) => p.status === "contradicted").flatMap((p) => p.reasons);
     return {
@@ -12195,13 +12204,16 @@
     };
   }
 
+  // src/postflopSourceFields.ts
+  var common3 = new Set("now pre eventsData mEV fV sN players".split(" "));
+
   // src/riverObservation.ts
   var object8 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
   var same4 = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   var chips4 = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
   var PAID_TURN_CONTINUITY_MS = 2e3;
-  var common3 = "now pre eventsData mEV fV sN".split(" ");
-  var turn = [...common3, "cPI", "sNA", "pASA", "pITT", "sNAA", "mAVTB"];
+  var common4 = "now pre eventsData mEV fV sN".split(" ");
+  var turn = [...common4, "cPI", "sNA", "pASA", "pITT", "sNAA", "mAVTB"];
   var fields = new Set("id hI gN now pre r gT seats iHPI dealerID dealerSeat sBPI bBPI tB pGS cPI pITT smallBlind bigBlind ante deadButton gM mode oTC gameResult aD aS cM cR cRPI rHP rHC eventsData version fV nR mTB rIT sPM players pC sBS sNA pASA sNAA mAVTB wBACPI mEV sN mR cHB pot uP aGC aVC dSB gDM pTB sG lE lSPI pASA dLTWTB dLTWoTB ownerID status bigBlindCheck directToNexTurn recordChatForReplay allowStandaloneRebuy rH sPI tHC".split(" "));
   function createRiverObservation(tableId, now) {
     let state = null, heroId = null;
@@ -12211,6 +12223,8 @@
     let actorSource = null;
     let paidTurnBridge = null;
     let reason = "Waiting for a continuous postflop source window.";
+    let gate = "registration", attemptedSequence = null;
+    let firstFailure = null;
     const reset = () => {
       state = null;
       heroId = null;
@@ -12223,16 +12237,31 @@
     };
     return {
       reset,
-      accept(input, seq, gen, received) {
+      accept(input, seq, gen, received, projectionReason) {
         observation = null;
         const bridge = paidTurnBridge;
         paidTurnBridge = null;
+        attemptedSequence = chips4(seq) ? seq : null;
+        gate = "receipt";
         try {
+          if (input === null && typeof projectionReason === "string") {
+            gate = "projection";
+            throw new Error(projectionReason.slice(0, 240));
+          }
           if (!object8(input) || !chips4(seq) || !chips4(gen) || !chips4(received) || received > now() || received < at || now() - received >= 1e4 || !object8(input.source)) throw new Error("Invalid receipt");
           const p = input, s = p.source;
+          gate = "continuity";
           if (!s.heroId || s.event !== "registered" && (seq !== sequence + 1 || gen !== generation || s.heroId !== heroId || !state) || s.event === "registered" && gen <= generation) throw new Error("Discontinuous river source");
           const previous = state, previousPot = pot;
+          gate = "bounded_state";
           state = s.event === "registered" ? initializeUtgState(s.frame, tableId, s.heroId) : advanceUtgState(state, s.frame, tableId, s.heroId);
+          if (p.ancillaryPlayers !== void 0 && (!Array.isArray(p.ancillaryPlayers) || p.ancillaryPlayers.length > 10 || p.ancillaryPlayers.some((id) => !Object.hasOwn(state.players, id)))) throw new Error("Ancillary update references an unavailable player.");
+          if (p.participationPlayers !== void 0) {
+            gate = "ancillary_transition";
+            if (p.kind !== "ancillary" || !previous || !same4(previous.gT, [1, 5]) || !Array.isArray(p.participationPlayers) || p.participationPlayers.length > 10 || p.participationPlayers.some((id) => id === s.heroId || previous.players[id]?.status !== "inGame" || previous.pGS[id] !== "fold" || !previous.iHPI.includes(id)))
+              throw new Error("Participation-flag deletion requires a known folded nonhero in a settled hand.");
+          }
+          gate = "standing_boundary";
           if (p.standingUpPlayer !== void 0) {
             const id = p.standingUpPlayer;
             if (!previous || s.event !== "gC" || !same4(previous.gT, [1, 5]) || !same4(state.gT, [1, 0]) || previous.hI === state.hI || state.gN !== previous.gN + 1 || id === s.heroId || previous.players[id]?.status !== "inGame" || state.players[id]?.status !== "standingUp" || !previous.iHPI.includes(id) || !same4(state.iHPI, previous.iHPI.filter((player2) => player2 !== id)) || state.pGS[id] !== "fold" || Object.hasOwn(state.pC, id) || !same4(previous.seats, state.seats) || state.players[id].stack !== previous.players[id].stack || [state.cPI, state.pITT, state.dealerID, state.sBPI, state.bBPI].includes(id))
@@ -12242,6 +12271,8 @@
           sequence = seq;
           generation = gen;
           at = received;
+          if (s.event === "registered") firstFailure = null;
+          gate = "recognition";
           reason = "Continuous observations; waiting for a supported postflop check/bet/activation window.";
           if (s.event === "registered" || previous?.hI !== state.hI) {
             pending = null;
@@ -12255,12 +12286,22 @@
             if (!chips4(p.pot)) throw new Error("Invalid pot");
             pot = p.pot;
           }
+          if (p.kind === "ancillary") {
+            gate = "ancillary";
+            const stable = (value) => Object.fromEntries(Object.entries(value).filter(([k]) => k !== "now" && k !== "pre"));
+            if (!previous || !same4(stable(previous), stable(state)) || pot !== previousPot)
+              throw new Error("Ancillary update changed gameplay state.");
+            reason = "Ancillary update validated; no betting event or decision renewal.";
+            return;
+          }
+          gate = "collection";
           if (s.event !== "registered" && previous && previous.hI === state.hI && !same4(previous.gT, state.gT) && [1, 2, 3].some((index) => same4(state.gT, [1, index]))) {
             const collected = Object.values(previous.tB ?? {}).reduce((sum, value) => sum + Number(value), 0);
             if (collected > 0 && (p.pot === void 0 || p.pot < collected || previousPot !== null && p.pot !== previousPot + collected || Object.entries(previous.tB).some(([id, value]) => Number(value) > 0 && state.players[id]?.stack !== previous.players[id].stack - Number(value))))
               throw new Error("Postflop collection is missing or contradicts previous wagers, pot or stacks.");
           }
           if (p.kind === "turn_board_carried_actor") {
+            gate = "actor_bridge";
             if (!previous || Object.hasOwn(s.frame, "cPI") || !bridge || bridge.callCursor !== previous.now || bridge.sequence + 1 !== seq || bridge.generation !== gen || received - bridge.receivedAt >= PAID_TURN_CONTINUITY_MS || now() - bridge.receivedAt >= PAID_TURN_CONTINUITY_MS || state.now - bridge.callCursor >= PAID_TURN_CONTINUITY_MS || bridge.actor.handId !== state.hI || bridge.actor.handNumber !== state.gN || !same4(bridge.actor.street, [1, 1]) || bridge.actor.actor !== heroId || previous.cPI !== heroId || previous.pITT !== null || state.pITT !== heroId || previous.hI !== state.hI || previous.gN !== state.gN || !same4(previous.gT, [1, 1]) || !same4(previous.seats, state.seats) || !same4(previous.iHPI, state.iHPI) || !same4(previous.pGS, state.pGS) || !same4(previous.pC, state.pC) || previous.dealerID !== state.dealerID || Object.entries(previous.players).some(([id, player2]) => !same4(
               state.players[id],
               { ...player2, stack: previous.players[id].stack - (previous.tB[id] ?? 0) }
@@ -12268,6 +12309,7 @@
               throw new Error("Paid turn lacks a matching independently established flop actor.");
           }
           if (p.kind === "river" || p.kind === "turn_board" || p.kind === "turn_board_carried_actor" || p.kind === "flop_board") {
+            gate = "street_boundary";
             const street = p.kind === "river" ? "river" : p.kind === "flop_board" ? "flop" : "turn";
             const streetIndex = street === "river" ? 3 : street === "turn" ? 2 : 1;
             const boardCount = streetIndex + 2, previousBoardCount = street === "flop" ? 0 : boardCount - 1;
@@ -12284,6 +12326,7 @@
             pending = { step: state.cPI === heroId ? 0 : 2, street, villain: active.find((id) => id !== heroId), base: structuredClone(state), pot, bet: 0 };
             return;
           }
+          gate = "action_window";
           if (!pending) return;
           const w = pending;
           if (state.hI !== w.base.hI || pot !== w.pot || !same4(state.seats, w.base.seats) || !same4(state.pGS, w.base.pGS) || !same4(state.pC, w.base.pC) || !same4(state.players, w.base.players) || !same4(state.oTC, w.base.oTC) || !same4(state.gT, w.base.gT)) {
@@ -12329,6 +12372,7 @@
               liveAuthorized: false
             };
             pending = null;
+            gate = "ready";
             reason = `Matched ${w.street} source window; gross arithmetic only, no contestable-pot or action authorization.`;
           } else if (w.street !== "river") {
             pending = null;
@@ -12337,13 +12381,21 @@
         } catch (error) {
           reset();
           reason = error instanceof Error ? error.message : "River observation rejected.";
+          firstFailure ??= { sequence: attemptedSequence, gate, reason };
         }
       },
       snapshot() {
         return observation && now() >= observation.receivedAt && now() < observation.expiresAt ? structuredClone(observation) : null;
       },
       diagnostic() {
-        return { reason: observation && (now() < observation.receivedAt || now() >= observation.expiresAt) ? "Postflop observation expired at its original activation deadline." : reason, sequence, generation };
+        return {
+          reason: observation && (now() < observation.receivedAt || now() >= observation.expiresAt) ? "Postflop observation expired at its original activation deadline." : reason,
+          sequence,
+          generation,
+          attemptedSequence,
+          gate: observation && now() >= observation.expiresAt ? "expiry" : gate,
+          firstFailure
+        };
       }
     };
   }
@@ -12368,7 +12420,7 @@
         if (!message || typeof message !== "object") return;
         const m = message;
         if (m.channel === TIMELINE_CHANNEL && m.type === "source_metadata" && m.tableId === options.tableId) {
-          riverSource.accept(m.riverSource, m.sequence, m.generation, m.observedAt);
+          riverSource.accept(m.riverSource, m.sequence, m.generation, m.observedAt, m.riverSourceDiagnostic);
           let bootstrap;
           try {
             bootstrap = firstUtgSource.accept(m.utgSource, m.sequence, m.generation, m.observedAt);

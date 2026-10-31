@@ -246,6 +246,11 @@ function riverCallFoldReadiness(read: LiveTableRead, assessment: LiveStateAssess
   if (ui?.status !== "observed_matching") reasons.push(...(ui?.reasons ?? ["No decision-local CALL-control cross-check is available."]));
   const illustration = riverIllustration(read, assessment, timeline, envelope);
   if (!illustration.binding) reasons.push(`No validated ${street} source activation binds the current hand, hero, ${cardCount} board cards, payable CALL and original expiry. A matching DOM label or connected socket is insufficient.`);
+  if (!illustration.binding && timeline?.sourceStatus.riverObservationDiagnostic) {
+    const d = timeline.sourceStatus.riverObservationDiagnostic, first = d.firstFailure;
+    reasons.push(`Postflop source frame ${d.attemptedSequence ?? "unknown"}, gate ${d.gate}: ${d.reason}`);
+    if (first) reasons.push(`First source failure at frame ${first.sequence ?? "unknown"}, gate ${first.gate}: ${first.reason}`);
+  }
   reasons.push(...illustration.reasons);
   // Contradictions remain fatal even in scopes not needed to price a pairwise
   // comparison. Unknown raise rights/position/range confidence are not blockers.

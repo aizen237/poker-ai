@@ -32,7 +32,7 @@ export function createTimelineRuntime(options: TimelineRuntimeOptions) {
       if (!message || typeof message !== "object") return;
       const m = message as Record<string, unknown>;
       if (m.channel === TIMELINE_CHANNEL && m.type === "source_metadata" && m.tableId === options.tableId) {
-        riverSource.accept(m.riverSource, m.sequence, m.generation, m.observedAt);
+        riverSource.accept(m.riverSource, m.sequence, m.generation, m.observedAt, m.riverSourceDiagnostic);
         let bootstrap: ReturnType<typeof firstUtgSource.accept>;
         try { bootstrap = firstUtgSource.accept(m.utgSource, m.sequence, m.generation, m.observedAt); } catch { firstUtgSource.reset(); }
         sourceMetadata.socket(m.metadata, m.sequence, m.generation, options.now(), bootstrap);

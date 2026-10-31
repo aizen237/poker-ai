@@ -16,7 +16,8 @@ export function riverIllustration(read: LiveTableRead, assessment: LiveStateAsse
   const w = timeline?.sourceStatus.riverObservation;
   const empty = (reasons: string[] = [], unsafe = false) => ({ binding: null, calculation: null,
     modelAbstention: null as string | null, lines: [] as string[], reasons, unsafe });
-  if (!w || !timeline || Date.now() < w.receivedAt || Date.now() >= w.expiresAt) return empty();
+  if (!w || !timeline) return empty(["Binding gate source_window: no current validated observation."]);
+  if (Date.now() < w.receivedAt || Date.now() >= w.expiresAt) return empty(["Binding gate expiry: outside the original activation deadline."]);
   const source = timeline.sourceStatus, identity = source.identity, state = assessment.state;
   const card = (c: { rank: number; suit: string }) => `${"23456789TJQKA"[c.rank - 2]}${c.suit}`;
   const seats = state?.seats.filter(s => s.isOccupied) ?? [], hero = seats.find(s => s.isYou);
@@ -32,19 +33,23 @@ export function riverIllustration(read: LiveTableRead, assessment: LiveStateAsse
       identity?.handNumber !== w.handNumber || identity?.heroPlayerId !== w.heroId ||
       timeline.current.handId !== `${w.tableId}:hand:${w.handId}` ||
       source.sourceMetadata.socketContinuity.generation !== w.generation) return empty([`${w.street} source identity or connection contradicts the activation.`], true);
-  if (!state || read.context.readErrors.length || ui.status !== "observed_matching") return empty(ui.reasons, ui.status === "contradicted");
-  if (state.street !== w.street || assessment.activeOpponents !== 1 || !hero?.isCurrentToAct ||
-      !same(state.board.map(card), w.board) || !same(hero.holeCards.map(card).sort(), [...w.heroCards].sort()) ||
-      (assessment.amountToCall !== w.payableCall && !(sourceZero && assessment.amountToCall === null)) || seats.length !== w.players.length ||
+  if (!state || read.context.readErrors.length) return empty(["Binding gate DOM_read: unavailable state or recorded read errors."]);
+  if (ui.status !== "observed_matching") return empty(["Binding gate CALL_control: control is absent, stale or mismatched.", ...ui.reasons], ui.status === "contradicted");
+  const domGate = state.street !== w.street || assessment.activeOpponents !== 1 ? "street_or_opponents" :
+      !hero?.isCurrentToAct ? "hero_actor" :
+      !same(state.board.map(card), w.board) || !same(hero.holeCards.map(card).sort(), [...w.heroCards].sort()) ? "cards" :
+      assessment.amountToCall !== w.payableCall && !(sourceZero && assessment.amountToCall === null) ? "payable_call" :
+      seats.length !== w.players.length ||
       new Set(seats.map(s => s.seatNumber)).size !== seats.length ||
       seats.filter(s => s.isYou).length !== 1 || seats.filter(s => s.isCurrentToAct).length !== 1 ||
-      timeline.current.seatMapping.status === "invalid" || timeline.current.seatMapping.entries.some(e => !w.players.some(p => p.seat === e.seat && p.playerId === e.playerId)) ||
+      timeline.current.seatMapping.status === "invalid" || timeline.current.seatMapping.entries.some(e => !w.players.some(p => p.seat === e.seat && p.playerId === e.playerId)) ? "seat_identity" :
       !w.players.every(p => {
         const s = seats.find(s => s.seatNumber === p.seat);
         return !!s && s.isYou === (p.playerId === w.heroId) && s.isFolded === p.folded && !s.isAllIn && !s.isSettling &&
           (p.folded || !s.isOffline) && !s.betReadError && s.stack === p.remainingStack &&
           (s.currentBet !== null ? s.currentBet === p.contribution : p.contribution === 0 && (s.isChecking || p.folded || s.isYou && sourceZero));
-      })) return empty([`${w.street} DOM identity, board, opponent roster, contributions or remaining capacity contradicts the source window.`], true);
+      }) ? "player_status_stack_or_contribution" : null;
+  if (domGate || !hero) return empty([`${w.street} DOM identity, board, opponent roster, contributions or remaining capacity contradicts the source window. Binding gate ${domGate}.`], true);
   if (assessment.pot.mainPot !== w.collectedPot || assessment.pot.displayedTotalPot !== w.grossPotBeforeCall ||
       w.grossPotBeforeCall !== w.collectedPot + w.streetSubtotal) return empty([`${w.street} pot displays contradict collected pot plus current street contributions.`], true);
   if (timeline.current.events.some(e => e.action === "uncalled_return") || timeline.current.accounting.adjustments.length)
@@ -68,7 +73,8 @@ export function riverIllustration(read: LiveTableRead, assessment: LiveStateAsse
   const calculation = w.street === "flop" ? cachedFlop!.result : w.street === "turn" ? cachedTurn!.result : cached!.result;
   // Enumeration may take time; it never renews the source/control deadline.
   if (Date.now() < w.receivedAt || Date.now() >= w.expiresAt ||
-      assessCallControlReadiness(read.callControl ?? null, w.payableCall, w.receivedAt, Date.now()).status !== "observed_matching") return empty();
+      assessCallControlReadiness(read.callControl ?? null, w.payableCall, w.receivedAt, Date.now()).status !== "observed_matching")
+    return empty(["Binding gate computation_deadline: calculation outlived the original source or CALL-control deadline."]);
   const binding = { tableId: w.tableId, handId: w.handId, heroId: w.heroId, generation: w.generation,
     cursor: w.cursor, sequence: w.sequence, receivedAt: w.receivedAt, expiresAt: w.expiresAt, decisionEpoch: envelope.decisionEpoch };
   // Model coverage and evidence validity are independent. Keep the original

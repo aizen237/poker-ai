@@ -72,7 +72,8 @@ describe("Hand493 original raw frames and real recorded DOM checkpoint", () => {
     expect(fixture.capture).toMatchObject({ frameCount: 28, rejectedFrames: 0, registeredCaptured: true });
     expect(r.messages).toHaveLength(28);
     expect(r.trace.map((s, i) => ({ frame: i + 1, kind: r.messages[i].riverSource?.kind,
-      diagnostic: s.riverObservationDiagnostic }))).toEqual(expectedTrace);
+      diagnostic: { reason: s.riverObservationDiagnostic.reason, sequence: s.riverObservationDiagnostic.sequence,
+        generation: s.riverObservationDiagnostic.generation } }))).toEqual(expectedTrace);
     expect(r.trace[21].riverObservation).toMatchObject({ street: "flop", payableCall: 4 });
     expect(r.trace[27].riverObservation).toMatchObject({ street: "turn", handNumber: 493,
       heroCards: ["Tc", "4d"], board: ["5s", "5c", "4c", "Jc"], sequence: 28,

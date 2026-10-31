@@ -126,11 +126,11 @@
   var RAW_CAPTURE_KEY = "poker-ai:raw-socket-capture";
   var MAX_FRAMES = 500;
   var MAX_CHARACTERS = 4 * 1024 * 1024;
-  function endOfValue(text, start) {
+  function endOfValue(text2, start) {
     let depth = 0;
     let quoted = false;
-    for (let i = start; i < text.length; i++) {
-      const c = text[i];
+    for (let i = start; i < text2.length; i++) {
+      const c = text2[i];
       if (quoted) {
         if (c === "\\") i++;
         else if (c === '"') quoted = false;
@@ -141,24 +141,24 @@
         depth--;
       } else if (c === "," && depth === 0) return i;
     }
-    return text.length;
+    return text2.length;
   }
-  function members(object8) {
+  function members(object9) {
     const result = [];
     let i = 1;
-    while (i < object8.length) {
-      while (/\s|,/.test(object8[i] ?? "") && i < object8.length) i++;
-      if (object8[i] === "}") break;
+    while (i < object9.length) {
+      while (/\s|,/.test(object9[i] ?? "") && i < object9.length) i++;
+      if (object9[i] === "}") break;
       const keyStart = i++;
-      while (i < object8.length) {
-        if (object8[i] === "\\") i += 2;
-        else if (object8[i++] === '"') break;
+      while (i < object9.length) {
+        if (object9[i] === "\\") i += 2;
+        else if (object9[i++] === '"') break;
       }
-      const key = JSON.parse(object8.slice(keyStart, i));
-      while (object8[i] !== ":" && i < object8.length) i++;
+      const key = JSON.parse(object9.slice(keyStart, i));
+      while (object9[i] !== ":" && i < object9.length) i++;
       i++;
-      const end = endOfValue(object8, i);
-      result.push({ key, raw: object8.slice(i, end).trim() });
+      const end = endOfValue(object9, i);
+      result.push({ key, raw: object9.slice(i, end).trim() });
       i = end;
     }
     return result;
@@ -390,8 +390,8 @@
   };
   var exact = (v, keys2) => Object.keys(v).length === keys2.length && keys2.every((k) => Object.hasOwn(v, k));
   var common2 = ["now", "pre", "eventsData", "mEV", "fV", "sN"];
-  function isFlopAccountingBoundary(raw, profile = "hand243") {
-    const hand248 = profile === "hand248";
+  function isFlopAccountingBoundary(raw, profile2 = "hand243") {
+    const hand248 = profile2 === "hand248";
     return object5(raw) && exact(raw, [
       ...common2,
       ...hand248 ? ["mR", "cHB"] : [],
@@ -557,91 +557,166 @@
     }
   }
 
-  // src/riverObservation.ts
+  // src/postflopSourceFields.ts
   var object7 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+  var count = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+  var text = (v, max) => typeof v === "string" && v.length <= max;
+  var dictionary = (v) => object7(v) && Object.keys(v).length <= 10 && Object.keys(v).every((k) => /^[A-Za-z0-9_-]{1,160}$/.test(k) && !["__proto__", "prototype", "constructor"].includes(k));
+  var playerFields = /* @__PURE__ */ new Set(["id", "stack", "status", "disconnectedSince"]);
+  var profile = {
+    name: (v) => text(v, 160),
+    avatarID: (v) => v === null,
+    winCount: count,
+    quitCount: count,
+    dAC: (v) => v === false,
+    isNetworkPlayer: (v) => typeof v === "boolean"
+  };
+  var descriptions = /* @__PURE__ */ new Set(["name1", "name2", "name1RH", "name2RH", "prob1"]);
+  var common3 = new Set("now pre eventsData mEV fV sN players".split(" "));
+  function normalizePostflopAncillary(raw, standingPlayer, hero, registration) {
+    const normalized = structuredClone(raw), referenced = /* @__PURE__ */ new Set(), participation = /* @__PURE__ */ new Set();
+    const standalone = Object.keys(raw).every((k) => common3.has(k)) && object7(raw.players) && Object.values(raw.players).every((p) => object7(p) && Object.keys(p).every((k) => !playerFields.has(k)));
+    if (Object.hasOwn(raw, "players")) {
+      if (!dictionary(raw.players)) throw new Error("players: expected a bounded player dictionary");
+      normalized.players = {};
+      for (const [id, p] of Object.entries(raw.players)) {
+        if (!object7(p)) throw new Error("players.*: unsupported player replacement/deletion");
+        const gameplay = {};
+        for (const [key, value] of Object.entries(p)) {
+          if (playerFields.has(key)) {
+            gameplay[key] = value;
+            continue;
+          }
+          if (key === "sUNH" || key === "hideAway") {
+            if (value !== "<D>" || id === hero || !(standingPlayer === id || standalone))
+              throw new Error(`players.*.${key}: unsupported participation-flag transition`);
+            if (standingPlayer !== id) participation.add(id);
+          } else if (!Object.hasOwn(profile, key) || !profile[key](value) || !registration && ["dAC", "isNetworkPlayer"].includes(key)) {
+            throw new Error("players.*: unknown or malformed ancillary field");
+          }
+          referenced.add(id);
+        }
+        if (Object.keys(gameplay).length) normalized.players[id] = gameplay;
+        else referenced.add(id);
+      }
+    }
+    if (Object.hasOwn(raw, "pC")) {
+      if (!dictionary(raw.pC)) throw new Error("pC: expected a bounded card dictionary");
+      normalized.pC = {};
+      for (const [id, hand] of Object.entries(raw.pC)) {
+        if (!object7(hand)) throw new Error("pC.*: expected a card record");
+        for (const [key, value] of Object.entries(hand)) {
+          if (key === "cards") continue;
+          if (!descriptions.has(key) || value !== null && !text(value, 32))
+            throw new Error("pC.*: unknown or malformed card description");
+          referenced.add(id);
+        }
+        if (Object.hasOwn(hand, "cards")) normalized.pC[id] = { cards: hand.cards };
+        else referenced.add(id);
+      }
+    }
+    return { normalized, referenced: [...referenced], participation: [...participation] };
+  }
+  function postflopShape(raw, required, optional = {}) {
+    return required.every((k) => Object.hasOwn(raw, k)) && Object.entries(raw).every(([k, v]) => required.includes(k) || Object.hasOwn(optional, k) && optional[k](v) || k === "players" && object7(v) && Object.values(v).every((p) => object7(p) && Object.keys(p).length === 0) || k === "pC" && object7(v) && Object.keys(v).length === 0);
+  }
+
+  // src/riverObservation.ts
+  var object8 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
   var same4 = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   var chips = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
   var exact2 = (v, keys2) => Object.keys(v).length === keys2.length && keys2.every((k) => Object.hasOwn(v, k));
-  var common3 = "now pre eventsData mEV fV sN".split(" ");
-  var turn = [...common3, "cPI", "sNA", "pASA", "pITT", "sNAA", "mAVTB"];
+  var common4 = "now pre eventsData mEV fV sN".split(" ");
+  var turn = [...common4, "cPI", "sNA", "pASA", "pITT", "sNAA", "mAVTB"];
   var fields = new Set("id hI gN now pre r gT seats iHPI dealerID dealerSeat sBPI bBPI tB pGS cPI pITT smallBlind bigBlind ante deadButton gM mode oTC gameResult aD aS cM cR cRPI rHP rHC eventsData version fV nR mTB rIT sPM players pC sBS sNA pASA sNAA mAVTB wBACPI mEV sN mR cHB pot uP aGC aVC dSB gDM pTB sG lE lSPI pASA dLTWTB dLTWoTB ownerID status bigBlindCheck directToNexTurn recordChatForReplay allowStandaloneRebuy rH sPI tHC".split(" "));
-  function projectRiverObservation(data, knownHero) {
-    if (typeof data !== "string" || data.length > 2e6 || !data.startsWith("42[")) return null;
+  function inspectRiverObservation(data, knownHero) {
+    let gate = "wire";
     try {
-      const [event, payload] = JSON.parse(data.slice(2));
-      if (!["registered", "gC"].includes(event) || !object7(payload)) return null;
+      if (typeof data !== "string" || data.length > 2e6 || !data.startsWith("42[")) throw new Error("Malformed socket envelope");
+      const packet = JSON.parse(data.slice(2));
+      if (!Array.isArray(packet) || packet.length !== 2) throw new Error("Expected one event and payload");
+      const [event, payload] = packet;
+      if (!["registered", "gC"].includes(event) || !object8(payload)) throw new Error("Unsupported state event");
       const raw = event === "registered" ? payload.gameState : payload;
-      if (!object7(raw) || Object.keys(raw).some((k) => !fields.has(k)) || !same4(raw.eventsData, []) || raw.fV !== "0.1.72" || raw.mEV !== 0 || !chips(raw.now) || !chips(raw.sN) || Object.hasOwn(raw, "pot") && !chips(raw.pot)) return null;
-      const normalized = structuredClone(raw);
-      if (object7(raw.pC)) {
-        normalized.pC = {};
-        for (const [id, hand] of Object.entries(raw.pC)) {
-          if (!object7(hand) || Object.keys(hand).some((k) => !["cards", "name1", "name2", "name1RH", "name2RH", "prob1"].includes(k))) return null;
-          if (Object.hasOwn(hand, "cards")) normalized.pC[id] = hand;
-          else if (Object.values(hand).some((v) => v !== null && (typeof v !== "string" || v.length > 32))) return null;
-        }
-      }
-      const standingUpFields = [...common3, ..."gN gT hI mR nR pC tB cHB cPI oTC pGS rHP sBS sNA bBPI cRPI iHPI pASA pITT sBPI sNAA wBACPI players dealerID dealerSeat gameResult rHC".split(" ")];
-      const standingUpShape = event === "gC" && same4(raw.gT, [1, 0]) && raw.gameResult === "<D>" && (exact2(raw, standingUpFields) || exact2(raw, [...standingUpFields, "mAVTB"]) && chips(raw.mAVTB)) && object7(raw.players) && Object.keys(raw.players).length === 1;
+      gate = "fields";
+      if (!object8(raw) || Object.keys(raw).some((k) => !fields.has(k)) || !same4(raw.eventsData, []) || raw.fV !== "0.1.72" || raw.mEV !== 0 || !chips(raw.now) || !chips(raw.sN) || Object.hasOwn(raw, "pot") && !chips(raw.pot)) throw new Error("Unknown field or invalid clocks, version, events or pot");
+      const standingUpFields = [...common4, ..."gN gT hI mR nR pC tB cHB cPI oTC pGS rHP sBS sNA bBPI cRPI iHPI pASA pITT sBPI sNAA wBACPI players dealerID dealerSeat gameResult rHC".split(" ")];
+      const standingUpShape = event === "gC" && same4(raw.gT, [1, 0]) && raw.gameResult === "<D>" && (exact2(raw, standingUpFields) || exact2(raw, [...standingUpFields, "mAVTB"]) && chips(raw.mAVTB)) && object8(raw.players) && Object.keys(raw.players).length === 1;
       const standingUpPlayer = standingUpShape ? Object.keys(raw.players)[0] : null;
-      const standingUp = standingUpPlayer !== null && standingUpPlayer !== knownHero && object7(raw.players[standingUpPlayer]) && exact2(raw.players[standingUpPlayer], ["status", "sUNH", "hideAway"]) && raw.players[standingUpPlayer].status === "standingUp" && raw.players[standingUpPlayer].sUNH === "<D>" && raw.players[standingUpPlayer].hideAway === "<D>";
-      if (object7(raw.players) && Object.values(raw.players).some((p) => !object7(p) || !(standingUp && p === raw.players[standingUpPlayer]) && Object.keys(p).some((k) => !["id", "stack", "status", "disconnectedSince", "dAC", "name", "avatarID", "winCount", "quitCount", "isNetworkPlayer"].includes(k)))) return null;
-      if (object7(raw.tB)) normalized.tB = Object.fromEntries(Object.entries(raw.tB).map(([id, n]) => [id, n === "check" ? 0 : n]));
+      const standingUp = standingUpPlayer !== null && standingUpPlayer !== knownHero && object8(raw.players[standingUpPlayer]) && exact2(raw.players[standingUpPlayer], ["status", "sUNH", "hideAway"]) && raw.players[standingUpPlayer].status === "standingUp" && raw.players[standingUpPlayer].sUNH === "<D>" && raw.players[standingUpPlayer].hideAway === "<D>";
+      gate = "ancillary";
+      const { normalized, referenced, participation } = normalizePostflopAncillary(
+        raw,
+        standingUp ? standingUpPlayer : null,
+        event === "registered" ? payload.currentPlayer?.id : knownHero,
+        event === "registered"
+      );
+      gate = "financial_fields";
+      for (const key of ["mR", "cHB", "mAVTB", "pASA"])
+        if (Object.hasOwn(raw, key) && !chips(raw[key])) throw new Error(`${key}: expected nonnegative integer`);
+      if (Object.hasOwn(raw, "sNAA") && raw.sNAA !== null && !chips(raw.sNAA)) throw new Error("sNAA: invalid action clock");
+      if (object8(raw.tB)) normalized.tB = Object.fromEntries(Object.entries(raw.tB).map(([id, n]) => [id, n === "check" ? 0 : n]));
+      gate = "projection";
       const source = projectFirstUtgSource("42" + JSON.stringify([event, event === "registered" ? { currentPlayer: payload.currentPlayer, gameState: normalized } : normalized]), knownHero);
-      if (!source) return null;
+      if (!source) throw new Error("Bounded projection rejected cards, identity or payload");
       const result = {
         source: { event: source.event, heroId: source.heroId, frame: source.frame },
+        ...referenced.length ? { ancillaryPlayers: referenced } : {},
+        ...participation.length ? { participationPlayers: participation } : {},
         ...standingUp ? { standingUpPlayer } : {},
         ...Object.hasOwn(raw, "pot") ? { pot: raw.pot } : {},
         kind: "other",
         actor: null,
         amount: null
       };
+      const gameplay = { ...normalized, ...Object.hasOwn(raw, "tB") ? { tB: raw.tB } : {} };
+      const shape = (keys2, optional) => postflopShape(gameplay, keys2, optional);
+      if (event === "gC" && shape(common4)) result.kind = "ancillary";
       const active = raw.cPI === raw.pITT && typeof raw.cPI === "string" && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now;
-      if (exact2(raw, turn) && active && chips(raw.mAVTB)) {
+      if (shape(turn) && active && chips(raw.mAVTB)) {
         result.kind = "turn";
         result.actor = raw.cPI;
       }
-      if (exact2(raw, [...turn, "gT", "pC", "tB", "oTC", "cRPI", "players"]) && active && (same4(raw.gT, [1, 3]) || same4(raw.gT, [1, 2])) && same4(raw.cRPI, []) && same4(raw.players, {}) && object7(raw.tB) && Object.values(raw.tB).every((v) => v === "<D>")) result.kind = same4(raw.gT, [1, 3]) ? "river" : "turn_board";
+      if (shape([...turn, "gT", "pC", "tB", "oTC", "cRPI", "players"]) && active && (same4(raw.gT, [1, 3]) || same4(raw.gT, [1, 2])) && same4(raw.cRPI, []) && same4(gameplay.players, {}) && object8(raw.tB) && Object.values(raw.tB).every((v) => v === "<D>")) result.kind = same4(raw.gT, [1, 3]) ? "river" : "turn_board";
       const paidDeal = [...turn, "gT", "mR", "pC", "tB", "cHB", "oTC", "pot", "cRPI", "players"];
-      const paidDealShape = exact2(raw, [...paidDeal, "bigBlindCheck"]) && raw.bigBlindCheck === false || same4(raw.gT, [1, 1]) && exact2(raw, paidDeal);
-      const paidFlopWithoutCapacity = event === "gC" && same4(raw.gT, [1, 1]) && exact2(raw, paidDeal.filter((k) => k !== "mAVTB"));
-      const carriedTurnShape = event === "gC" && same4(raw.gT, [1, 2]) && exact2(raw, paidDeal.filter((k) => k !== "cPI")) && raw.pITT === source.heroId && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now;
-      if (((paidDealShape || paidFlopWithoutCapacity) && active || carriedTurnShape) && [1, 2, 3].some((index) => same4(raw.gT, [1, index])) && raw.cHB === 0 && chips(raw.mR) && (paidFlopWithoutCapacity || chips(raw.mAVTB)) && same4(raw.cRPI, []) && object7(raw.players) && Object.values(raw.players).every((p) => object7(p) && exact2(p, ["stack"]) && chips(p.stack)) && object7(raw.tB) && Object.values(raw.tB).every((v) => v === "<D>"))
+      const paidDealShape = same4(raw.gT, [1, 1]) ? shape(paidDeal, { bigBlindCheck: (v) => v === false }) : shape([...paidDeal, "bigBlindCheck"]) && raw.bigBlindCheck === false;
+      const paidFlopWithoutCapacity = event === "gC" && same4(raw.gT, [1, 1]) && shape(paidDeal.filter((k) => k !== "mAVTB"));
+      const carriedTurnShape = event === "gC" && same4(raw.gT, [1, 2]) && shape(paidDeal.filter((k) => k !== "cPI")) && raw.pITT === source.heroId && raw.sNA === null && raw.sNAA === null && raw.pASA === raw.now;
+      if (((paidDealShape || paidFlopWithoutCapacity) && active || carriedTurnShape) && [1, 2, 3].some((index) => same4(raw.gT, [1, index])) && raw.cHB === 0 && chips(raw.mR) && (paidFlopWithoutCapacity || chips(raw.mAVTB)) && same4(raw.cRPI, []) && object8(gameplay.players) && Object.values(gameplay.players).every((p) => object8(p) && exact2(p, ["stack"]) && chips(p.stack)) && object8(raw.tB) && Object.values(raw.tB).every((v) => v === "<D>"))
         result.kind = carriedTurnShape ? "turn_board_carried_actor" : raw.gT[1] === 1 ? "flop_board" : raw.gT[1] === 2 ? "turn_board" : "river";
       const action = raw.sNA === "NSAA" && raw.pITT === null && chips(raw.sNAA);
-      if (action && object7(raw.tB) && Object.keys(raw.tB).length === 1) {
+      if (action && object8(raw.tB) && Object.keys(raw.tB).length === 1) {
         const [actor, amount] = Object.entries(raw.tB)[0];
-        if (amount === "check" && exact2(raw, [...common3, "tB", "sNA", "cRPI", "pITT", "sNAA"]) && same4(raw.cRPI, [actor])) {
+        if (amount === "check" && shape([...common4, "tB", "sNA", "cRPI", "pITT", "sNAA"]) && same4(raw.cRPI, [actor])) {
           result.kind = "check";
           result.actor = actor;
         }
-        if (chips(amount) && amount > 0 && raw.cHB === amount && same4(raw.pGS, {}) && same4(raw.cRPI, [actor]) && same4(raw.wBACPI, []) && exact2(raw, [...common3, "mR", "tB", "cHB", "pGS", "sNA", "cRPI", "pITT", "sNAA", "wBACPI"])) {
+        if (chips(amount) && amount > 0 && raw.cHB === amount && same4(raw.pGS, {}) && same4(raw.cRPI, [actor]) && same4(raw.wBACPI, []) && shape([...common4, "mR", "tB", "cHB", "pGS", "sNA", "cRPI", "pITT", "sNAA", "wBACPI"])) {
           result.kind = "bet";
           result.actor = actor;
           result.amount = amount;
         }
-        if (chips(amount) && amount > 0 && same4(raw.pGS, {}) && same4(raw.wBACPI, []) && Array.isArray(raw.cRPI) && raw.cRPI.length === 2 && new Set(raw.cRPI).size === 2 && raw.cRPI.includes(actor) && exact2(raw, [...common3, "tB", "pGS", "sNA", "cRPI", "pITT", "sNAA", "wBACPI"])) {
+        if (chips(amount) && amount > 0 && same4(raw.pGS, {}) && same4(raw.wBACPI, []) && Array.isArray(raw.cRPI) && raw.cRPI.length === 2 && new Set(raw.cRPI).size === 2 && raw.cRPI.includes(actor) && shape([...common4, "tB", "pGS", "sNA", "cRPI", "pITT", "sNAA", "wBACPI"])) {
           result.kind = "call";
           result.actor = actor;
           result.amount = amount;
         }
       }
-      return result;
-    } catch {
-      return null;
+      return { projection: result, reason: null };
+    } catch (error) {
+      return { projection: null, reason: `${gate}: ${error instanceof SyntaxError ? "Malformed JSON" : error instanceof Error ? error.message : "Rejected source"}` };
     }
   }
 
   // ../../packages/browser-reader/dist/tableInfoParsing.js
   function parseChipsValueText(normalValueText) {
-    const text = normalValueText.trim();
-    const cleaned = text.replace(/,/g, "");
+    const text2 = normalValueText.trim();
+    const cleaned = text2.replace(/,/g, "");
     if (cleaned.length === 0) {
       throw new Error(`Chips value text is empty (expected a number, got an empty string)`);
     }
     const value = Number(cleaned);
-    if (!/^(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$/.test(text) || !Number.isFinite(value) || value < 0) {
+    if (!/^(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$/.test(text2) || !Number.isFinite(value) || value < 0) {
       throw new Error(`Unrecognized chips value text: "${normalValueText}"`);
     }
     return value;
@@ -712,7 +787,7 @@
   var CHANNEL = "poker-ai:raise-evidence-diagnostics:v1";
   var CHECKPOINT_LABELS = ["panel_opened", "min_raise_selected", "five_chips_entered", "postflop_call", "postflop_observation"];
   var LIMITS = { checkpoints: 8, bytes: 128 * 1024 };
-  var bytes = (text) => new TextEncoder().encode(text).byteLength;
+  var bytes = (text2) => new TextEncoder().encode(text2).byteLength;
   var enabled = (target) => {
     try {
       return target.sessionStorage.getItem(RAISE_CAPTURE_KEY) === "1";
@@ -1116,7 +1191,9 @@
                   utgSource: metadata ? projectFirstUtgSource(event.data, identity?.heroPlayerId ?? null) : null,
                   observedAt: Date.now()
                 };
-                lastMetadata.riverSource = metadata ? projectRiverObservation(event.data, identity?.heroPlayerId ?? null) : null;
+                const river = inspectRiverObservation(event.data, identity?.heroPlayerId ?? null);
+                lastMetadata.riverSource = metadata ? river.projection : null;
+                lastMetadata.riverSourceDiagnostic = river.reason ?? (metadata ? null : "metadata: unsupported socket state envelope");
                 firstMetadata ??= lastMetadata;
                 window.postMessage(lastMetadata, location.origin);
               }

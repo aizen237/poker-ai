@@ -2,7 +2,7 @@ import { identityFromSocketPacket, tableIdFromPath, TIMELINE_CHANNEL, type HandI
 import { inspectSocketMetadata } from "./sourceMetadata.js";
 import { installRawSocketCapture, type RawSocketCapture } from "./rawSocketCapture.js";
 import { projectFirstUtgSource } from "./firstUtgSource.js";
-import { projectRiverObservation } from "./riverObservation.js";
+import { inspectRiverObservation } from "./riverObservation.js";
 import { installRaiseEvidenceCollector } from "./raiseEvidenceCapture.js";
 
 // Runs in MAIN at document_start. Observe existing incoming traffic only;
@@ -52,7 +52,9 @@ if (tableId && typeof window.WebSocket === "function") {
               lastMetadata = { channel: TIMELINE_CHANNEL, type: "source_metadata", tableId,
                 sequence: ++metadataSequence, generation: mine, metadata,
                 utgSource: metadata ? projectFirstUtgSource(event.data, identity?.heroPlayerId ?? null) : null, observedAt: Date.now() };
-              lastMetadata.riverSource = metadata ? projectRiverObservation(event.data, identity?.heroPlayerId ?? null) : null;
+              const river = inspectRiverObservation(event.data, identity?.heroPlayerId ?? null);
+              lastMetadata.riverSource = metadata ? river.projection : null;
+              lastMetadata.riverSourceDiagnostic = river.reason ?? (metadata ? null : "metadata: unsupported socket state envelope");
               firstMetadata ??= lastMetadata;
               window.postMessage(lastMetadata, location.origin);
             }
