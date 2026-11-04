@@ -1,0 +1,442 @@
+{
+  "captureCount": 9,
+  "frameCount": 549,
+  "envelopeCounts": {
+    "registered": 9,
+    "gC": 540
+  },
+  "patchShapeVariants": 21,
+  "nestedDictionaryShapeVariants": {
+    "players": [
+      "avatarID,dAC,id,isNetworkPlayer,name,quitCount,stack,status,winCount",
+      "dAC,id,isNetworkPlayer,name,quitCount,stack,status,winCount",
+      "disconnectedSince",
+      "hideAway,sUNH",
+      "hideAway,sUNH,status",
+      "stack",
+      "stack,status",
+      "stack,winCount",
+      "status"
+    ],
+    "pC": [
+      "cards,name1,name1RH,name2,name2RH,prob1",
+      "cards,name1,name1RH,name2RH,prob1",
+      "name1",
+      "name1,name1RH,name2"
+    ]
+  },
+  "topLevelFields": {
+    "aD": [
+      "boolean"
+    ],
+    "aGC": [
+      "boolean"
+    ],
+    "allowStandaloneRebuy": [
+      "boolean"
+    ],
+    "ante": [
+      "null"
+    ],
+    "aS": [
+      "boolean"
+    ],
+    "aVC": [
+      "boolean"
+    ],
+    "bBPI": [
+      "string"
+    ],
+    "bigBlind": [
+      "number"
+    ],
+    "bigBlindCheck": [
+      "boolean"
+    ],
+    "cHB": [
+      "number"
+    ],
+    "cM": [
+      "boolean"
+    ],
+    "cPI": [
+      "null",
+      "string"
+    ],
+    "cR": [
+      "boolean"
+    ],
+    "cRPI": [
+      "array"
+    ],
+    "deadButton": [
+      "boolean"
+    ],
+    "dealerID": [
+      "string"
+    ],
+    "dealerSeat": [
+      "number"
+    ],
+    "directToNexTurn": [
+      "boolean"
+    ],
+    "dLTWoTB": [
+      "null"
+    ],
+    "dLTWTB": [
+      "null"
+    ],
+    "dSB": [
+      "boolean"
+    ],
+    "eventsData": [
+      "array"
+    ],
+    "fV": [
+      "string"
+    ],
+    "gameResult": [
+      "null",
+      "object",
+      "string"
+    ],
+    "gDM": [
+      "array"
+    ],
+    "gM": [
+      "string"
+    ],
+    "gN": [
+      "number"
+    ],
+    "gT": [
+      "array"
+    ],
+    "hI": [
+      "string"
+    ],
+    "id": [
+      "string"
+    ],
+    "iHPI": [
+      "array"
+    ],
+    "lE": [
+      "boolean"
+    ],
+    "lSPI": [
+      "null"
+    ],
+    "mAVTB": [
+      "number"
+    ],
+    "mEV": [
+      "number"
+    ],
+    "mode": [
+      "string"
+    ],
+    "mR": [
+      "number"
+    ],
+    "mTB": [
+      "null"
+    ],
+    "now": [
+      "number"
+    ],
+    "nR": [
+      "array"
+    ],
+    "oTC": [
+      "object"
+    ],
+    "ownerID": [
+      "string"
+    ],
+    "pASA": [
+      "number"
+    ],
+    "pC": [
+      "object"
+    ],
+    "pGS": [
+      "object"
+    ],
+    "pITT": [
+      "null",
+      "string"
+    ],
+    "players": [
+      "object"
+    ],
+    "pot": [
+      "number"
+    ],
+    "pre": [
+      "number"
+    ],
+    "pTB": [
+      "object"
+    ],
+    "recordChatForReplay": [
+      "boolean"
+    ],
+    "rH": [
+      "boolean"
+    ],
+    "rHC": [
+      "null"
+    ],
+    "rHP": [
+      "array"
+    ],
+    "rIT": [
+      "string"
+    ],
+    "sBPI": [
+      "string"
+    ],
+    "sBS": [
+      "number"
+    ],
+    "seats": [
+      "array"
+    ],
+    "sG": [
+      "boolean"
+    ],
+    "smallBlind": [
+      "number"
+    ],
+    "sN": [
+      "number"
+    ],
+    "sNA": [
+      "null",
+      "string"
+    ],
+    "sNAA": [
+      "null",
+      "number"
+    ],
+    "sPI": [
+      "array"
+    ],
+    "sPM": [
+      "boolean"
+    ],
+    "status": [
+      "string"
+    ],
+    "tB": [
+      "object"
+    ],
+    "tHC": [
+      "null"
+    ],
+    "uP": [
+      "number",
+      "string"
+    ],
+    "version": [
+      "string"
+    ],
+    "wBACPI": [
+      "array"
+    ]
+  },
+  "sourceActionFlags": {
+    "NSAGR": 38,
+    "NSAF": 186,
+    "NSAA": 61
+  },
+  "coverage": [
+    {
+      "hand": 435,
+      "frames": 62,
+      "result": "accepted",
+      "failure": null,
+      "street": "flop",
+      "pot": 13,
+      "actions": 8,
+      "actionTypes": {
+        "FOLD": 4,
+        "RAISE": 1,
+        "CALL": 1,
+        "CHECK": 1,
+        "BET": 1
+      },
+      "actionPrefixComplete": true,
+      "liveAuthorized": false,
+      "domCheckpoint": true
+    },
+    {
+      "hand": 459,
+      "frames": 77,
+      "result": "accepted",
+      "failure": null,
+      "street": "flop",
+      "pot": 13,
+      "actions": 8,
+      "actionTypes": {
+        "FOLD": 4,
+        "RAISE": 1,
+        "CALL": 1,
+        "CHECK": 1,
+        "BET": 1
+      },
+      "actionPrefixComplete": true,
+      "liveAuthorized": false,
+      "domCheckpoint": false
+    },
+    {
+      "hand": 465,
+      "frames": 78,
+      "result": "accepted",
+      "failure": null,
+      "street": "turn",
+      "pot": 21,
+      "actions": 11,
+      "actionTypes": {
+        "FOLD": 4,
+        "RAISE": 1,
+        "CALL": 2,
+        "CHECK": 2,
+        "BET": 2
+      },
+      "actionPrefixComplete": true,
+      "liveAuthorized": false,
+      "domCheckpoint": false
+    },
+    {
+      "hand": 471,
+      "frames": 78,
+      "result": "accepted",
+      "failure": null,
+      "street": "turn",
+      "pot": 21,
+      "actions": 11,
+      "actionTypes": {
+        "FOLD": 4,
+        "RAISE": 1,
+        "CALL": 2,
+        "CHECK": 2,
+        "BET": 2
+      },
+      "actionPrefixComplete": true,
+      "liveAuthorized": false,
+      "domCheckpoint": false
+    },
+    {
+      "hand": 477,
+      "frames": 46,
+      "result": "accepted",
+      "failure": null,
+      "street": "turn",
+      "pot": 21,
+      "actions": 11,
+      "actionTypes": {
+        "FOLD": 4,
+        "RAISE": 1,
+        "CALL": 2,
+        "CHECK": 2,
+        "BET": 2
+      },
+      "actionPrefixComplete": true,
+      "liveAuthorized": false,
+      "domCheckpoint": false
+    },
+    {
+      "hand": 482,
+      "frames": 67,
+      "result": "accepted",
+      "failure": null,
+      "street": "turn",
+      "pot": 21,
+      "actions": 11,
+      "actionTypes": {
+        "FOLD": 4,
+        "RAISE": 1,
+        "CALL": 2,
+        "CHECK": 2,
+        "BET": 2
+      },
+      "actionPrefixComplete": true,
+      "liveAuthorized": false,
+      "domCheckpoint": false
+    },
+    {
+      "hand": 493,
+      "frames": 28,
+      "result": "accepted",
+      "failure": null,
+      "street": "turn",
+      "pot": 21,
+      "actions": 11,
+      "actionTypes": {
+        "FOLD": 4,
+        "RAISE": 1,
+        "CALL": 2,
+        "CHECK": 2,
+        "BET": 2
+      },
+      "actionPrefixComplete": true,
+      "liveAuthorized": false,
+      "domCheckpoint": true
+    },
+    {
+      "hand": 499,
+      "frames": 81,
+      "result": "accepted",
+      "failure": null,
+      "street": "turn",
+      "pot": 21,
+      "actions": 11,
+      "actionTypes": {
+        "FOLD": 4,
+        "RAISE": 1,
+        "CALL": 2,
+        "CHECK": 2,
+        "BET": 2
+      },
+      "actionPrefixComplete": true,
+      "liveAuthorized": false,
+      "domCheckpoint": true
+    },
+    {
+      "hand": 511,
+      "frames": 32,
+      "result": "accepted",
+      "failure": null,
+      "street": "river",
+      "pot": 29,
+      "actions": 14,
+      "actionTypes": {
+        "FOLD": 4,
+        "RAISE": 1,
+        "CALL": 3,
+        "CHECK": 3,
+        "BET": 3
+      },
+      "actionPrefixComplete": true,
+      "liveAuthorized": false,
+      "domCheckpoint": true
+    }
+  ],
+  "comparison": {
+    "previousSource": {
+      "handsWithTargetStreetWindows": 8,
+      "requestedHands": 8,
+      "hand511RiverWindow": false,
+      "hand511LastWindow": "turn at frame 26"
+    },
+    "prototype": {
+      "handsWithContinuousTargetActionPrefixes": 9,
+      "hand511RiverTransition": true,
+      "syntheticBetCallCases": 8,
+      "liveAuthorization": false
+    }
+  }
+}
