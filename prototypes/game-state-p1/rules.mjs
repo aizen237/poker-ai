@@ -1,38 +1,60 @@
 // Pure, offline poker rules. No source protocol, hand numbers, strategy or I/O.
 const integer = v => Number.isSafeInteger(v) && v >= 0;
 const need = (condition, reason) => { if (!condition) throw Error(reason); };
-export function startRound({street, order, stacks, bigBlind, contributions = {}}) {
+const unique = values => new Set(values).size === values.length;
+
+export function startRound({street, order, stacks, bigBlind, contributions = {}, contenders = order, allIn = []}) {
   need(['preflop','flop','turn','river'].includes(street), 'Unsupported street');
-  need(order.length >= 2 && new Set(order).size === order.length, 'Invalid round roster');
+  need(order.length >= 1 && order.length <= 10 && unique(order), 'Invalid round roster');
+  need(contenders.length >= order.length && unique(contenders) && order.every(id => contenders.includes(id)), 'Invalid contender roster');
   need(integer(bigBlind) && bigBlind > 0, 'Invalid big blind');
-  need(order.every(id => integer(stacks[id]) && stacks[id] > (contributions[id] ?? 0)), 'Unsupported stack/all-in');
-  need(Object.values(contributions).every(integer), 'Invalid contributions');
+  need(Object.values(stacks).every(integer) && order.every(id => integer(stacks[id])), 'Invalid stacks');
+  need(Object.entries(contributions).every(([id,v]) => contenders.includes(id) && integer(v)), 'Invalid contributions');
+  need(allIn.every(id => contenders.includes(id)) && unique(allIn) && order.every(id => !allIn.includes(id)), 'Invalid all-in roster');
+  need(Object.values(contributions).every((v,i) => integer(v)), 'Invalid contributions');
   const currentBet = Math.max(0,...Object.values(contributions));
-  return {street,order:[...order],active:[...order],stacks:{...stacks},contributions:{...contributions},
+  return {street,order:[...order],active:[...order],contenders:[...contenders],allIn:[...allIn],stacks:{...stacks},contributions:{...contributions},
     currentBet,lastRaise:bigBlind,bigBlind,pending:[...order],actor:order[0],closed:false,actions:[]};
 }
+
 export function act(previous, event) {
   const s=structuredClone(previous), {type,actor}=event;
   need(!s.closed && actor === s.actor && s.active.includes(actor), 'Wrong actor or closed round');
-  const before=s.contributions[actor]??0, owed=s.currentBet-before;
-  need(owed >= 0, 'Contribution exceeds current bet');
-  if(type==='FOLD') s.active=s.active.filter(id=>id!==actor);
-  else if(type==='CHECK') need(owed===0 && event.to===undefined, 'Check facing wager');
-  else {
+  const before=s.contributions[actor]??0, owed=s.currentBet-before, stack=s.stacks[actor];
+  need(owed >= 0 && before <= stack, 'Contribution exceeds current bet or stack');
+  let becomesAllIn=false;
+  if(type==='FOLD') {
+    need(event.to===undefined&&event.allIn===undefined,'Invalid fold fields');
+    s.active=s.active.filter(id=>id!==actor);
+    s.contenders=s.contenders.filter(id=>id!==actor);
+  } else if(type==='CHECK') {
+    need(owed===0 && event.to===undefined && event.allIn===undefined, 'Check facing wager');
+  } else {
     const to=event.to;
-    need(integer(to) && to>before && to<s.stacks[actor], 'Invalid amount or unsupported all-in');
-    if(type==='CALL') need(owed>0 && to===s.currentBet, 'Invalid call');
-    else {
+    need(integer(to) && to>before && to<=stack, 'Invalid amount');
+    becomesAllIn=to===stack;
+    need(becomesAllIn ? event.allIn===true : event.allIn!==true,
+      becomesAllIn?'Missing all-in status':'Unexpected all-in status');
+    if(type==='CALL') {
+      need(owed>0 && (to===s.currentBet || becomesAllIn&&to<s.currentBet), 'Invalid call');
+    } else {
       need(type==='BET' && s.currentBet===0 || type==='RAISE' && s.currentBet>0, 'Invalid bet/raise');
+      need(to>s.currentBet, 'Bet must increase the current wager');
       const increment=to-s.currentBet;
-      need(increment>=s.lastRaise, 'Below minimum full raise');
-      s.lastRaise=increment; s.currentBet=to; s.pending=[...s.active];
+      need(increment>=s.lastRaise || becomesAllIn, 'Below minimum full raise');
+      if(increment>=s.lastRaise) s.lastRaise=increment;
+      s.currentBet=to;
     }
     s.contributions[actor]=to;
+    if(becomesAllIn) {
+      s.allIn.push(actor);
+      s.active=s.active.filter(id=>id!==actor);
+    }
+    if(type==='BET'||type==='RAISE') s.pending=[...s.active];
   }
   s.pending=s.pending.filter(id=>id!==actor && s.active.includes(id));
   s.actions.push(structuredClone(event));
-  s.closed=s.active.length===1 || s.pending.length===0;
+  s.closed=s.contenders.length<=1 || s.pending.length===0;
   if(s.closed) s.actor=null;
   else {
     const at=s.order.indexOf(actor);
@@ -41,6 +63,7 @@ export function act(previous, event) {
   }
   return s;
 }
+
 export function decision(state, now) {
   const a=state?.activation;
   return a && state.actor && Number.isSafeInteger(now) && now>=a.receivedAt && now<a.expiresAt
